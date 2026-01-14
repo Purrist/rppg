@@ -1,23 +1,28 @@
 <template>
-  <div class="monitor-container">
-    <div class="nav-header">RPPG 多区域光谱扫描监控系统</div>
-    
-    <div class="main-layout">
-      <div class="video-box">
-        <div class="status-tag">REAL-TIME OVERLAY</div>
-        <img :src="videoUrl" class="stream-img" />
+  <div class="research-container">
+    <div class="header">
+      <span>认知训练伴随监测原型 (Cognitive-RPPG v1.6)</span>
+      <span class="mode-tag">学术研究模式</span>
+    </div>
+
+    <div class="main-view">
+      <div class="viewport">
+        <img :src="`http://${host}:8080/video_feed`" />
+        <div class="overlay-info">
+          ROI 状态: 3-Point Tracking [Locked]
+        </div>
       </div>
 
-      <div class="sidebar">
-        <div class="metric-card">
-          <div class="label">当前频率估算</div>
-          <div class="bpm-value">{{ bpm }} <small>BPM</small></div>
+      <div class="control-panel">
+        <div class="stat-box">
+          <div class="label">实时频率 (BPM)</div>
+          <div class="value">{{ bpm }}</div>
         </div>
-
-        <div class="info-list">
-          <div class="info-item">信号源: 3-ROI Fusion</div>
-          <div class="info-item">光照归一化: 开启</div>
-          <div class="info-item">采样状态: {{ bpm === '--' ? '校准中' : '锁定中' }}</div>
+        
+        <div class="analysis-box">
+          <p>场景: 养老机构室内</p>
+          <p>算法: Spatial-Temporal Fusion</p>
+          <p>补偿: Global Normalization ON</p>
         </div>
       </div>
     </div>
@@ -25,40 +30,32 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
-
+import { ref, onMounted } from 'vue'
 const host = ref('')
-const videoUrl = ref('')
 const bpm = ref('--')
-let timer = null
 
 onMounted(() => {
   host.value = window.location.hostname
-  videoUrl.value = `http://${host.value}:8080/video_feed`
-  
-  timer = setInterval(async () => {
+  setInterval(async () => {
     try {
-      const r = await fetch(`http://${host.value}:8080/bpm_data`)
+      const r = await fetch(`http://${host.value}:8080/get_metrics`)
       const d = await r.json()
       bpm.value = d.bpm
     } catch (e) {}
   }, 1000)
 })
-
-onUnmounted(() => clearInterval(timer))
 </script>
 
 <style scoped>
-.monitor-container { background: #000; min-height: 100vh; color: #0f0; font-family: monospace; padding: 20px; }
-.nav-header { border-bottom: 1px solid #040; padding-bottom: 15px; margin-bottom: 30px; font-size: 1.2rem; }
-.main-layout { display: flex; gap: 20px; flex-wrap: wrap; }
-.video-box { flex: 2; min-width: 500px; border: 1px solid #040; background: #050505; position: relative; }
-.stream-img { width: 100%; display: block; height: auto; }
-.status-tag { position: absolute; top: 10px; left: 10px; background: rgba(0, 255, 0, 0.2); padding: 4px 10px; font-size: 0.7rem; }
-.sidebar { flex: 1; min-width: 280px; display: flex; flex-direction: column; gap: 20px; }
-.metric-card { background: #0a0a0a; border: 1px solid #040; padding: 40px 20px; text-align: center; }
-.bpm-value { font-size: 4rem; font-weight: bold; margin-top: 10px; }
-.bpm-value small { font-size: 1rem; color: #060; }
-.label { color: #888; font-size: 0.8rem; }
-.info-list { background: #0a0a0a; border: 1px solid #040; padding: 15px; font-size: 0.8rem; line-height: 2; color: #080; }
+.research-container { background: #0a0c10; min-height: 100vh; color: #e1e1e1; font-family: 'Inter', sans-serif; padding: 20px; }
+.header { display: flex; justify-content: space-between; border-bottom: 1px solid #30363d; padding-bottom: 10px; margin-bottom: 20px; font-weight: 600; }
+.mode-tag { color: #f8e45c; font-size: 0.8rem; border: 1px solid #f8e45c; padding: 2px 8px; border-radius: 4px; }
+.main-view { display: grid; grid-template-columns: 1fr 320px; gap: 20px; }
+.viewport { position: relative; border: 1px solid #30363d; background: #000; border-radius: 8px; overflow: hidden; }
+.viewport img { width: 100%; display: block; }
+.overlay-info { position: absolute; bottom: 10px; left: 10px; font-size: 12px; color: #00ff00; background: rgba(0,0,0,0.5); padding: 4px 8px; }
+.control-panel { display: flex; flex-direction: column; gap: 20px; }
+.stat-box { background: #161b22; border: 1px solid #30363d; padding: 30px; border-radius: 8px; text-align: center; }
+.value { font-size: 64px; font-weight: 800; color: #58a6ff; }
+.analysis-box { background: #161b22; border: 1px solid #30363d; padding: 20px; border-radius: 8px; font-size: 13px; color: #8b949e; line-height: 1.8; }
 </style>

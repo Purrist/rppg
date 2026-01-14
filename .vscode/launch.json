@@ -24,7 +24,7 @@
   ],
   "compounds": [
     {
-      "name": "🚀 最终修复版-一键启动",
+      "name": "🚀 一键启动",
       "configurations": ["Backend (Flask)", "Frontend (Nuxt)"],
       "stopAll": true
     }

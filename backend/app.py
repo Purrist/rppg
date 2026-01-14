@@ -4,7 +4,7 @@ from flask import Flask, Response, jsonify
 from flask_cors import CORS
 from scipy.signal import butter, filtfilt, detrend
 
-# 强制路径导入，解决常见的 MediaPipe 属性错误
+# 医疗声明：本原型仅用于学术交互设计研究，不作为医疗诊断依据。
 try:
     import mediapipe.python.solutions.face_mesh as mp_face_mesh
 except:
@@ -14,102 +14,99 @@ except:
 app = Flask(__name__)
 CORS(app)
 
-# 核心算法参数
-FS = 30           # 采样率
-BUFFER_SIZE = 150 # 5秒数据窗口
-signal_data = []
+# 信号缓冲区
+FS = 30
+BUFFER_SIZE = 150
+raw_signals = []      # 原始绿色通道均值
+filtered_signals = [] # 滤波后的波形（用于可视化）
 current_bpm = "--"
 
-# 初始化人脸网格
-face_mesh = mp_face_mesh.FaceMesh(
-    static_image_mode=False,
-    max_num_faces=1,
-    refine_landmarks=True,
-    min_detection_confidence=0.5,
-    min_tracking_confidence=0.5
-)
+face_mesh = mp_face_mesh.FaceMesh(refine_landmarks=True, max_num_faces=1)
 
-def process_bpm(data):
-    if len(data) < BUFFER_SIZE: return None
-    # 1. 去趋势 & 归一化
-    norm_data = detrend(np.array(data))
-    norm_data = (norm_data - np.mean(norm_data)) / (np.std(norm_data) + 1e-6)
-    # 2. 带通滤波 (0.75Hz - 3Hz 对应 45-180 BPM)
-    nyq = 0.5 * FS
-    b, a = butter(2, [0.75 / nyq, 3.0 / nyq], btype='band')
-    filtered = filtfilt(b, a, norm_data)
-    # 3. FFT 频率提取
-    fft = np.abs(np.fft.rfft(filtered))
-    freqs = np.fft.rfftfreq(BUFFER_SIZE, 1/FS)
-    return int(freqs[np.argmax(fft[1:]) + 1] * 60)
+def butter_bandpass(data, lowcut=0.75, highcut=3.0, fs=30, order=2):
+    nyq = 0.5 * fs
+    low = lowcut / nyq
+    high = highcut / nyq
+    b, a = butter(order, [low, high], btype='band')
+    return filtfilt(b, a, data)
 
-class RppgEngine:
+class ResearchProcessor:
     def __init__(self):
         self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-    
+
     def get_frame(self):
-        global current_bpm
+        global current_bpm, filtered_signals
         success, frame = self.cap.read()
-        
-        # 核心修复：严禁空包进入 MediaPipe
-        if not success or frame is None: return None
+        if not success: return None
 
         h, w, _ = frame.shape
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        
-        try:
-            results = face_mesh.process(rgb)
-        except:
-            return None
+        res = face_mesh.process(rgb)
 
-        # 准备叠加层 (光谱可视化)
-        overlay = frame.copy()
+        # 信号分析仪表盘
+        dashboard = np.zeros((h, 300, 3), dtype=np.uint8) 
 
-        if results.multi_face_landmarks:
-            landmarks = results.multi_face_landmarks[0].landmark
-            # 选取三个关键区域：额头(10), 左脸颊(234), 右脸颊(454)
-            roi_points = [10, 234, 454]
-            g_vals = []
+        if res.multi_face_landmarks:
+            landmarks = res.multi_face_landmarks[0].landmark
+            # 动态ROI选取：额头(10), 左脸颊(234), 右脸颊(454)
+            rois = [10, 234, 454]
+            current_g_pool = []
 
-            for idx in roi_points:
+            for i, idx in enumerate(rois):
                 cx, cy = int(landmarks[idx].x * w), int(landmarks[idx].y * h)
+                # 动态ROI范围
                 r = 15
                 if 0 < cy-r < h and 0 < cx-r < w:
-                    roi = frame[cy-r:cy+r, cx-r:cx+r]
-                    # 空间平均值提取
-                    g_vals.append(np.mean(roi[:, :, 1]))
-                    # 绘制光谱叠加效果 (增强绿色)
-                    overlay[cy-r:cy+r, cx-r:cx+r, 1] = cv2.add(overlay[cy-r:cy+r, cx-r:cx+r, 1], 60)
-                    cv2.rectangle(overlay, (cx-r, cy-r), (cx+r, cy+r), (0, 255, 0), 1)
+                    roi_zone = frame[cy-r:cy+r, cx-r:cx+r]
+                    current_g_pool.append(np.mean(roi_zone[:,:,1]))
+                    # 光谱成像叠加
+                    cv2.circle(frame, (cx, cy), r, (0, 255, 0), -1)
 
-            if g_vals:
-                # 环境光补偿：局部均值 / 全局均值
-                global_g = np.mean(frame[:, :, 1]) + 1e-6
-                signal_data.append(np.mean(g_vals) / global_g)
-                
-                if len(signal_data) > BUFFER_SIZE: signal_data.pop(0)
-                if len(signal_data) == BUFFER_SIZE:
-                    bpm_res = process_bpm(signal_data)
-                    if bpm_res: current_bpm = bpm_res
+            if current_g_pool:
+                # 空间均值融合 + 全局归一化（抗光照波动核心）
+                avg_g = np.mean(current_g_pool)
+                global_g = np.mean(frame[:,:,1]) + 1e-6
+                raw_signals.append(avg_g / global_g)
 
-        # 合并图像：原始画面 + 30%光谱叠加
-        final_frame = cv2.addWeighted(frame, 0.7, overlay, 0.3, 0)
-        _, jpeg = cv2.imencode('.jpg', final_frame)
+                if len(raw_signals) > BUFFER_SIZE: raw_signals.pop(0)
+
+                if len(raw_signals) == BUFFER_SIZE:
+                    try:
+                        # 信号处理链路可视化
+                        processed = detrend(np.array(raw_signals))
+                        y = butter_bandpass(processed)
+                        filtered_signals = y.tolist()
+                        
+                        # 频率计算
+                        fft = np.abs(np.fft.rfft(y))
+                        freqs = np.fft.rfftfreq(BUFFER_SIZE, 1/FS)
+                        current_bpm = int(freqs[np.argmax(fft[1:])+1] * 60)
+                    except: pass
+
+        # 绘制实时波形图（这就是你要的可视化）
+        if len(filtered_signals) > 2:
+            pts = np.column_stack((
+                np.linspace(10, 290, len(filtered_signals)), 
+                150 - np.array(filtered_signals) * 1000
+            )).astype(np.int32)
+            cv2.polylines(dashboard, [pts], False, (0, 255, 0), 2)
+            cv2.putText(dashboard, "BVP Signal Trace", (10, 30), 0, 0.5, (0,255,0), 1)
+
+        # 拼接主画面和仪表盘
+        combined = np.hstack((frame, dashboard))
+        _, jpeg = cv2.imencode('.jpg', combined)
         return jpeg.tobytes()
 
-engine = RppgEngine()
+ap = ResearchProcessor()
 
 @app.route('/video_feed')
 def video_feed():
-    def gen():
-        while True:
-            f = engine.get_frame()
-            if f: yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + f + b'\r\n\r\n')
-    return Response(gen(), mimetype='multipart/x-mixed-replace; boundary=frame')
+    return Response((b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + ap.get_frame() + b'\r\n\r\n' for _ in iter(int, 1)),
+                    mimetype='multipart/x-mixed-replace; boundary=frame')
 
-@app.route('/bpm_data')
-def bpm_data():
+@app.route('/get_metrics')
+def get_metrics():
     return jsonify({"bpm": current_bpm})
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080, threaded=True)
+    app.run(host="0.0.0.0", port=8080)
