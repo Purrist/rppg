@@ -1,3 +1,4 @@
 {
-  "python.defaultInterpreterPath": "D:/anaconda/envs/rppg/python.exe"
+  "python.defaultInterpreterPath": "D:/anaconda/envs/rppg/python.exe",
+  "python.terminal.activateEnvInCurrentTerminal": true
 }

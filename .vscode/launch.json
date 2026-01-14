@@ -2,12 +2,29 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Run rPPG Server",
-      "type": "python",
+      "name": "Backend (Flask)",
+      "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/backend/localapp.py",
+      "program": "localapp.py",
+      "cwd": "${workspaceFolder}/backend", 
       "python": "D:/anaconda/envs/rppg/python.exe",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Frontend (Nuxt)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run dev",
+      "cwd": "${workspaceFolder}/frontend",
       "console": "integratedTerminal"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "🚀 FULL START (一键启动)",
+      "configurations": ["Backend (Flask)", "Frontend (Nuxt)"],
+      "stopAll": true
     }
   ]
 }
