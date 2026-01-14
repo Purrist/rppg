@@ -7,19 +7,24 @@
       "request": "launch",
       "program": "localapp.py",
       "cwd": "${workspaceFolder}/backend",
-      "python": "D:/anaconda/envs/rppg/python.exe"
+      "python": "D:/anaconda/envs/rppg/python.exe", // 👈 必须是 rppg 环境下的 python.exe
+      "env": {
+          "PYTHONPATH": "${workspaceFolder}/backend"
+      },
+      "console": "integratedTerminal"
     },
     {
       "name": "Frontend (Nuxt)",
       "type": "node-terminal",
       "request": "launch",
       "command": "npm run dev",
-      "cwd": "${workspaceFolder}/frontend"
+      "cwd": "${workspaceFolder}/frontend",
+      "console": "integratedTerminal"
     }
   ],
   "compounds": [
     {
-      "name": "🚀 一键启动整个项目",
+      "name": "🚀 最终修复版-一键启动",
       "configurations": ["Backend (Flask)", "Frontend (Nuxt)"],
       "stopAll": true
     }
