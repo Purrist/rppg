@@ -1,21 +1,28 @@
 <template>
-  <div style="text-align: center; padding: 20px;">
-    <h1>rPPG 监控终端</h1>
-    <div v-if="backendUrl">
-      <img :src="`${backendUrl}/video_feed`" alt="实时心率监控画面" style="max-width: 90%; border-radius: 10px; border: 2px solid #333;" />
+  <div style="text-align: center; font-family: sans-serif; padding: 20px;">
+    <h2>rPPG 心率监测终端</h2>
+    
+    <div style="display: inline-block; background: #000; border-radius: 8px; overflow: hidden; border: 4px solid #333;">
+      <img :src="videoUrl" alt="正在加载视频流..." style="max-width: 100%; display: block;" />
     </div>
-    <div v-else>正在寻找后端服务...</div>
+
+    <div style="margin-top: 20px;">
+      <p style="font-size: 1.2rem;">当前状态: <span style="color: green;">已连接</span></p>
+      <div style="font-size: 2rem; color: #e74c3c; font-weight: bold;">
+        BPM: --
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
 
-const backendUrl = ref('')
+const videoUrl = ref('')
 
 onMounted(() => {
-  // 动态获取当前局域网 IP
+  // 自动获取当前访问的局域网 IP
   const host = window.location.hostname
-  backendUrl.value = `http://${host}:8080`
+  videoUrl.value = `http://${host}:8080/video_feed`
 })
 </script>

@@ -6,10 +6,9 @@
       "type": "debugpy",
       "request": "launch",
       "program": "localapp.py",
-      "cwd": "${workspaceFolder}/backend", 
+      "cwd": "${workspaceFolder}/backend",
       "python": "D:/anaconda/envs/rppg/python.exe",
-      "console": "integratedTerminal",
-      "justMyCode": false
+      "console": "integratedTerminal"
     },
     {
       "name": "Frontend (Nuxt)",
@@ -22,7 +21,7 @@
   ],
   "compounds": [
     {
-      "name": "🚀 FULL START (一键启动)",
+      "name": "🚀 一键启动整个项目",
       "configurations": ["Backend (Flask)", "Frontend (Nuxt)"],
       "stopAll": true
     }
