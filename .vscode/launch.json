@@ -1,0 +1,13 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "🚀 Run rPPG Flask (localapp)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/backend/localapp.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}/backend"
+    }
+  ]
+}

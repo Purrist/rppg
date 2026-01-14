@@ -1,0 +1,20 @@
+<template>
+  <div class="container">
+    <h1>Camera Stream Test</h1>
+    <img :src="videoUrl" />
+  </div>
+</template>
+
+<script setup>
+const videoUrl = 'http://你的电脑IP:8080/video'
+</script>
+
+<style>
+.container {
+  text-align: center;
+}
+img {
+  width: 80%;
+  border-radius: 12px;
+}
+</style>
