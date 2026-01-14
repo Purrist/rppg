@@ -3,20 +3,17 @@ from flask_cors import CORS
 import cv2
 
 app = Flask(__name__)
-CORS(app)
+CORS(app) # 允许 Nuxt 跨域访问
 
 class VideoCamera:
     def __init__(self):
-        # 使用 CAP_DSHOW 解决某些 Windows 摄像头启动慢的问题
         self.video = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-    
     def __del__(self):
         self.video.release()
-
     def get_frame(self):
         success, frame = self.video.read()
         if not success: return None
-        # 预留：此处可添加 Mediapipe 处理逻辑
+        # 这里以后可以添加 Mediapipe 处理
         _, jpeg = cv2.imencode('.jpg', frame)
         return jpeg.tobytes()
 

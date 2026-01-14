@@ -7,16 +7,14 @@
       "request": "launch",
       "program": "localapp.py",
       "cwd": "${workspaceFolder}/backend",
-      "python": "D:/anaconda/envs/rppg/python.exe",
-      "console": "integratedTerminal"
+      "python": "D:/anaconda/envs/rppg/python.exe"
     },
     {
       "name": "Frontend (Nuxt)",
       "type": "node-terminal",
       "request": "launch",
       "command": "npm run dev",
-      "cwd": "${workspaceFolder}/frontend",
-      "console": "integratedTerminal"
+      "cwd": "${workspaceFolder}/frontend"
     }
   ],
   "compounds": [
