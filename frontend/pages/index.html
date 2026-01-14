@@ -1,20 +1,26 @@
-<template>
-  <div class="container">
-    <h1>Camera Stream Test</h1>
-    <img :src="videoUrl" />
-  </div>
-</template>
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <title>rPPG Camera Test</title>
+</head>
+<body>
+  <h2>rPPG 摄像头测试</h2>
 
-<script setup>
-const videoUrl = 'http://你的电脑IP:8080/video'
-</script>
+  <p>当前服务 IP：{{ local_ip }}</p>
 
-<style>
-.container {
-  text-align: center;
-}
-img {
-  width: 80%;
-  border-radius: 12px;
-}
-</style>
+  <video id="video" autoplay playsinline width="480"></video>
+
+  <script>
+    const video = document.getElementById("video");
+
+    navigator.mediaDevices.getUserMedia({ video: true })
+      .then(stream => {
+        video.srcObject = stream;
+      })
+      .catch(err => {
+        alert("摄像头访问失败：" + err);
+      });
+  </script>
+</body>
+</html>

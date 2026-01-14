@@ -1,10 +1,13 @@
-from app import app
-import os
+from app import app, get_local_ip
 
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 8080))
+if __name__ == "__main__":
+    port = 8080
+    ip = get_local_ip()
+    print(f"🌐 LAN access: http://{ip}:{port}")
+
     app.run(
-        host='0.0.0.0',   # 关键点
+        host="0.0.0.0",
         port=port,
-        debug=True
+        debug=False,        # 🔴 关键：关 debug
+        use_reloader=False # 🔴 关键：关自动重载
     )

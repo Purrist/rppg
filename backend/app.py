@@ -1,26 +1,25 @@
-from flask import Flask, Response
-import cv2
+from flask import Flask, render_template
+import socket
 
-app = Flask(__name__)
+def get_local_ip():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+    except Exception:
+        ip = "127.0.0.1"
+    finally:
+        s.close()
+    return ip
 
-camera = cv2.VideoCapture(0)  # 默认摄像头
+app = Flask(
+    __name__,
+    template_folder="../frontend/pages"
+)
 
-def gen_frames():
-    while True:
-        success, frame = camera.read()
-        if not success:
-            break
-        else:
-            ret, buffer = cv2.imencode('.jpg', frame)
-            frame = buffer.tobytes()
-            yield (
-                b'--frame\r\n'
-                b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n'
-            )
-
-@app.route('/video')
-def video():
-    return Response(
-        gen_frames(),
-        mimetype='multipart/x-mixed-replace; boundary=frame'
+@app.route("/")
+def index():
+    return render_template(
+        "index.html",
+        local_ip=get_local_ip()
     )
