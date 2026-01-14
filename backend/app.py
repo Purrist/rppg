@@ -2,9 +2,9 @@ import cv2
 import numpy as np
 from flask import Flask, Response, jsonify
 from flask_cors import CORS
-from scipy.signal import butter, filtfilt
+from scipy.signal import butter, filtfilt, detrend
 
-# 尝试极限导入
+# 强制路径导入，解决常见的 MediaPipe 属性错误
 try:
     import mediapipe.python.solutions.face_mesh as mp_face_mesh
 except:
@@ -14,89 +14,101 @@ except:
 app = Flask(__name__)
 CORS(app)
 
-# 全局变量
-FS = 30
-BUFFER_SIZE = 150
+# 核心算法参数
+FS = 30           # 采样率
+BUFFER_SIZE = 150 # 5秒数据窗口
 signal_data = []
 current_bpm = "--"
 
-# 强制初始化
+# 初始化人脸网格
 face_mesh = mp_face_mesh.FaceMesh(
     static_image_mode=False,
     max_num_faces=1,
     refine_landmarks=True,
-    min_detection_confidence=0.5
+    min_detection_confidence=0.5,
+    min_tracking_confidence=0.5
 )
 
-def bandpass_filter(data):
-    if len(data) < 50: return np.array(data) - np.mean(data)
+def process_bpm(data):
+    if len(data) < BUFFER_SIZE: return None
+    # 1. 去趋势 & 归一化
+    norm_data = detrend(np.array(data))
+    norm_data = (norm_data - np.mean(norm_data)) / (np.std(norm_data) + 1e-6)
+    # 2. 带通滤波 (0.75Hz - 3Hz 对应 45-180 BPM)
     nyq = 0.5 * FS
-    low, high = 0.8 / nyq, 3.0 / nyq # 48-180次/分
-    b, a = butter(2, [low, high], btype='band')
-    return filtfilt(b, a, data)
+    b, a = butter(2, [0.75 / nyq, 3.0 / nyq], btype='band')
+    filtered = filtfilt(b, a, norm_data)
+    # 3. FFT 频率提取
+    fft = np.abs(np.fft.rfft(filtered))
+    freqs = np.fft.rfftfreq(BUFFER_SIZE, 1/FS)
+    return int(freqs[np.argmax(fft[1:]) + 1] * 60)
 
-class VideoProcessor:
+class RppgEngine:
     def __init__(self):
         self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-
-    def get_frames(self):
+    
+    def get_frame(self):
         global current_bpm
         success, frame = self.cap.read()
-        if not success: return None, None
+        
+        # 核心修复：严禁空包进入 MediaPipe
+        if not success or frame is None: return None
 
         h, w, _ = frame.shape
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        results = face_mesh.process(rgb_frame)
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         
-        # 初始化波形图预览
-        wave_view = np.zeros((h, w, 3), dtype=np.uint8)
+        try:
+            results = face_mesh.process(rgb)
+        except:
+            return None
+
+        # 准备叠加层 (光谱可视化)
+        overlay = frame.copy()
 
         if results.multi_face_landmarks:
-            # 10号点为额头
-            land = results.multi_face_landmarks[0].landmark[10]
-            cx, cy = int(land.x * w), int(land.y * h)
-            rx, ry = 25, 15 # 采样区域半径
-            
-            if 0 < cy-ry < h and 0 < cx-rx < w:
-                roi = frame[cy-ry:cy+ry, cx-rx:cx+rx]
-                # 提取绿通道均值
-                g_mean = np.mean(roi[:, :, 1])
-                signal_data.append(g_mean)
+            landmarks = results.multi_face_landmarks[0].landmark
+            # 选取三个关键区域：额头(10), 左脸颊(234), 右脸颊(454)
+            roi_points = [10, 234, 454]
+            g_vals = []
+
+            for idx in roi_points:
+                cx, cy = int(landmarks[idx].x * w), int(landmarks[idx].y * h)
+                r = 15
+                if 0 < cy-r < h and 0 < cx-r < w:
+                    roi = frame[cy-r:cy+r, cx-r:cx+r]
+                    # 空间平均值提取
+                    g_vals.append(np.mean(roi[:, :, 1]))
+                    # 绘制光谱叠加效果 (增强绿色)
+                    overlay[cy-r:cy+r, cx-r:cx+r, 1] = cv2.add(overlay[cy-r:cy+r, cx-r:cx+r, 1], 60)
+                    cv2.rectangle(overlay, (cx-r, cy-r), (cx+r, cy+r), (0, 255, 0), 1)
+
+            if g_vals:
+                # 环境光补偿：局部均值 / 全局均值
+                global_g = np.mean(frame[:, :, 1]) + 1e-6
+                signal_data.append(np.mean(g_vals) / global_g)
+                
                 if len(signal_data) > BUFFER_SIZE: signal_data.pop(0)
-
-                # 处理信号
                 if len(signal_data) == BUFFER_SIZE:
-                    y = bandpass_filter(signal_data)
-                    # 估算
-                    fft = np.abs(np.fft.rfft(y))
-                    freqs = np.fft.rfftfreq(BUFFER_SIZE, 1/FS)
-                    current_bpm = int(freqs[np.argmax(fft[1:])+1] * 60)
-                    
-                    # 绘制波形
-                    pts = np.column_stack((np.linspace(0, w, len(y)), h/2 - y*30)).astype(np.int32)
-                    cv2.polylines(wave_view, [pts], False, (0, 255, 0), 2)
+                    bpm_res = process_bpm(signal_data)
+                    if bpm_res: current_bpm = bpm_res
 
-                # 绘制UI
-                cv2.rectangle(frame, (cx-rx, cy-ry), (cx+rx, cy+ry), (0, 255, 0), 2)
+        # 合并图像：原始画面 + 30%光谱叠加
+        final_frame = cv2.addWeighted(frame, 0.7, overlay, 0.3, 0)
+        _, jpeg = cv2.imencode('.jpg', final_frame)
+        return jpeg.tobytes()
 
-        _, img_raw = cv2.imencode('.jpg', frame)
-        _, img_wave = cv2.imencode('.jpg', wave_view)
-        return img_raw.tobytes(), img_wave.tobytes()
+engine = RppgEngine()
 
-vp = VideoProcessor()
-
-@app.route('/stream/<mode>')
-def stream(mode):
-    def generate():
+@app.route('/video_feed')
+def video_feed():
+    def gen():
         while True:
-            raw, wave = vp.get_frames()
-            data = raw if mode == 'raw' else wave
-            if data:
-                yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + data + b'\r\n\r\n')
-    return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
+            f = engine.get_frame()
+            if f: yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + f + b'\r\n\r\n')
+    return Response(gen(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
-@app.route('/bpm')
-def get_bpm():
+@app.route('/bpm_data')
+def bpm_data():
     return jsonify({"bpm": current_bpm})
 
 if __name__ == "__main__":
