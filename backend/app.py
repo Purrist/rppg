@@ -1,112 +1,178 @@
 import cv2
 import numpy as np
-from flask import Flask, Response, jsonify
+from flask import Flask, Response, jsonify, request
 from flask_cors import CORS
-from scipy.signal import butter, filtfilt, detrend
+import sys
+import time
 
-# 医疗声明：本原型仅用于学术交互设计研究，不作为医疗诊断依据。
-try:
-    import mediapipe.python.solutions.face_mesh as mp_face_mesh
-except:
-    import mediapipe as mp
-    mp_face_mesh = mp.solutions.face_mesh
+from tablet_processor import TabletProcessor
+from projector_processor import ProjectorProcessor
+from state_manager import StateManager
 
 app = Flask(__name__)
 CORS(app)
 
-# 信号缓冲区
-FS = 30
-BUFFER_SIZE = 150
-raw_signals = []      # 原始绿色通道均值
-filtered_signals = [] # 滤波后的波形（用于可视化）
-current_bpm = "--"
+tablet_processor = None
+projector_processor = None
+state_manager = None
 
-face_mesh = mp_face_mesh.FaceMesh(refine_landmarks=True, max_num_faces=1)
+def get_ip():
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(('8.8.8.8', 80))
+        ip = s.getsockname()[0]
+    except Exception:
+        ip = '127.0.0.1'
+    finally:
+        s.close()
+    return ip
 
-def butter_bandpass(data, lowcut=0.75, highcut=3.0, fs=30, order=2):
-    nyq = 0.5 * fs
-    low = lowcut / nyq
-    high = highcut / nyq
-    b, a = butter(order, [low, high], btype='band')
-    return filtfilt(b, a, data)
+@app.route('/tablet_video_feed')
+def tablet_video_feed():
+    def generate():
+        while True:
+            frame = tablet_processor.get_frame()
+            if frame is not None:
+                _, jpeg = cv2.imencode('.jpg', frame)
+                yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n\r\n')
+            else:
+                time.sleep(0.01)
+    return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
-class ResearchProcessor:
-    def __init__(self):
-        self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+@app.route('/projector_video_feed')
+def projector_video_feed():
+    def generate():
+        while True:
+            frame = projector_processor.get_frame()
+            if frame is not None:
+                _, jpeg = cv2.imencode('.jpg', frame)
+                yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n\r\n')
+            else:
+                time.sleep(0.01)
+    return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
-    def get_frame(self):
-        global current_bpm, filtered_signals
-        success, frame = self.cap.read()
-        if not success: return None
+@app.route('/api/physiological_state')
+def get_physiological_state():
+    return jsonify(tablet_processor.get_state())
 
-        h, w, _ = frame.shape
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        res = face_mesh.process(rgb)
+@app.route('/api/interaction_state')
+def get_interaction_state():
+    return jsonify(projector_processor.get_state())
 
-        # 信号分析仪表盘
-        dashboard = np.zeros((h, 300, 3), dtype=np.uint8) 
+@app.route('/api/fused_state')
+def get_fused_state():
+    return jsonify(state_manager.get_fused_state())
 
-        if res.multi_face_landmarks:
-            landmarks = res.multi_face_landmarks[0].landmark
-            # 动态ROI选取：额头(10), 左脸颊(234), 右脸颊(454)
-            rois = [10, 234, 454]
-            current_g_pool = []
+@app.route('/api/start_training', methods=['POST'])
+def start_training():
+    data = request.get_json() or {}
+    mode = data.get('mode', 'memory_game')
+    difficulty = data.get('difficulty', 'medium')
+    
+    result = state_manager.start_training(mode, difficulty)
+    return jsonify(result)
 
-            for i, idx in enumerate(rois):
-                cx, cy = int(landmarks[idx].x * w), int(landmarks[idx].y * h)
-                # 动态ROI范围
-                r = 15
-                if 0 < cy-r < h and 0 < cx-r < w:
-                    roi_zone = frame[cy-r:cy+r, cx-r:cx+r]
-                    current_g_pool.append(np.mean(roi_zone[:,:,1]))
-                    # 光谱成像叠加
-                    cv2.circle(frame, (cx, cy), r, (0, 255, 0), -1)
+@app.route('/api/stop_training', methods=['POST'])
+def stop_training():
+    result = state_manager.stop_training()
+    return jsonify(result)
 
-            if current_g_pool:
-                # 空间均值融合 + 全局归一化（抗光照波动核心）
-                avg_g = np.mean(current_g_pool)
-                global_g = np.mean(frame[:,:,1]) + 1e-6
-                raw_signals.append(avg_g / global_g)
+@app.route('/api/training_status')
+def get_training_status():
+    return jsonify(state_manager.get_training_status())
 
-                if len(raw_signals) > BUFFER_SIZE: raw_signals.pop(0)
+@app.route('/api/update_score', methods=['POST'])
+def update_score():
+    data = request.get_json() or {}
+    correct = data.get('correct', True)
+    
+    state_manager.update_score(correct)
+    return jsonify({"status": "success"})
 
-                if len(raw_signals) == BUFFER_SIZE:
-                    try:
-                        # 信号处理链路可视化
-                        processed = detrend(np.array(raw_signals))
-                        y = butter_bandpass(processed)
-                        filtered_signals = y.tolist()
-                        
-                        # 频率计算
-                        fft = np.abs(np.fft.rfft(y))
-                        freqs = np.fft.rfftfreq(BUFFER_SIZE, 1/FS)
-                        current_bpm = int(freqs[np.argmax(fft[1:])+1] * 60)
-                    except: pass
+@app.route('/api/training_history')
+def get_training_history():
+    limit = request.args.get('limit', 10, type=int)
+    history = state_manager.get_training_history(limit)
+    return jsonify({"sessions": history})
 
-        # 绘制实时波形图（这就是你要的可视化）
-        if len(filtered_signals) > 2:
-            pts = np.column_stack((
-                np.linspace(10, 290, len(filtered_signals)), 
-                150 - np.array(filtered_signals) * 1000
-            )).astype(np.int32)
-            cv2.polylines(dashboard, [pts], False, (0, 255, 0), 2)
-            cv2.putText(dashboard, "BVP Signal Trace", (10, 30), 0, 0.5, (0,255,0), 1)
+@app.route('/api/health')
+def health_check():
+    return jsonify({
+        "status": "running",
+        "tablet_camera": tablet_processor is not None,
+        "projector_camera": projector_processor is not None,
+        "state_manager": state_manager is not None
+    })
 
-        # 拼接主画面和仪表盘
-        combined = np.hstack((frame, dashboard))
-        _, jpeg = cv2.imencode('.jpg', combined)
-        return jpeg.tobytes()
-
-ap = ResearchProcessor()
-
-@app.route('/video_feed')
-def video_feed():
-    return Response((b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + ap.get_frame() + b'\r\n\r\n' for _ in iter(int, 1)),
-                    mimetype='multipart/x-mixed-replace; boundary=frame')
-
-@app.route('/get_metrics')
-def get_metrics():
-    return jsonify({"bpm": current_bpm})
+def main():
+    global tablet_processor, projector_processor, state_manager
+    
+    tablet_camera_url = 0
+    projector_camera_url = 0
+    
+    if len(sys.argv) > 1:
+        tablet_camera_url = sys.argv[1]
+        print(f"使用平板摄像头: {tablet_camera_url}")
+    else:
+        print("使用本地平板摄像头: 0")
+        print("提示: 使用网络摄像头请运行: python app.py <平板摄像头URL>")
+    
+    if len(sys.argv) > 2:
+        projector_camera_url = sys.argv[2]
+        print(f"使用投影摄像头: {projector_camera_url}")
+    else:
+        print("使用本地投影摄像头: 0")
+        print("提示: 使用网络摄像头请运行: python app.py <平板URL> <投影URL>")
+    
+    try:
+        state_manager = StateManager()
+        print("[系统] 状态管理器已初始化")
+        
+        tablet_processor = TabletProcessor(tablet_camera_url)
+        tablet_processor.start()
+        print("[系统] 平板摄像头已启动")
+        
+        projector_processor = ProjectorProcessor(projector_camera_url)
+        projector_processor.start()
+        print("[系统] 投影摄像头已启动")
+        
+        print("\n" + "="*60)
+        print("双摄像头感知系统启动成功！")
+        print("="*60)
+        
+        local_ip = get_ip()
+        print(f"\n📡 局域网访问地址:")
+        print(f"   平板控制界面: http://{local_ip}:3000/tablet")
+        print(f"   投影训练界面: http://{local_ip}:3000/training")
+        print(f"\n⚙️  后端 API 地址:")
+        print(f"   http://{local_ip}:8080")
+        print(f"\n📹 视频流:")
+        print(f"   平板摄像头: http://{local_ip}:8080/tablet_video_feed")
+        print(f"   投影摄像头: http://{local_ip}:8080/projector_video_feed")
+        print(f"\n📊 API 接口:")
+        print(f"   生理状态: http://{local_ip}:8080/api/physiological_state")
+        print(f"   交互状态: http://{local_ip}:8080/api/interaction_state")
+        print(f"   融合状态: http://{local_ip}:8080/api/fused_state")
+        print("="*60 + "\n")
+        
+        app.run(host="0.0.0.0", port=8080, debug=False)
+        
+    except KeyboardInterrupt:
+        print("\n[系统] 正在关闭...")
+    except Exception as e:
+        print(f"\n[系统] 错误: {e}")
+        print("\n请检查:")
+        print("1. 平板摄像头 URL 是否正确")
+        print("2. 平板和电脑是否在同一 Wi-Fi 网络")
+        print("3. 平板上的摄像头应用是否已启动")
+        print("4. 投影摄像头是否可用")
+    finally:
+        if tablet_processor:
+            tablet_processor.stop()
+        if projector_processor:
+            projector_processor.stop()
+        print("[系统] 已关闭")
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080)
+    main()

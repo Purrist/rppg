@@ -1,0 +1,26 @@
+[
+  {
+    "date": "2026-01-15 12:40:04",
+    "mode": "memory_game",
+    "difficulty": "中等",
+    "duration": 10,
+    "score": 0,
+    "correct_count": 0,
+    "total_count": 0,
+    "correct_rate": 0.0,
+    "avg_bpm": "--",
+    "avg_emotion": "neutral"
+  },
+  {
+    "date": "2026-01-15 12:40:08",
+    "mode": "memory_game",
+    "difficulty": "中等",
+    "duration": 2,
+    "score": 0,
+    "correct_count": 0,
+    "total_count": 0,
+    "correct_rate": 0.0,
+    "avg_bpm": "--",
+    "avg_emotion": "neutral"
+  }
+]
