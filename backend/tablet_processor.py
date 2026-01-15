@@ -61,44 +61,88 @@ class TabletProcessor:
     def detect_emotion(self, landmarks, frame):
         h, w = frame.shape[:2]
         
+        # 眼睛相关特征点
         left_eye_top = landmarks[159]
         left_eye_bottom = landmarks[145]
+        left_eye_left = landmarks[33]
+        left_eye_right = landmarks[133]
+        
         right_eye_top = landmarks[386]
         right_eye_bottom = landmarks[374]
-        nose = landmarks[1]
+        right_eye_left = landmarks[362]
+        right_eye_right = landmarks[263]
+        
+        # 眉毛相关特征点
+        left_eyebrow_inner = landmarks[27]
+        left_eyebrow_outer = landmarks[22]
+        right_eyebrow_inner = landmarks[257]
+        right_eyebrow_outer = landmarks[262]
+        
+        # 嘴巴相关特征点
         mouth_top = landmarks[13]
         mouth_bottom = landmarks[14]
         mouth_left = landmarks[61]
         mouth_right = landmarks[291]
+        mouth_left_corner = landmarks[17]
+        mouth_right_corner = landmarks[267]
         
+        # 计算眼睛高度和宽度
         eye_height_left = abs(left_eye_top.y - left_eye_bottom.y)
         eye_height_right = abs(right_eye_top.y - right_eye_bottom.y)
+        eye_width_left = abs(left_eye_right.x - left_eye_left.x)
+        eye_width_right = abs(right_eye_right.x - right_eye_left.x)
         avg_eye_height = (eye_height_left + eye_height_right) / 2
+        avg_eye_width = (eye_width_left + eye_width_right) / 2
+        eye_aspect_ratio = avg_eye_height / (avg_eye_width + 1e-6)
         
+        # 计算嘴巴参数
         mouth_width = abs(mouth_right.x - mouth_left.x)
         mouth_height = abs(mouth_bottom.y - mouth_top.y)
         mouth_aspect = mouth_height / (mouth_width + 1e-6)
+        mouth_corner_lift = (landmarks[61].y + landmarks[291].y) - (landmarks[17].y + landmarks[267].y)
         
-        eyebrow_height = abs(landmarks[10].y - landmarks[152].y)
+        # 计算眉毛参数
+        left_eyebrow_height = left_eyebrow_inner.y - landmarks[10].y
+        right_eyebrow_height = right_eyebrow_inner.y - landmarks[152].y
+        eyebrow_height_diff = abs(left_eyebrow_height - right_eyebrow_height)
         
-        if avg_eye_height < 0.015 and mouth_aspect < 0.15:
-            emotion = "neutral"
-            confidence = 0.7
-        elif mouth_aspect > 0.25 and eyebrow_height < 0.02:
-            emotion = "happy"
-            confidence = 0.85
-        elif avg_eye_height < 0.01:
-            emotion = "sad"
-            confidence = 0.75
-        elif eyebrow_height > 0.03 and mouth_aspect < 0.1:
-            emotion = "angry"
-            confidence = 0.7
-        elif avg_eye_height < 0.02 and mouth_aspect > 0.2:
-            emotion = "surprise"
-            confidence = 0.75
-        else:
-            emotion = "neutral"
-            confidence = 0.6
+        # 计算鼻子相关参数
+        nose_tip = landmarks[4]
+        nose_bridge = landmarks[168]
+        nose_angle = abs(nose_tip.y - nose_bridge.y)
+        
+        # 情绪识别逻辑
+        emotions = []
+        
+        # 检测开心
+        if mouth_aspect > 0.22 and mouth_corner_lift < -0.02:
+            emotions.append(("happy", 0.85))
+        
+        # 检测惊讶
+        if avg_eye_height > 0.025 and mouth_aspect > 0.18:
+            emotions.append(("surprise", 0.8))
+        
+        # 检测愤怒
+        if (left_eyebrow_height < -0.04 or right_eyebrow_height < -0.04) and mouth_aspect < 0.12:
+            emotions.append(("angry", 0.75))
+        
+        # 检测悲伤
+        if mouth_corner_lift > 0.02 and avg_eye_height < 0.015:
+            emotions.append(("sad", 0.7))
+        
+        # 检测厌恶
+        if nose_angle > 0.03 and mouth_aspect > 0.15:
+            emotions.append(("disgust", 0.65))
+        
+        # 检测恐惧
+        if eyebrow_height_diff > 0.02 and avg_eye_height > 0.02 and mouth_aspect < 0.15:
+            emotions.append(("fear", 0.6))
+        
+        # 始终将中性情绪作为备选
+        emotions.append(("neutral", 0.5))
+        
+        # 选择置信度最高的情绪
+        emotion, confidence = max(emotions, key=lambda x: x[1])
         
         return emotion, confidence
     
@@ -181,7 +225,7 @@ class TabletProcessor:
                         
                         fft = np.abs(np.fft.rfft(y))
                         freqs = np.fft.rfftfreq(self.BUFFER_SIZE, 1/self.FS)
-                        self.current_bpm = int(freqs[np.argmax(fft[1:])+1] * 60)
+                        self.current_bpm = int(freqs[np.argmax(fft[1:])+1]) * 60
                     except:
                         pass
                 
@@ -196,6 +240,13 @@ class TabletProcessor:
                 self.posture_state = posture
                 
                 self.attention_score = 0.5 + (0.5 * (1.0 - emotion_conf))
+            
+            cv2.rectangle(frame, (int(landmarks[1].x * w - 50), int(landmarks[1].y * h - 50)), 
+                       (int(landmarks[1].x * w + 50), int(landmarks[1].y * h + 50)), (0, 255, 0), 2)
+            cv2.rectangle(frame, (int(landmarks[152].x * w - 30), int(landmarks[152].y * h - 30)), 
+                       (int(landmarks[152].x * w + 30), int(landmarks[152].y * h + 30)), (0, 255, 0), 2)
+            cv2.rectangle(frame, (int(landmarks[10].x * w - 40), int(landmarks[10].y * h - 40)), 
+                       (int(landmarks[10].x * w + 40), int(landmarks[10].y * h + 40)), (0, 255, 0), 2)
         
         return frame
     

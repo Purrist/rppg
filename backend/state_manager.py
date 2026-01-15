@@ -22,7 +22,8 @@ class StateManager:
         self.fused_state = {}
         
         self.training_history = []
-        self.history_file = "training_history.json"
+        # 使用绝对路径保存历史数据
+        self.history_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "training_history.json")
         
         self.load_history()
     

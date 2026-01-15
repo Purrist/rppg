@@ -1,15 +1,17 @@
 <template>
   <div class="training-container">
     <div class="welcome-screen" v-if="!gameStarted">
-      <h1 class="main-title">色词匹配 · 认知训练</h1>
+      <h1 class="main-title">色词测试 · 认知训练</h1>
       <p class="instructions-text">反应力挑战！你需要选择文字呈现的颜色，而不是文字的内容，每题仅有2秒反应时间，看看你能在三分钟内答对多少吧！</p>
       
       <div class="start-button-container">
-        <div class="start-button" :class="{active: startButtonActive, pressed: startButtonPressed}">
-          <div class="button-circle" :style="{width: startButtonProgress + '%', height: startButtonProgress + '%'}"></div>
-          <span class="button-text">开始训练</span>
-        </div>
-        <p class="button-hint">踩住按钮 2 秒开始游戏</p>
+        <button 
+          class="start-button" 
+          @click="startGame"
+        >
+          <span class="button-text">开始测试</span>
+        </button>
+        <p class="button-hint">点击按钮开始测试</p>
       </div>
     </div>
 
@@ -39,9 +41,12 @@
             <div class="word-text" :style="{color: currentWordColor}">{{ currentWord }}</div>
           </div>
           
-          <div class="feedback-container" v-if="showFeedback">
+          <div class="feedback-container" v-if="showFeedback" :class="feedbackType">
             <div class="feedback-icon">{{ feedbackIcon }}</div>
             <div class="feedback-text">{{ feedbackText }}</div>
+            <div class="feedback-reaction" v-if="reactionTime > 0">
+              反应时间: {{ reactionTime }}ms
+            </div>
           </div>
         </div>
 
@@ -62,12 +67,16 @@
           v-for="(word, index) in words" 
           :key="word.text"
           class="option-btn"
-          :class="{active: activeOptionIndex === index, pressed: pressedOptionIndex === index}"
-          :style="{backgroundColor: word.color}"
+          :class="{active: selectedOptionIndex === index, selected: screenState.selected_region === word.text}"
           @click="selectWord(word)"
         >
-          <div class="option-circle" :style="{width: optionProgress[index] + '%', height: optionProgress[index] + '%'}"></div>
-          <span class="option-text">{{ word.text }}</span>
+          <div class="option-content">
+            <span class="option-text">{{ word.text }}</span>
+            <div class="selection-indicator" v-if="screenState.selected_region === word.text">
+              <span class="indicator-icon">✓</span>
+              <span class="indicator-text">已选择</span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -93,14 +102,10 @@ const currentWordColor = ref('#000000')
 const showFeedback = ref(false)
 const feedbackText = ref('')
 const feedbackIcon = ref('')
-
-const startButtonActive = ref(false)
-const startButtonPressed = ref(false)
-const startButtonProgress = ref(0)
-
-const activeOptionIndex = ref(-1)
-const pressedOptionIndex = ref(-1)
-const optionProgress = ref([0, 0, 0, 0, 0, 0])
+const feedbackType = ref('')
+const reactionTime = ref(0)
+const selectedOptionIndex = ref(-1)
+const screenState = ref({})
 
 const words = ref([
   { text: '红', color: '#ff0000' },
@@ -114,8 +119,6 @@ const words = ref([
 const GAME_DURATION = 180
 const TRIAL_DURATION = 2000
 const FEEDBACK_DURATION = 1500
-const START_BUTTON_PRESS_TIME = 2000
-const OPTION_PRESS_TIME = 500
 
 let gameTimer = null
 let trialTimer = null
@@ -123,8 +126,7 @@ let trialTimeout = null
 let trialStartTime = 0
 let totalReactionTime = 0
 let timeLeft = GAME_DURATION
-let startButtonPressTimer = null
-let optionPressTimers = [null, null, null, null, null, null]
+let screenStateInterval = null
 
 const accuracy = computed(() => {
   const total = correctCount.value + incorrectCount.value + missedCount.value
@@ -156,6 +158,7 @@ const startGame = () => {
 const prepareNextRound = () => {
   showFeedback.value = false
   isTimeRunning.value = false
+  selectedOptionIndex.value = -1
   
   const randomIndex = Math.floor(Math.random() * words.value.length)
   currentWord.value = words.value[randomIndex].text
@@ -221,19 +224,23 @@ const handleResponse = (event, isTimeout) => {
   updateScore(false)
 }
 
-const displayFeedback = (type, reactionTime) => {
+const displayFeedback = (type, reactionTimeValue) => {
   showFeedback.value = true
+  reactionTime.value = reactionTimeValue
   
   switch (type) {
     case 'correct':
+      feedbackType.value = 'correct'
       feedbackIcon.value = '✓'
-      feedbackText.value = `真棒，答对啦！你的反应时间为${reactionTime}ms`
+      feedbackText.value = '真棒，答对啦！'
       break
     case 'incorrect':
+      feedbackType.value = 'incorrect'
       feedbackIcon.value = '✗'
       feedbackText.value = '诶哟，答错了'
       break
     case 'missed':
+      feedbackType.value = 'missed'
       feedbackIcon.value = '✗'
       feedbackText.value = '哎呀，漏答了'
       break
@@ -241,6 +248,7 @@ const displayFeedback = (type, reactionTime) => {
   
   setTimeout(() => {
     showFeedback.value = false
+    reactionTime.value = 0
     if (timeLeft > 0) {
       prepareNextRound()
     }
@@ -287,77 +295,47 @@ const restartGame = () => {
   }
 }
 
-const handleStartButtonPress = () => {
-  startButtonActive.value = true
-  startButtonPressed.value = true
-  
-  let progress = 0
-  const interval = 50
-  const step = (interval / START_BUTTON_PRESS_TIME) * 100
-  
-  startButtonPressTimer = setInterval(() => {
-    progress += step
-    startButtonProgress.value = progress
+// 区域名称映射：英文 -> 中文
+const regionNameMap = {
+  'red': '红',
+  'yellow': '黄',
+  'blue': '蓝',
+  'green': '绿',
+  'purple': '紫',
+  'orange': '橙'
+}
+
+const fetchScreenState = async () => {
+  try {
+    const response = await fetch(`http://${host.value}:8080/api/screen_state`)
+    screenState.value = await response.json()
     
-    if (progress >= 100) {
-      clearInterval(startButtonPressTimer)
-      startButtonPressed.value = false
-      startGame()
+    if (screenState.value.selected_region && screenState.value.selection_confidence >= 0.8) {
+      const chineseRegionName = regionNameMap[screenState.value.selected_region]
+      if (chineseRegionName) {
+        const selectedWord = words.value.find(w => w.text === chineseRegionName)
+        if (selectedWord) {
+          selectWord(selectedWord)
+        }
+      }
     }
-  }, interval)
-}
-
-const handleStartButtonRelease = () => {
-  startButtonPressed.value = false
-  if (startButtonPressTimer) {
-    clearInterval(startButtonPressTimer)
-    startButtonPressTimer = null
+  } catch (e) {
+    console.error('获取屏幕状态失败:', e)
   }
-  startButtonProgress.value = 0
-}
-
-const handleOptionPress = (index) => {
-  activeOptionIndex.value = index
-  pressedOptionIndex.value = index
-  
-  let progress = 0
-  const interval = 50
-  const step = (interval / OPTION_PRESS_TIME) * 100
-  
-  optionPressTimers[index] = setInterval(() => {
-    progress += step
-    optionProgress.value[index] = progress
-    
-    if (progress >= 100) {
-      clearInterval(optionPressTimers[index])
-      optionPressTimers[index] = null
-      pressedOptionIndex.value = -1
-      selectWord(words.value[index])
-    }
-  }, interval)
-}
-
-const handleOptionRelease = (index) => {
-  pressedOptionIndex.value = -1
-  if (optionPressTimers[index]) {
-    clearInterval(optionPressTimers[index])
-    optionPressTimers[index] = null
-  }
-  optionProgress.value[index] = 0
 }
 
 onMounted(() => {
   host.value = window.location.hostname
+  
+  fetchScreenState()
+  screenStateInterval = setInterval(fetchScreenState, 500)
 })
 
 onUnmounted(() => {
   if (gameTimer) clearInterval(gameTimer)
   if (trialTimer) clearInterval(trialTimer)
   if (trialTimeout) clearTimeout(trialTimeout)
-  if (startButtonPressTimer) clearInterval(startButtonPressTimer)
-  optionPressTimers.forEach(timer => {
-    if (timer) clearInterval(timer)
-  })
+  if (screenStateInterval) clearInterval(screenStateInterval)
 })
 </script>
 
@@ -410,31 +388,17 @@ onUnmounted(() => {
   justify-content: center;
   align-items: center;
   cursor: pointer;
-  position: relative;
   transition: all 0.3s ease;
   box-shadow: 0 0 20px rgba(0, 102, 255, 0.3);
-}
-
-.start-button.active {
-  box-shadow: 0 0 30px rgba(0, 102, 255, 0.5);
-}
-
-.start-button.pressed {
-  transform: scale(0.95);
-}
-
-.button-circle {
-  position: absolute;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.3);
-  transition: width 0.05s linear, height 0.05s linear;
-}
-
-.button-text {
+  border: none;
+  color: #ffffff;
   font-size: 1.5rem;
   font-weight: bold;
-  color: #ffffff;
-  z-index: 1;
+}
+
+.start-button:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 25px rgba(0, 102, 255, 0.5);
 }
 
 .button-hint {
@@ -582,21 +546,52 @@ onUnmounted(() => {
 
 .option-btn.active {
   box-shadow: 0 0 20px rgba(0, 0, 0, 0.3);
+  transform: scale(1.05);
 }
 
-.option-btn.pressed {
-  transform: scale(0.95);
+.option-btn.selected {
+  border-color: #10b981;
+  border-width: 3px;
+  box-shadow: 0 0 25px rgba(16, 185, 129, 0.3);
 }
 
-.option-circle {
-  position: absolute;
-  border-radius: 15px;
-  background: rgba(255, 255, 255, 0.3);
-  transition: width 0.05s linear, height 0.05s linear;
+.option-content {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
 
 .option-text {
+  font-size: 2.5rem;
+  font-weight: 700;
   z-index: 1;
+}
+
+.selection-indicator {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  z-index: 2;
+}
+
+.indicator-icon {
+  font-size: 2rem;
+  font-weight: 700;
+  color: #10b981;
+}
+
+.indicator-text {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #10b981;
 }
 
 .bottom-bar {

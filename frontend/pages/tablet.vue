@@ -126,33 +126,42 @@ const emotionText = computed(() => {
 })
 
 const fatigueText = computed(() => {
-  const fatigue = physiologicalState.value.fatigue
+  const fatigue = physiologicalState.value.fatigue_level
   const map = {
     'low': '低',
     'medium': '中',
-    'high': '高'
+    'high': '高',
+    'unknown': '--'
   }
   return map[fatigue] || '--'
 })
 
 const postureText = computed(() => {
-  const posture = physiologicalState.value.posture
+  const posture = physiologicalState.value.posture_state
   const map = {
     'focused': '专注',
     'relaxed': '放松',
-    'poor': '不良'
+    'slouching': '不良',
+    'leaning': '倾斜',
+    'neutral': '正常',
+    'unknown': '--'
   }
   return map[posture] || '--'
 })
 
 const healthScore = computed(() => {
   const bpm = physiologicalState.value.bpm || 0
-  const fatigue = physiologicalState.value.fatigue || 'medium'
+  const fatigue = physiologicalState.value.fatigue_level || 'medium'
   const emotion = physiologicalState.value.emotion || 'neutral'
   
   let score = 100
   
-  if (bpm > 100 || bpm < 50) score -= 20
+  if (typeof bpm === 'number') {
+    if (bpm > 100 || bpm < 50) score -= 20
+  } else {
+    score -= 10
+  }
+  
   if (fatigue === 'high') score -= 30
   if (fatigue === 'medium') score -= 15
   if (emotion === 'sad' || emotion === 'angry') score -= 20
@@ -187,7 +196,7 @@ const fetchTrainingHistory = async () => {
   try {
     const response = await fetch(`http://${host.value}:8080/api/training_history`)
     const data = await response.json()
-    trainingHistory.value = data
+    trainingHistory.value = data.sessions || []
   } catch (e) {
     console.error('获取训练历史失败:', e)
   }

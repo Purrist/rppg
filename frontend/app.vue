@@ -5,7 +5,8 @@
       <div class="nav-links">
         <NuxtLink to="/" class="nav-link">🏠 首页</NuxtLink>
         <NuxtLink to="/tablet" class="nav-link">📱 平板控制</NuxtLink>
-        <NuxtLink to="/training" class="nav-link">🎮 投影训练</NuxtLink>
+        <NuxtLink to="/training" class="nav-link">🎮 色词测试</NuxtLink>
+        <NuxtLink to="/judge" class="nav-link">👁 屏幕识别</NuxtLink>
       </div>
     </nav>
     <NuxtPage />

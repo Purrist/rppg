@@ -6,14 +6,14 @@ import sys
 import time
 
 from tablet_processor import TabletProcessor
-from projector_processor import ProjectorProcessor
+from screen_processor import ScreenProcessor
 from state_manager import StateManager
 
 app = Flask(__name__)
 CORS(app)
 
 tablet_processor = None
-projector_processor = None
+screen_processor = None
 state_manager = None
 
 def get_ip():
@@ -40,11 +40,11 @@ def tablet_video_feed():
                 time.sleep(0.01)
     return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
-@app.route('/projector_video_feed')
-def projector_video_feed():
+@app.route('/screen_video_feed')
+def screen_video_feed():
     def generate():
         while True:
-            frame = projector_processor.get_frame()
+            frame = screen_processor.get_frame()
             if frame is not None:
                 _, jpeg = cv2.imencode('.jpg', frame)
                 yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n\r\n')
@@ -56,9 +56,23 @@ def projector_video_feed():
 def get_physiological_state():
     return jsonify(tablet_processor.get_state())
 
+@app.route('/api/screen_state')
+def get_screen_state():
+    return jsonify(screen_processor.get_state())
+
 @app.route('/api/interaction_state')
 def get_interaction_state():
-    return jsonify(projector_processor.get_state())
+    # 返回脚踩踏状态数据
+    return jsonify({
+        "person_detected": screen_processor.hand_detected,
+        "body_position": {"x": 0.5, "y": 0.5},
+        "gesture": "none",
+        "gesture_confidence": 0.0,
+        "interaction_target": screen_processor.selected_region or "none",
+        "activity_level": "medium",
+        "foot_detected": screen_processor.hand_detected,
+        "foot_position": {"x": 0.5, "y": 0.8}
+    })
 
 @app.route('/api/fused_state')
 def get_fused_state():
@@ -101,29 +115,31 @@ def health_check():
     return jsonify({
         "status": "running",
         "tablet_camera": tablet_processor is not None,
-        "projector_camera": projector_processor is not None,
+        "screen_camera": screen_processor is not None,
         "state_manager": state_manager is not None
     })
 
 def main():
-    global tablet_processor, projector_processor, state_manager
+    global tablet_processor, screen_processor, state_manager
     
     tablet_camera_url = 0
-    projector_camera_url = 0
+    screen_camera_url = 0
     
     if len(sys.argv) > 1:
         tablet_camera_url = sys.argv[1]
-        print(f"使用平板摄像头: {tablet_camera_url}")
+        print(f"使用手机摄像头作为平板摄像头: {tablet_camera_url}")
     else:
-        print("使用本地平板摄像头: 0")
-        print("提示: 使用网络摄像头请运行: python app.py <平板摄像头URL>")
+        print("错误: 必须提供平板摄像头URL")
+        print("提示: 请运行 start_system.bat 并输入正确的手机摄像头URL")
+        sys.exit(1)
     
     if len(sys.argv) > 2:
-        projector_camera_url = sys.argv[2]
-        print(f"使用投影摄像头: {projector_camera_url}")
+        screen_camera_url = sys.argv[2]
+        print(f"使用手机摄像头作为屏幕摄像头: {screen_camera_url}")
     else:
-        print("使用本地投影摄像头: 0")
-        print("提示: 使用网络摄像头请运行: python app.py <平板URL> <投影URL>")
+        print("错误: 必须提供屏幕摄像头URL")
+        print("提示: 请运行 start_system.bat 并输入正确的手机摄像头URL")
+        sys.exit(1)
     
     try:
         state_manager = StateManager()
@@ -133,9 +149,9 @@ def main():
         tablet_processor.start()
         print("[系统] 平板摄像头已启动")
         
-        projector_processor = ProjectorProcessor(projector_camera_url)
-        projector_processor.start()
-        print("[系统] 投影摄像头已启动")
+        screen_processor = ScreenProcessor(screen_camera_url)
+        screen_processor.start()
+        print("[系统] 屏幕摄像头已启动")
         
         print("\n" + "="*60)
         print("双摄像头感知系统启动成功！")
@@ -149,10 +165,10 @@ def main():
         print(f"   http://{local_ip}:8080")
         print(f"\n📹 视频流:")
         print(f"   平板摄像头: http://{local_ip}:8080/tablet_video_feed")
-        print(f"   投影摄像头: http://{local_ip}:8080/projector_video_feed")
+        print(f"   屏幕摄像头: http://{local_ip}:8080/screen_video_feed")
         print(f"\n📊 API 接口:")
         print(f"   生理状态: http://{local_ip}:8080/api/physiological_state")
-        print(f"   交互状态: http://{local_ip}:8080/api/interaction_state")
+        print(f"   屏幕状态: http://{local_ip}:8080/api/screen_state")
         print(f"   融合状态: http://{local_ip}:8080/api/fused_state")
         print("="*60 + "\n")
         
@@ -166,12 +182,12 @@ def main():
         print("1. 平板摄像头 URL 是否正确")
         print("2. 平板和电脑是否在同一 Wi-Fi 网络")
         print("3. 平板上的摄像头应用是否已启动")
-        print("4. 投影摄像头是否可用")
+        print("4. 屏幕摄像头 URL 是否正确")
     finally:
         if tablet_processor:
             tablet_processor.stop()
-        if projector_processor:
-            projector_processor.stop()
+        if screen_processor:
+            screen_processor.stop()
         print("[系统] 已关闭")
 
 if __name__ == "__main__":
