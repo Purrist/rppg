@@ -32,24 +32,36 @@ def get_ip():
 def tablet_video_feed():
     def generate():
         while True:
-            frame = tablet_processor.get_frame()
+            frame = tablet_processor.get_frame() if tablet_processor else None
             if frame is not None:
                 _, jpeg = cv2.imencode('.jpg', frame)
                 yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n\r\n')
             else:
-                time.sleep(0.01)
+                # 当摄像头未连接时，返回一个占位图像
+                placeholder = np.ones((480, 640, 3), dtype=np.uint8) * 200
+                cv2.putText(placeholder, 'Tablet Camera Disconnected', (50, 240), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                _, jpeg = cv2.imencode('.jpg', placeholder)
+                yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n\r\n')
+            time.sleep(0.033)  # 30fps
     return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 @app.route('/screen_video_feed')
 def screen_video_feed():
     def generate():
         while True:
-            frame = screen_processor.get_frame()
+            frame = screen_processor.get_frame() if screen_processor else None
             if frame is not None:
                 _, jpeg = cv2.imencode('.jpg', frame)
                 yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n\r\n')
             else:
-                time.sleep(0.01)
+                # 当摄像头未连接时，返回一个占位图像
+                placeholder = np.ones((480, 640, 3), dtype=np.uint8) * 200
+                cv2.putText(placeholder, 'Screen Camera Disconnected', (50, 240), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                _, jpeg = cv2.imencode('.jpg', placeholder)
+                yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n\r\n')
+            time.sleep(0.033)  # 30fps
     return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 @app.route('/api/physiological_state')

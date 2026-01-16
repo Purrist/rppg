@@ -307,20 +307,24 @@ const regionNameMap = {
 
 const fetchScreenState = async () => {
   try {
-    const response = await fetch(`http://${host.value}:8080/api/screen_state`)
-    screenState.value = await response.json()
+    const response = await fetch(`http://${host.value}:8080/api/interaction_state`)
+    const data = await response.json()
     
-    if (screenState.value.selected_region && screenState.value.selection_confidence >= 0.8) {
-      const chineseRegionName = regionNameMap[screenState.value.selected_region]
+    // 更新屏幕状态
+    screenState.value = data
+    
+    // 如果检测到手部遮挡（模拟脚踩踏）且置信度足够高，自动选择对应选项
+    if (data.interaction_target !== 'none' && data.foot_detected) {
+      const chineseRegionName = regionNameMap[data.interaction_target]
       if (chineseRegionName) {
         const selectedWord = words.value.find(w => w.text === chineseRegionName)
-        if (selectedWord) {
+        if (selectedWord && isTimeRunning.value && gameStarted.value) {
           selectWord(selectedWord)
         }
       }
     }
   } catch (e) {
-    console.error('获取屏幕状态失败:', e)
+    console.error('获取交互状态失败:', e)
   }
 }
 

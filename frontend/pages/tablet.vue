@@ -11,7 +11,18 @@
       <div class="camera-panel">
         <h2>📷 平板摄像头（人脸追踪）</h2>
         <div class="camera-area">
-          <img :src="`http://${host.value}:8080/tablet_video_feed`" alt="平板摄像头" class="camera-img" />
+          <img 
+            v-if="host.value" 
+            :src="`http://${host.value}:8080/tablet_video_feed`" 
+            alt="平板摄像头" 
+            class="camera-img" 
+          />
+          <div v-else class="camera-placeholder">
+            <div class="placeholder-content">
+              <div class="placeholder-icon">📷</div>
+              <div class="placeholder-text">摄像头连接中...</div>
+            </div>
+          </div>
         </div>
         <div class="chart-area">
           <canvas ref="chartRef" height="120"></canvas>
@@ -304,7 +315,7 @@ onUnmounted(() => {
 const loadChartJs = () => new Promise((res, rej) => {
   if (window.Chart) return res()
   const s = document.createElement('script')
-  s.src = 'https://cdn.jsdelivr.net/npm/chart.js'
+  s.src = '/js/chart.min.js'
   s.onload = res
   s.onerror = rej
   document.head.appendChild(s)
@@ -568,6 +579,31 @@ const updateBpmHistory = (bpm) => {
   width: 100%;
   border-radius: 12px;
   display: block;
+}
+
+.camera-placeholder {
+  width: 100%;
+  height: 480px;
+  background: rgba(0, 0, 0, 0.8);
+  border-radius: 12px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.placeholder-content {
+  text-align: center;
+  color: #ffffff;
+}
+
+.placeholder-icon {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+}
+
+.placeholder-text {
+  font-size: 1.2rem;
+  opacity: 0.8;
 }
 
 

@@ -11,7 +11,18 @@
       <div class="video-section">
         <h2>📹 摄像头预览</h2>
         <div class="video-container">
-          <img :src="`http://${host.value}:8080/screen_video_feed`" alt="手机摄像头" class="camera-img" />
+          <img 
+            v-if="host.value" 
+            :src="`http://${host.value}:8080/screen_video_feed`" 
+            alt="手机摄像头" 
+            class="camera-img" 
+          />
+          <div v-else class="camera-placeholder">
+            <div class="placeholder-content">
+              <div class="placeholder-icon">📷</div>
+              <div class="placeholder-text">摄像头连接中...</div>
+            </div>
+          </div>
           
           <div class="overlay-info">
             <div class="info-item">
@@ -208,6 +219,30 @@ onUnmounted(() => {
 .video-container .camera-img {
   width: 100%;
   display: block;
+}
+
+.camera-placeholder {
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.placeholder-content {
+  text-align: center;
+  color: #ffffff;
+}
+
+.placeholder-icon {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+}
+
+.placeholder-text {
+  font-size: 1.2rem;
+  opacity: 0.8;
 }
 
 .overlay-info {
