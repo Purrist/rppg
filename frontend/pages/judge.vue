@@ -11,7 +11,7 @@
       <div class="video-section">
         <h2>📹 摄像头预览</h2>
         <div class="video-container">
-          <img :src="`http://${host}:8080/screen_video_feed`" alt="Camera Preview" />
+          <img :src="`http://${host.value}:8080/screen_video_feed`" alt="手机摄像头" class="camera-img" />
           
           <div class="overlay-info">
             <div class="info-item">
@@ -204,7 +204,8 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
-.video-container img {
+.video-container img,
+.video-container .camera-img {
   width: 100%;
   display: block;
 }

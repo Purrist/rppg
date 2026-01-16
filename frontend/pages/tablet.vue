@@ -8,6 +8,16 @@
     </div>
 
     <div class="main-content">
+      <div class="camera-panel">
+        <h2>📷 平板摄像头（人脸追踪）</h2>
+        <div class="camera-area">
+          <img :src="`http://${host.value}:8080/tablet_video_feed`" alt="平板摄像头" class="camera-img" />
+        </div>
+        <div class="chart-area">
+          <canvas ref="chartRef" height="120"></canvas>
+        </div>
+      </div>
+
       <div class="physiological-panel">
         <h2>❤️ 生理状态监测</h2>
         
@@ -97,11 +107,21 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 
+// 基本状态
 const host = ref('')
 const connectionStatus = ref('disconnected')
 const physiologicalState = ref({})
 const recommendations = ref([])
 const trainingHistory = ref([])
+
+// 摄像头 + 面部追踪 refs
+const overlayRef = ref(null)
+const chartRef = ref(null)
+
+// rPPG 缓冲与绘图数据
+const bpmHistory = ref([])
+let chartInstance = null
+let running = true
 
 const connectionStatusText = computed(() => {
   const statusMap = {
@@ -185,6 +205,11 @@ const fetchPhysiologicalState = async () => {
     physiologicalState.value = data
     connectionStatus.value = 'connected'
     
+    // 更新心率图表
+    if (data.bpm && typeof data.bpm === 'number') {
+      updateBpmHistory(data.bpm)
+    }
+    
     updateRecommendations(data)
   } catch (e) {
     console.error('获取生理状态失败:', e)
@@ -259,16 +284,78 @@ const updateRecommendations = (state) => {
 
 onMounted(() => {
   host.value = window.location.hostname
-  
   fetchPhysiologicalState()
   fetchTrainingHistory()
-  
+
+  // 初始化图表
+  setupChart()
+
   setInterval(fetchPhysiologicalState, 1000)
   setInterval(fetchTrainingHistory, 5000)
 })
 
 onUnmounted(() => {
+  running = false
+  if (chartInstance) chartInstance.destroy()
 })
+
+// ---------- 下面是图表实现 ----------
+
+const loadChartJs = () => new Promise((res, rej) => {
+  if (window.Chart) return res()
+  const s = document.createElement('script')
+  s.src = 'https://cdn.jsdelivr.net/npm/chart.js'
+  s.onload = res
+  s.onerror = rej
+  document.head.appendChild(s)
+})
+
+const setupChart = async () => {
+  try {
+    // 动态加载 Chart.js
+    await loadChartJs()
+    
+    const ctx = chartRef.value.getContext('2d')
+    chartInstance = new window.Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [{
+          label: 'BPM',
+          data: [],
+          borderColor: 'rgba(255,99,132,1)',
+          backgroundColor: 'rgba(255,99,132,0.2)',
+          tension: 0.2,
+          pointRadius: 0
+        }]
+      },
+      options: {
+        animation: false,
+        scales: {
+          y: { suggestedMin: 40, suggestedMax: 160 }
+        },
+        plugins: { legend: { display: false } }
+      }
+    })
+  } catch (e) {
+    console.error('加载 Chart.js 失败', e)
+  }
+}
+
+const updateBpmHistory = (bpm) => {
+  const t = new Date()
+  bpmHistory.value.push({t, bpm})
+  if (bpmHistory.value.length > 100) bpmHistory.value.shift()
+  if (chartInstance) {
+    chartInstance.data.labels.push(t.toLocaleTimeString())
+    chartInstance.data.datasets[0].data.push(bpm)
+    if (chartInstance.data.labels.length > 60) {
+      chartInstance.data.labels.shift()
+      chartInstance.data.datasets[0].data.shift()
+    }
+    chartInstance.update()
+  }
+}
 </script>
 
 <style scoped>
@@ -460,5 +547,35 @@ onUnmounted(() => {
   text-align: center;
   font-size: 1rem;
   opacity: 0.8;
+}
+
+.camera-panel {
+  background: rgba(255,255,255,0.04);
+  border-radius: 16px;
+  padding: 1rem;
+  border: 1px solid rgba(255,255,255,0.08);
+}
+
+.camera-area {
+  position: relative;
+  width: 100%;
+  max-width: 640px;
+  margin-bottom: 0.8rem;
+}
+
+.camera-area video,
+.camera-area .camera-img {
+  width: 100%;
+  border-radius: 12px;
+  display: block;
+}
+
+
+
+.chart-area {
+  max-width: 640px;
+  background: rgba(0,0,0,0.15);
+  padding: 0.6rem;
+  border-radius: 10px;
 }
 </style>

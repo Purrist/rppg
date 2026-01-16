@@ -122,37 +122,57 @@ def health_check():
 def main():
     global tablet_processor, screen_processor, state_manager
     
-    tablet_camera_url = 0
-    screen_camera_url = 0
+    # 摄像头配置 - 可以在这里集中管理所有摄像头设置
+    # 用户可以直接修改下面的URL来更换摄像头
+    CAMERA_CONFIG = {
+        "tablet": {
+            "name": "平板摄像头",
+            "url": "http://10.117.42.45:8080/video",  # 平板摄像头URL
+            "type": "tablet"  # 摄像头类型
+        },
+        "external": {
+            "name": "外接摄像头",
+            "url": "http://10.117.42.174:8080/video",  # 外接摄像头URL
+            "type": "external"  # 摄像头类型
+        }
+    }
     
-    if len(sys.argv) > 1:
-        tablet_camera_url = sys.argv[1]
-        print(f"使用手机摄像头作为平板摄像头: {tablet_camera_url}")
-    else:
-        print("错误: 必须提供平板摄像头URL")
-        print("提示: 请运行 start_system.bat 并输入正确的手机摄像头URL")
-        sys.exit(1)
+    # 从命令行参数获取摄像头URL（如果提供），否则使用配置文件中的默认值
+    tablet_camera_url = sys.argv[1] if len(sys.argv) > 1 else CAMERA_CONFIG["tablet"]["url"]
+    external_camera_url = sys.argv[2] if len(sys.argv) > 2 else CAMERA_CONFIG["external"]["url"]
     
-    if len(sys.argv) > 2:
-        screen_camera_url = sys.argv[2]
-        print(f"使用手机摄像头作为屏幕摄像头: {screen_camera_url}")
-    else:
-        print("错误: 必须提供屏幕摄像头URL")
-        print("提示: 请运行 start_system.bat 并输入正确的手机摄像头URL")
-        sys.exit(1)
+    # 更新配置
+    CAMERA_CONFIG["tablet"]["url"] = tablet_camera_url
+    CAMERA_CONFIG["external"]["url"] = external_camera_url
+    
+    print(f"使用{CAMERA_CONFIG['tablet']['name']}: {tablet_camera_url}")
+    print(f"使用{CAMERA_CONFIG['external']['name']}: {external_camera_url}")
     
     try:
         state_manager = StateManager()
         print("[系统] 状态管理器已初始化")
         
-        tablet_processor = TabletProcessor(tablet_camera_url)
-        tablet_processor.start()
-        print("[系统] 平板摄像头已启动")
+        # 尝试启动平板摄像头
+        tablet_processor = None
+        try:
+            # 使用简单的try-except，不使用线程
+            tablet_processor = TabletProcessor(tablet_camera_url)
+            tablet_processor.start()
+            print("[系统] 平板摄像头已启动")
+        except Exception as e:
+            print(f"[系统] 平板摄像头启动失败: {e}")
         
-        screen_processor = ScreenProcessor(screen_camera_url)
-        screen_processor.start()
-        print("[系统] 屏幕摄像头已启动")
+        # 尝试启动外接摄像头
+        screen_processor = None
+        try:
+            # 使用简单的try-except，不使用线程
+            screen_processor = ScreenProcessor(external_camera_url)
+            screen_processor.start()
+            print("[系统] 外接摄像头已启动")
+        except Exception as e:
+            print(f"[系统] 外接摄像头启动失败: {e}")
         
+        # 即使没有摄像头，也要让系统运行，方便调试
         print("\n" + "="*60)
         print("双摄像头感知系统启动成功！")
         print("="*60)
@@ -164,8 +184,10 @@ def main():
         print(f"\n⚙️  后端 API 地址:")
         print(f"   http://{local_ip}:8080")
         print(f"\n📹 视频流:")
-        print(f"   平板摄像头: http://{local_ip}:8080/tablet_video_feed")
-        print(f"   屏幕摄像头: http://{local_ip}:8080/screen_video_feed")
+        if tablet_processor:
+            print(f"   平板摄像头: http://{local_ip}:8080/tablet_video_feed")
+        if screen_processor:
+            print(f"   外接摄像头: http://{local_ip}:8080/screen_video_feed")
         print(f"\n📊 API 接口:")
         print(f"   生理状态: http://{local_ip}:8080/api/physiological_state")
         print(f"   屏幕状态: http://{local_ip}:8080/api/screen_state")
@@ -182,7 +204,7 @@ def main():
         print("1. 平板摄像头 URL 是否正确")
         print("2. 平板和电脑是否在同一 Wi-Fi 网络")
         print("3. 平板上的摄像头应用是否已启动")
-        print("4. 屏幕摄像头 URL 是否正确")
+        print("4. 外接摄像头 URL 是否正确")
     finally:
         if tablet_processor:
             tablet_processor.stop()

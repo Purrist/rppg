@@ -4,10 +4,11 @@ from scipy.signal import butter, filtfilt, detrend
 import threading
 from queue import Queue
 import time
+import os
 
 try:
     import mediapipe.python.solutions.face_mesh as mp_face_mesh
-except:
+except ImportError:
     import mediapipe as mp
     mp_face_mesh = mp.solutions.face_mesh
 
@@ -35,20 +36,53 @@ class TabletProcessor:
         self.frame_queue = Queue(maxsize=1)
         
         self.emotion_labels = ["angry", "disgust", "fear", "happy", "sad", "surprise", "neutral"]
-        
+    
     def connect_camera(self):
         if self.cap is not None:
             self.cap.release()
         
         print(f"[平板摄像头] 正在连接: {self.camera_url}")
-        self.cap = cv2.VideoCapture(self.camera_url)
         
-        if not self.cap.isOpened():
+        # 使用多线程实现超时控制
+        import threading
+        
+        self.cap = None
+        connect_error = None
+        
+        def connect_task():
+            nonlocal self, connect_error
+            try:
+                # 直接使用摄像头URL，让OpenCV自动检测协议
+                self.cap = cv2.VideoCapture(self.camera_url)
+                
+                if not self.cap.isOpened():
+                    connect_error = Exception(f"无法打开平板摄像头: {self.camera_url}")
+                    return
+                
+                self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                self.cap.set(cv2.CAP_PROP_FPS, 30)
+            except Exception as e:
+                connect_error = e
+        
+        # 创建线程并启动
+        thread = threading.Thread(target=connect_task)
+        thread.daemon = True
+        thread.start()
+        
+        # 等待最多3秒
+        thread.join(timeout=3)
+        
+        if thread.is_alive():
+            # 线程超时，强制退出
+            raise Exception(f"平板摄像头连接超时: {self.camera_url}")
+        
+        if connect_error:
+            raise connect_error
+        
+        if not self.cap or not self.cap.isOpened():
             raise Exception(f"无法打开平板摄像头: {self.camera_url}")
         
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        self.cap.set(cv2.CAP_PROP_FPS, 30)
         print("[平板摄像头] 连接成功！")
     
     def butter_bandpass(self, data, lowcut=0.75, highcut=3.0, fs=30, order=2):
@@ -195,19 +229,20 @@ class TabletProcessor:
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         res = self.face_mesh.process(rgb)
         
-        if res.multi_face_landmarks:
+        if res.multi_face_landmarks and len(res.multi_face_landmarks) > 0:
             landmarks = res.multi_face_landmarks[0].landmark
             
             rois = [10, 234, 454]
             current_g_pool = []
             
             for idx in rois:
-                cx, cy = int(landmarks[idx].x * w), int(landmarks[idx].y * h)
-                r = 15
-                if 0 < cy-r < h and 0 < cx-r < w:
-                    roi_zone = frame[cy-r:cy+r, cx-r:cx+r]
-                    current_g_pool.append(np.mean(roi_zone[:,:,1]))
-                    cv2.circle(frame, (cx, cy), r, (0, 255, 0), -1)
+                if idx < len(landmarks):
+                    cx, cy = int(landmarks[idx].x * w), int(landmarks[idx].y * h)
+                    r = 15
+                    if 0 < cy-r < h and 0 < cx-r < w:
+                        roi_zone = frame[cy-r:cy+r, cx-r:cx+r]
+                        current_g_pool.append(np.mean(roi_zone[:,:,1]))
+                        cv2.circle(frame, (cx, cy), r, (0, 255, 0), -1)
             
             if current_g_pool:
                 avg_g = np.mean(current_g_pool)
@@ -228,25 +263,33 @@ class TabletProcessor:
                         self.current_bpm = int(freqs[np.argmax(fft[1:])+1]) * 60
                     except:
                         pass
-                
-                emotion, emotion_conf = self.detect_emotion(landmarks, frame)
-                self.current_emotion = emotion
-                self.emotion_confidence = emotion_conf
-                
-                fatigue = self.detect_fatigue(landmarks, frame)
-                self.fatigue_level = fatigue
-                
-                posture = self.detect_posture(landmarks, frame)
-                self.posture_state = posture
-                
-                self.attention_score = 0.5 + (0.5 * (1.0 - emotion_conf))
             
-            cv2.rectangle(frame, (int(landmarks[1].x * w - 50), int(landmarks[1].y * h - 50)), 
-                       (int(landmarks[1].x * w + 50), int(landmarks[1].y * h + 50)), (0, 255, 0), 2)
-            cv2.rectangle(frame, (int(landmarks[152].x * w - 30), int(landmarks[152].y * h - 30)), 
-                       (int(landmarks[152].x * w + 30), int(landmarks[152].y * h + 30)), (0, 255, 0), 2)
-            cv2.rectangle(frame, (int(landmarks[10].x * w - 40), int(landmarks[10].y * h - 40)), 
-                       (int(landmarks[10].x * w + 40), int(landmarks[10].y * h + 40)), (0, 255, 0), 2)
+            # 只有在检测到面部时才进行情绪和姿态检测
+            if res.multi_face_landmarks and len(res.multi_face_landmarks) > 0:
+                face_landmarks = res.multi_face_landmarks[0]
+                if face_landmarks.landmark and len(face_landmarks.landmark) > 0:
+                    landmarks = face_landmarks.landmark
+                    
+                    emotion, emotion_conf = self.detect_emotion(landmarks, frame)
+                    self.current_emotion = emotion
+                    self.emotion_confidence = emotion_conf
+                    
+                    fatigue = self.detect_fatigue(landmarks, frame)
+                    self.fatigue_level = fatigue
+                    
+                    posture = self.detect_posture(landmarks, frame)
+                    self.posture_state = posture
+                    
+                    self.attention_score = 0.5 + (0.5 * (1.0 - emotion_conf))
+                    
+                    # 在面部关键点上绘制矩形
+                    if 1 < len(landmarks) and 152 < len(landmarks) and 10 < len(landmarks):
+                        cv2.rectangle(frame, (int(landmarks[1].x * w - 50), int(landmarks[1].y * h - 50)), 
+                                   (int(landmarks[1].x * w + 50), int(landmarks[1].y * h + 50)), (0, 255, 0), 2)
+                        cv2.rectangle(frame, (int(landmarks[152].x * w - 30), int(landmarks[152].y * h - 30)), 
+                                   (int(landmarks[152].x * w + 30), int(landmarks[152].y * h + 30)), (0, 255, 0), 2)
+                        cv2.rectangle(frame, (int(landmarks[10].x * w - 40), int(landmarks[10].y * h - 40)), 
+                                   (int(landmarks[10].x * w + 40), int(landmarks[10].y * h + 40)), (0, 255, 0), 2)
         
         return frame
     

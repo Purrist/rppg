@@ -1,6 +1,7 @@
 {
   "version": "0.2.0",
   "configurations": [
+
     {
       "name": "Backend (Flask)",
       "type": "debugpy",
@@ -11,6 +12,10 @@
       "env": {
           "PYTHONPATH": "${workspaceFolder}/backend"
       },
+      "args": [
+        "http://10.117.42.45:8080/video",
+        "http://10.117.42.174:8080/video"
+      ],
       "console": "integratedTerminal"
     },
     {
