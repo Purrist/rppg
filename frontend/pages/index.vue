@@ -16,6 +16,16 @@
         </div>
       </div>
 
+      <div class="game-card" @click="selectGame('occlusion')">
+        <div class="game-icon">👋</div>
+        <h3 class="game-title">遮挡选择</h3>
+        <p class="game-description">基于视觉遮挡的无接触按钮选择，3秒确认机制</p>
+        <div class="game-stats">
+          <span class="stat">👁️ 视觉检测</span>
+          <span class="stat">⏱️ 3秒确认</span>
+        </div>
+      </div>
+
       <div class="game-card disabled">
         <div class="game-icon">🧠</div>
         <h3 class="game-title">记忆游戏</h3>
@@ -59,7 +69,11 @@ import { useRouter } from 'vue-router'
 const router = useRouter()
 
 const selectGame = (gameType) => {
-  router.push('/training')
+  if (gameType === 'occlusion') {
+    router.push('/occlusion')
+  } else {
+    router.push('/training')
+  }
 }
 </script>
 

@@ -13,12 +13,9 @@ class ScreenProcessor:
         self.thread = None
         
         self.screen_regions = {
-            "red": {"x": 0.2, "y": 0.7, "width": 0.15, "height": 0.1},
-            "yellow": {"x": 0.5, "y": 0.7, "width": 0.15, "height": 0.1},
-            "blue": {"x": 0.8, "y": 0.7, "width": 0.15, "height": 0.1},
-            "green": {"x": 0.2, "y": 0.7, "width": 0.15, "height": 0.1},
-            "purple": {"x": 0.5, "y": 0.7, "width": 0.15, "height": 0.1},
-            "orange": {"x": 0.8, "y": 0.7, "width": 0.15, "height": 0.1}
+            "red": {"x": 0.2, "y": 0.5, "width": 0.15, "height": 0.2},
+            "yellow": {"x": 0.5, "y": 0.5, "width": 0.15, "height": 0.2},
+            "blue": {"x": 0.8, "y": 0.5, "width": 0.15, "height": 0.2}
         }
         
         self.hand_detected = False
@@ -27,7 +24,7 @@ class ScreenProcessor:
         self.frame_queue = Queue(maxsize=1)
         
         self.selection_start_time = None
-        self.MIN_SELECTION_TIME = 2.0
+        self.MIN_SELECTION_TIME = 3.0
     
     def connect_camera(self):
         if self.cap is not None:

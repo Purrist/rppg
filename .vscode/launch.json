@@ -32,14 +32,6 @@
       "name": "🚀 一键启动",
       "configurations": ["Backend (Flask)", "Frontend (Nuxt)"],
       "stopAll": true
-    },
-    {
-      "name": "🚀 一键启动（批处理脚本）",
-      "type": "shell",
-      "request": "launch",
-      "command": "start_system.bat",
-      "cwd": "${workspaceFolder}",
-      "console": "integratedTerminal"
     }
   ]
 }

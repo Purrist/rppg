@@ -11,11 +11,12 @@
       <div class="video-section">
         <h2>📹 摄像头预览</h2>
         <div class="video-container">
+          <!-- 只在client mounted之后显示视频流，确保浏览器能正确处理MJPEG -->
           <img 
-            v-if="host.value" 
-            :src="`http://${host.value}:8080/screen_video_feed`" 
+            v-if="host" 
+            :src="`http://${host}:8080/screen_video_feed`" 
             alt="手机摄像头" 
-            class="camera-img" 
+            class="camera-img"
           />
           <div v-else class="camera-placeholder">
             <div class="placeholder-content">
@@ -99,7 +100,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 
 const host = ref('')
 const connectionStatus = ref('disconnected')
@@ -124,6 +125,8 @@ const connectionStatusText = computed(() => {
 })
 
 const fetchScreenState = async () => {
+  if (!host.value) return
+  
   try {
     const response = await fetch(`http://${host.value}:8080/api/screen_state`)
     screenState.value = await response.json()
@@ -135,13 +138,11 @@ const fetchScreenState = async () => {
 }
 
 onMounted(() => {
+  // 只在客户端mounted之后设置host，确保浏览器能正确处理MJPEG流
   host.value = window.location.hostname
   
   fetchScreenState()
   setInterval(fetchScreenState, 500)
-})
-
-onUnmounted(() => {
 })
 </script>
 

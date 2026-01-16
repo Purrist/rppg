@@ -11,11 +11,12 @@
       <div class="camera-panel">
         <h2>📷 平板摄像头（人脸追踪）</h2>
         <div class="camera-area">
+          <!-- 只在client mounted之后显示视频流，确保浏览器能正确处理MJPEG -->
           <img 
-            v-if="host.value" 
-            :src="`http://${host.value}:8080/tablet_video_feed`" 
+            v-if="host" 
+            :src="`http://${host}:8080/tablet_video_feed`" 
             alt="平板摄像头" 
-            class="camera-img" 
+            class="camera-img"
           />
           <div v-else class="camera-placeholder">
             <div class="placeholder-content">
@@ -294,12 +295,15 @@ const updateRecommendations = (state) => {
 }
 
 onMounted(() => {
+  // 只在客户端mounted之后设置host，确保浏览器能正确处理MJPEG流
   host.value = window.location.hostname
   fetchPhysiologicalState()
   fetchTrainingHistory()
 
-  // 初始化图表
-  setupChart()
+  // 确保DOM渲染完成后再初始化图表
+  setTimeout(() => {
+    setupChart()
+  }, 100)
 
   setInterval(fetchPhysiologicalState, 1000)
   setInterval(fetchTrainingHistory, 5000)
@@ -307,7 +311,16 @@ onMounted(() => {
 
 onUnmounted(() => {
   running = false
-  if (chartInstance) chartInstance.destroy()
+  
+  // 销毁图表实例
+  if (chartInstance) {
+    try {
+      chartInstance.destroy()
+    } catch (e) {
+      console.error('销毁图表失败', e)
+    }
+    chartInstance = null
+  }
 })
 
 // ---------- 下面是图表实现 ----------
@@ -323,10 +336,37 @@ const loadChartJs = () => new Promise((res, rej) => {
 
 const setupChart = async () => {
   try {
+    // 检查chartRef是否存在
+    if (!chartRef.value) {
+      console.error('Chart canvas element not found')
+      return
+    }
+    
     // 动态加载 Chart.js
     await loadChartJs()
     
+    // 确保Canvas元素已渲染
+    if (!chartRef.value.parentNode) {
+      console.error('Chart canvas element not in DOM')
+      return
+    }
+    
     const ctx = chartRef.value.getContext('2d')
+    if (!ctx) {
+      console.error('Failed to get 2D context from canvas')
+      return
+    }
+    
+    // 销毁已存在的图表实例
+    if (chartInstance) {
+      try {
+        chartInstance.destroy()
+      } catch (e) {
+        console.error('销毁现有图表失败', e)
+      }
+      chartInstance = null
+    }
+    
     chartInstance = new window.Chart(ctx, {
       type: 'line',
       data: {
@@ -343,9 +383,26 @@ const setupChart = async () => {
       options: {
         animation: false,
         scales: {
-          y: { suggestedMin: 40, suggestedMax: 160 }
+          y: { 
+            suggestedMin: 40, 
+            suggestedMax: 160,
+            responsive: true,
+            maintainAspectRatio: false
+          },
+          x: {
+            responsive: true,
+            maintainAspectRatio: false
+          }
         },
-        plugins: { legend: { display: false } }
+        plugins: { 
+          legend: { display: false },
+          tooltip: {
+            enabled: false
+          }
+        },
+        responsive: true,
+        maintainAspectRatio: false,
+        events: [] // 禁用所有事件，避免事件绑定问题
       }
     })
   } catch (e) {
@@ -354,17 +411,22 @@ const setupChart = async () => {
 }
 
 const updateBpmHistory = (bpm) => {
+  if (!chartInstance) return
+  
   const t = new Date()
   bpmHistory.value.push({t, bpm})
   if (bpmHistory.value.length > 100) bpmHistory.value.shift()
-  if (chartInstance) {
+  
+  try {
     chartInstance.data.labels.push(t.toLocaleTimeString())
     chartInstance.data.datasets[0].data.push(bpm)
     if (chartInstance.data.labels.length > 60) {
       chartInstance.data.labels.shift()
       chartInstance.data.datasets[0].data.shift()
     }
-    chartInstance.update()
+    chartInstance.update('none') // 使用none动画，避免性能问题
+  } catch (e) {
+    console.error('更新图表失败', e)
   }
 }
 </script>
