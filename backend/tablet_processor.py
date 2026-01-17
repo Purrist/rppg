@@ -307,7 +307,13 @@ class TabletProcessor:
         while self.running:
             ret, frame = self.cap.read()
             if not ret:
-                time.sleep(0.01)
+                print(f"[平板摄像头] 读取失败，正在尝试重连...")
+                time.sleep(1.0)
+                try:
+                    self.connect_camera()
+                    print(f"[平板摄像头] 重连成功")
+                except Exception as e:
+                    print(f"[平板摄像头] 重连失败: {e}")
                 continue
             
             processed_frame = self.process_frame(frame)

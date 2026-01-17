@@ -34,7 +34,7 @@ def tablet_video_feed():
         while True:
             frame = tablet_processor.get_frame() if tablet_processor else None
             if frame is not None:
-                _, jpeg = cv2.imencode('.jpg', frame)
+                _, jpeg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
                 yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n\r\n')
             else:
                 # 当摄像头未连接时，返回一个占位图像
@@ -52,7 +52,7 @@ def screen_video_feed():
         while True:
             frame = screen_processor.get_frame() if screen_processor else None
             if frame is not None:
-                _, jpeg = cv2.imencode('.jpg', frame)
+                _, jpeg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
                 yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n\r\n')
             else:
                 # 当摄像头未连接时，返回一个占位图像
