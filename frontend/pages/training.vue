@@ -1,88 +1,108 @@
 <template>
-  <div class="training-container">
-    <div class="welcome-screen" v-if="!gameStarted">
-      <h1 class="main-title">色词测试 · 认知训练</h1>
-      <p class="instructions-text">反应力挑战！你需要选择文字呈现的颜色，而不是文字的内容，每题仅有2秒反应时间，看看你能在三分钟内答对多少吧！</p>
+  <div class="page-container">
+    <!-- 严格2560*1600比例的固定容器，按宽度铺满屏幕 -->
+    <div class="fixed-ratio-container">
+      <!-- 四个角的视觉定位点（用于摄像头定位） -->
+      <div class="visual-marker top-left">
+        <div class="marker-inner"></div>
+      </div>
+      <div class="visual-marker top-right">
+        <div class="marker-inner"></div>
+      </div>
+      <div class="visual-marker bottom-left">
+        <div class="marker-inner"></div>
+      </div>
+      <div class="visual-marker bottom-right">
+        <div class="marker-inner"></div>
+      </div>
       
-      <div class="start-button-container">
-        <button 
-          class="start-button" 
-          @click="startGame"
-        >
-          <span class="button-text">开始测试</span>
-        </button>
-        <p class="button-hint">点击按钮开始测试</p>
-      </div>
-    </div>
-
-    <div class="game-screen" v-else>
-      <div class="top-bar">
-        <div class="progress-bar" :class="{danger: isTimeRunning}"></div>
-      </div>
-
-      <div class="main-content">
-        <div class="stats-column left-stats">
-          <div class="stat-item">
-            <span class="value">{{ correctCount }}</span>
-            <span class="label">答对</span>
-          </div>
-          <div class="stat-item">
-            <span class="value">{{ incorrectCount }}</span>
-            <span class="label">答错</span>
-          </div>
-          <div class="stat-item">
-            <span class="value">{{ missedCount }}</span>
-            <span class="label">遗漏</span>
-          </div>
-        </div>
-
-        <div class="word-display-area">
-          <div class="word-box">
-            <div class="word-text" :style="{color: currentWordColor}">{{ currentWord }}</div>
-          </div>
+      <!-- 内容包装器 -->
+      <div class="content-wrapper">
+        <div class="welcome-screen" v-if="!gameStarted">
+          <h1 class="main-title">色词测试 · 认知训练</h1>
+          <p class="instructions-text">反应力挑战！你需要选择文字呈现的颜色，而不是文字的内容，每题仅有2秒反应时间，看看你能在三分钟内答对多少吧！</p>
           
-          <div class="feedback-container" v-if="showFeedback" :class="feedbackType">
-            <div class="feedback-icon">{{ feedbackIcon }}</div>
-            <div class="feedback-text">{{ feedbackText }}</div>
-            <div class="feedback-reaction" v-if="reactionTime > 0">
-              反应时间: {{ reactionTime }}ms
+          <div class="start-button-container">
+            <button 
+              class="start-button" 
+              @click="startGame"
+            >
+              <span class="button-text">开始测试</span>
+            </button>
+            <p class="button-hint">点击按钮开始测试</p>
+          </div>
+        </div>
+
+        <div class="game-screen" v-else>
+          <div class="top-bar">
+            <div class="progress-bar" :class="{danger: isTimeRunning}"></div>
+          </div>
+
+          <div class="main-content">
+            <div class="stats-column left-stats">
+              <div class="stat-item">
+                <span class="value">{{ correctCount }}</span>
+                <span class="label">答对</span>
+              </div>
+              <div class="stat-item">
+                <span class="value">{{ incorrectCount }}</span>
+                <span class="label">答错</span>
+              </div>
+              <div class="stat-item">
+                <span class="value">{{ missedCount }}</span>
+                <span class="label">遗漏</span>
+              </div>
+            </div>
+
+            <div class="word-display-area">
+              <div class="word-box">
+                <div class="word-text" :style="{color: currentWordColor}">{{ currentWord }}</div>
+              </div>
+              
+              <div class="feedback-container" v-if="showFeedback" :class="feedbackType">
+                <div class="feedback-icon">{{ feedbackIcon }}</div>
+                <div class="feedback-text">{{ feedbackText }}</div>
+                <div class="feedback-reaction" v-if="reactionTime > 0">
+                  反应时间: {{ reactionTime }}ms
+                </div>
+              </div>
+            </div>
+
+            <div class="stats-column right-stats">
+              <div class="stat-item">
+                <span class="value">{{ accuracy }}%</span>
+                <span class="label">准确率</span>
+              </div>
+              <div class="stat-item">
+                <span class="value">{{ avgReactionTime }}ms</span>
+                <span class="label">平均反应时间</span>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div class="stats-column right-stats">
-          <div class="stat-item">
-            <span class="value">{{ accuracy }}%</span>
-            <span class="label">准确率</span>
-          </div>
-          <div class="stat-item">
-            <span class="value">{{ avgReactionTime }}ms</span>
-            <span class="label">平均反应时间</span>
-          </div>
-        </div>
-      </div>
-
-      <div class="options-container">
-        <div 
-          v-for="(word, index) in words" 
-          :key="word.text"
-          class="option-btn"
-          :class="{active: selectedOptionIndex === index, selected: screenState.selected_region === word.text}"
-          @click="selectWord(word)"
-        >
-          <div class="option-content">
-            <span class="option-text">{{ word.text }}</span>
-            <div class="selection-indicator" v-if="screenState.selected_region === word.text">
-              <span class="indicator-icon">✓</span>
-              <span class="indicator-text">已选择</span>
+          <div class="options-container">
+            <div 
+              v-for="(word, index) in words" 
+              :key="word.text"
+              class="option-btn"
+              :class="{active: selectedOptionIndex === index, selected: screenState.selected_region === word.text}"
+              @click="selectWord(word)"
+            >
+              <div class="option-content">
+                <span class="option-text">{{ word.text }}</span>
+                <div class="selection-indicator" v-if="screenState.selected_region === word.text">
+                  <span class="indicator-icon">✓</span>
+                  <span class="indicator-text">已选择</span>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      </div>
 
-      <div class="bottom-bar">
-        <span class="timer-display">{{ formattedTime }}</span>
-        <button class="restart-button" @click="restartGame">重新开始</button>
+          <div class="bottom-bar">
+            <span class="timer-display">{{ formattedTime }}</span>
+            <button class="restart-button" @click="restartGame">重新开始</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -344,22 +364,114 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.training-container {
-  background: #ffffff;
-  min-height: 100vh;
-  color: #333333;
+/* 页面容器，确保内容居中显示 */
+.page-container {
+  width: 100%;
+  height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background-color: #1a1a2e;
+  overflow: hidden;
   font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
+}
+
+/* 严格2560*1600比例的固定容器，按宽度铺满屏幕 */
+.fixed-ratio-container {
+  position: relative;
+  width: 100vw;
+  /* 2560:1600 = 1.6:1 = 8:5 */
+  height: calc(100vw * 5 / 8);
+  max-height: 100vh;
+  background: #ffffff;
+  box-shadow: 0 10px 50px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 四个角的视觉定位点（用于摄像头视觉定位与透视校正） */
+.visual-marker {
+  position: absolute;
+  width: 30px;
+  height: 30px;
+  z-index: 100;
   display: flex;
   justify-content: center;
   align-items: center;
 }
 
+.marker-inner {
+  width: 20px;
+  height: 20px;
+  background-color: #000;
+  border: 3px solid #fff;
+  border-radius: 5px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+/* 十字标记 */
+.marker-inner::before, .marker-inner::after {
+  content: '';
+  position: absolute;
+  background-color: #fff;
+}
+
+.marker-inner::before {
+  width: 12px;
+  height: 2px;
+}
+
+.marker-inner::after {
+  width: 2px;
+  height: 12px;
+}
+
+/* 定位点位置 - 固定在四个角落 */
+.visual-marker.top-left {
+  top: 10px;
+  left: 10px;
+}
+
+.visual-marker.top-right {
+  top: 10px;
+  right: 10px;
+  transform: rotate(90deg);
+}
+
+.visual-marker.bottom-left {
+  bottom: 10px;
+  left: 10px;
+  transform: rotate(-90deg);
+}
+
+.visual-marker.bottom-right {
+  bottom: 10px;
+  right: 10px;
+  transform: rotate(180deg);
+}
+
+/* 内容包装器，所有内容都在这个容器内 */
+.content-wrapper {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 欢迎屏幕 */
 .welcome-screen {
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 2rem;
   text-align: center;
+  height: 100%;
+  padding: 0 5%;
 }
 
 .main-title {
@@ -372,7 +484,7 @@ onUnmounted(() => {
 .instructions-text {
   font-size: 1.2rem;
   color: #666666;
-  max-width: 50ch;
+  max-width: 60ch;
   line-height: 1.7;
 }
 
@@ -410,14 +522,17 @@ onUnmounted(() => {
   color: #666666;
 }
 
+/* 游戏屏幕 */
 .game-screen {
   width: 100%;
-  height: 100vh;
+  height: 100%;
   display: flex;
   flex-direction: column;
   align-items: stretch;
+  overflow: hidden;
 }
 
+/* 顶部进度条 */
 .top-bar {
   width: 100%;
   height: 8px;
@@ -444,16 +559,19 @@ onUnmounted(() => {
   50% { opacity: 0.5; }
 }
 
+/* 主内容区域 */
 .main-content {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
   grid-template-rows: 1fr;
-  flex-grow: 1;
+  flex: 1;
   gap: 2rem;
   padding: 2rem 3rem;
   position: relative;
+  overflow: hidden;
 }
 
+/* 统计列 */
 .stats-column {
   display: flex;
   flex-direction: column;
@@ -478,6 +596,7 @@ onUnmounted(() => {
   display: block;
 }
 
+/* 文字显示区域 */
 .word-display-area {
   display: flex;
   justify-content: center;
@@ -499,6 +618,7 @@ onUnmounted(() => {
   text-align: center;
 }
 
+/* 反馈容器 */
 .feedback-container {
   position: absolute;
   top: 50%;
@@ -509,6 +629,10 @@ onUnmounted(() => {
   align-items: center;
   gap: 1rem;
   z-index: 10;
+  background: rgba(255, 255, 255, 0.95);
+  padding: 2rem;
+  border-radius: 20px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
 }
 
 .feedback-icon {
@@ -523,14 +647,18 @@ onUnmounted(() => {
   text-align: center;
 }
 
+/* 选项容器 */
 .options-container {
   display: flex;
   justify-content: center;
   gap: 1.5rem;
-  flex-wrap: wrap;
   padding: 1rem;
+  flex-wrap: wrap;
+  background: #f8f9fa;
+  border-top: 1px solid #e0e0e0;
 }
 
+/* 选项按钮 */
 .option-btn {
   width: 120px;
   height: 120px;
@@ -546,6 +674,7 @@ onUnmounted(() => {
   display: flex;
   justify-content: center;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .option-btn.active {
@@ -574,6 +703,7 @@ onUnmounted(() => {
   z-index: 1;
 }
 
+/* 选择指示器 */
 .selection-indicator {
   position: absolute;
   top: 50%;
@@ -598,6 +728,7 @@ onUnmounted(() => {
   color: #10b981;
 }
 
+/* 底部栏 */
 .bottom-bar {
   display: flex;
   justify-content: space-between;
@@ -627,5 +758,32 @@ onUnmounted(() => {
 
 .restart-button:hover {
   background-color: #e55a5a;
+}
+
+/* 选项按钮颜色配置 */
+.option-btn:nth-child(1) {
+  background-color: #ff0000;
+}
+
+.option-btn:nth-child(2) {
+  background-color: #ffff00;
+  color: #000000;
+}
+
+.option-btn:nth-child(3) {
+  background-color: #00ff00;
+  color: #000000;
+}
+
+.option-btn:nth-child(4) {
+  background-color: #0000ff;
+}
+
+.option-btn:nth-child(5) {
+  background-color: #800080;
+}
+
+.option-btn:nth-child(6) {
+  background-color: #ff8000;
 }
 </style>

@@ -1,34 +1,135 @@
 <template>
-  <!-- 整个页面固定16:10比例，不允许拉伸 -->
-  <div class="fixed-ratio-page">
-    <!-- 四个角的视觉定位点（用于摄像头定位） -->
-    <div class="visual-marker top-left">
-      <div class="marker-inner"></div>
-    </div>
-    <div class="visual-marker top-right">
-      <div class="marker-inner"></div>
-    </div>
-    <div class="visual-marker bottom-left">
-      <div class="marker-inner"></div>
-    </div>
-    <div class="visual-marker bottom-right">
-      <div class="marker-inner"></div>
-    </div>
-    
-    <!-- 页面内容容器 -->
-    <div class="page-content">
-      <!-- 顶部状态栏 -->
-      <div class="top-status">
-        <h1 class="page-title">基于视觉遮挡的无接触按钮选择交互</h1>
-        <div class="status-bar">
-          <div class="status-item">
-            <span class="status-label">当前指向:</span>
-            <span class="status-value">{{ currentPointing }}</span>
+  <!-- 页面容器，确保内容居中显示 -->
+  <div class="page-container">
+    <!-- 严格16:10比例的固定容器，所有内容都在这个容器内 -->
+    <div class="fixed-ratio-container">
+      <!-- 四个角的视觉定位点（用于摄像头定位） -->
+      <div class="visual-marker top-left">
+        <div class="marker-inner"></div>
+      </div>
+      <div class="visual-marker top-right">
+        <div class="marker-inner"></div>
+      </div>
+      <div class="visual-marker bottom-left">
+        <div class="marker-inner"></div>
+      </div>
+      <div class="visual-marker bottom-right">
+        <div class="marker-inner"></div>
+      </div>
+      
+      <!-- 页面内容容器，所有内容都使用百分比宽度 -->
+      <div class="content-wrapper">
+        <!-- 顶部状态栏 -->
+        <div class="top-status">
+          <h1 class="page-title">基于视觉遮挡的无接触按钮选择交互</h1>
+          <div class="status-bar">
+            <div class="status-item">
+              <span class="status-label">当前指向:</span>
+              <span class="status-value">{{ currentPointing }}</span>
+            </div>
+            <div class="status-item">
+              <span class="status-label">交互结果:</span>
+              <span class="status-value" :class="resultClass">{{ resultText }}</span>
+            </div>
+            <div class="status-item">
+              <span class="status-label">区域检测:</span>
+              <span class="status-value" :class="regionsDetected ? 'detected' : 'not-detected'">
+                {{ regionsDetected ? '✓ 已识别三个区域' : `✗ 已识别 ${detectedRegionsCount}/3 个区域` }}
+              </span>
+            </div>
+            <div class="status-item">
+              <span class="status-label">手检测:</span>
+              <span class="status-value" :class="detectedHand ? 'detected' : 'not-detected'">
+                {{ detectedHand ? '✓ 已检测' : '✗ 未检测' }}
+              </span>
+            </div>
+            <div class="status-item">
+              <span class="status-label">食指检测:</span>
+              <span class="status-value" :class="detectedIndexFinger ? 'detected' : 'not-detected'">
+                {{ detectedIndexFinger ? '✓ 已检测' : '✗ 未检测' }}
+              </span>
+            </div>
+            <div class="status-badge" :class="connectionStatus">
+              {{ connectionStatusText }}
+            </div>
           </div>
-          <div class="status-item">
-            <span class="status-label">交互结果:</span>
-            <span class="status-value" :class="resultClass">{{ resultText }}</span>
+          <!-- 调试信息 -->
+          <div class="debug-info">
+            {{ debugInfo }}
           </div>
+        </div>
+
+        <!-- 游戏区域 -->
+        <div class="game-container">
+          <h2 class="game-title">投影式认知训练交互</h2>
+          
+          <div class="game-area">
+            <div class="mole-holes">
+              <div 
+                v-for="hole in holes" 
+                :key="hole.id" 
+                class="mole-hole"
+                :class="{ 'active': hole.active }"
+                :style="{ left: `${hole.x * 100}%` }"
+              >
+                <!-- 地鼠 -->
+                <div class="mole" v-if="hole.active">
+                  <div class="mole-head"></div>
+                  <div class="mole-eyes"></div>
+                </div>
+                
+                <!-- 进度圆环（扇形增长效果） -->
+                <div class="progress-ring-wrapper" v-if="pointingHole === hole.id">
+                  <svg class="progress-ring" viewBox="0 0 200 200">
+                    <!-- 背景圆环 -->
+                    <circle
+                      class="progress-ring-bg"
+                      stroke="rgba(255, 255, 255, 0.3)"
+                      fill="transparent"
+                      r="85"
+                      cx="100"
+                      cy="100"
+                      stroke-width="15"
+                    />
+                    <!-- 进度圆环 -->
+                    <circle
+                      class="progress-ring-progress"
+                      :stroke="progressColor"
+                      fill="transparent"
+                      r="85"
+                      cx="100"
+                      cy="100"
+                      stroke-width="15"
+                      :stroke-dasharray="circumference"
+                      :stroke-dashoffset="progressOffset"
+                      stroke-linecap="round"
+                      transform="rotate(-90 100 100)"
+                    />
+                  </svg>
+                  <div class="progress-text">{{ Math.round(progress * 100) }}%</div>
+                </div>
+                
+                <!-- 命中/未命中指示器 -->
+                <div class="hit-indicator" :class="hitIndicatorClass" v-if="showHitIndicator && lastHitHole === hole.id">
+                  {{ hitIndicatorText }}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 控制按钮 -->
+        <div class="controls">
+          <button class="control-button" @click="startGame" v-if="!gameStarted">
+            开始测试
+          </button>
+          <button class="control-button" @click="restartGame" v-else>
+            重新测试
+          </button>
+        </div>
+
+        <!-- 手指检测状态 -->
+        <div class="finger-status" v-if="gameStarted">
           <div class="status-item">
             <span class="status-label">手检测:</span>
             <span class="status-value" :class="detectedHand ? 'detected' : 'not-detected'">
@@ -41,107 +142,6 @@
               {{ detectedIndexFinger ? '✓ 已检测' : '✗ 未检测' }}
             </span>
           </div>
-          <div class="status-badge" :class="connectionStatus">
-            {{ connectionStatusText }}
-          </div>
-        </div>
-      </div>
-
-      <!-- 游戏区域 -->
-      <div class="game-container">
-        <h2 class="game-title">投影式认知训练交互</h2>
-        
-        <div class="game-area">
-          <div class="mole-holes">
-            <div 
-              v-for="hole in holes" 
-              :key="hole.id" 
-              class="mole-hole"
-              :class="{ 'active': hole.active }"
-            >
-              <!-- 地鼠 -->
-              <div class="mole" v-if="hole.active">
-                <div class="mole-head"></div>
-                <div class="mole-eyes"></div>
-              </div>
-              
-              <!-- 进度圆环（扇形增长效果） -->
-              <div class="progress-ring-wrapper" v-if="pointingHole === hole.id">
-                <svg class="progress-ring" width="200" height="200" viewBox="0 0 200 200">
-                  <!-- 背景圆环 -->
-                  <circle
-                    class="progress-ring-bg"
-                    stroke="rgba(255, 255, 255, 0.3)"
-                    fill="transparent"
-                    r="85"
-                    cx="100"
-                    cy="100"
-                    stroke-width="15"
-                  />
-                  <!-- 进度圆环 -->
-                  <circle
-                    class="progress-ring-progress"
-                    :stroke="progressColor"
-                    fill="transparent"
-                    r="85"
-                    cx="100"
-                    cy="100"
-                    stroke-width="15"
-                    :stroke-dasharray="circumference"
-                    :stroke-dashoffset="progressOffset"
-                    stroke-linecap="round"
-                    transform="rotate(-90 100 100)"
-                  />
-                </svg>
-                <div class="progress-text">{{ Math.round(progress * 100) }}%</div>
-              </div>
-              
-              <!-- 命中/未命中指示器 -->
-              <div class="hit-indicator" :class="hitIndicatorClass" v-if="showHitIndicator && lastHitHole === hole.id">
-                {{ hitIndicatorText }}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 摄像头区域 -->
-      <div class="camera-section">
-        <h3 class="section-title">摄像头实时画面</h3>
-        <div class="camera-container">
-          <img v-if="host" :src="`http://${host}:8080/screen_video_feed`" alt="实时画面" class="camera-feed" />
-          <div v-else class="camera-placeholder">
-            <div class="placeholder-content">
-              <div class="placeholder-icon">📷</div>
-              <div class="placeholder-text">摄像头连接中...</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 控制按钮 -->
-      <div class="controls">
-        <button class="control-button" @click="startGame" v-if="!gameStarted">
-          开始测试
-        </button>
-        <button class="control-button" @click="restartGame" v-else>
-          重新测试
-        </button>
-      </div>
-
-      <!-- 手指检测状态 -->
-      <div class="finger-status" v-if="gameStarted">
-        <div class="status-item">
-          <span class="status-label">手检测:</span>
-          <span class="status-value" :class="detectedHand ? 'detected' : 'not-detected'">
-            {{ detectedHand ? '✓ 已检测' : '✗ 未检测' }}
-          </span>
-        </div>
-        <div class="status-item">
-          <span class="status-label">食指检测:</span>
-          <span class="status-value" :class="detectedIndexFinger ? 'detected' : 'not-detected'">
-            {{ detectedIndexFinger ? '✓ 已检测' : '✗ 未检测' }}
-          </span>
         </div>
       </div>
     </div>
@@ -180,13 +180,18 @@ const progressStartTime = ref(null)
 const progressInterval = ref(null)
 const progressColor = ref('#4CAF50') // 进度圆环颜色
 
+// 区域检测状态
+const regionsDetected = ref(false)
+const detectedRegionsCount = ref(0)
+const debugInfo = ref('初始化中...')
+
 // 交互状态
 const currentPointing = ref('无')
 const resultText = ref('等待开始')
 const resultClass = ref('')
 
 // 配置参数
-const CONFIRMATION_TIME = 3.0 // 确认选择所需的时间（秒）
+const CONFIRMATION_TIME = 1.5 // 确认选择所需的时间（秒），从3秒缩短到1.5秒
 const MOLE_STAY_TIME = 5000 // 地鼠停留时间（毫秒），固定5秒
 const MOLE_INTERVAL = 2000 // 地鼠出现间隔（毫秒），节奏较慢
 const SCREEN_STATE_INTERVAL = 200 // 屏幕状态轮询间隔（毫秒），降低频率减少卡顿
@@ -423,21 +428,21 @@ const completeSelection = (hole) => {
 
 // 手势检测处理
 const handleGestureDetection = (data) => {
+  // 更新区域检测状态
+  regionsDetected.value = data.regions_detected || false
+  detectedRegionsCount.value = data.detected_regions_count || 0
+  debugInfo.value = data.debug_info || '初始化中...'
+  
+  // 更新手检测状态
+  detectedHand.value = data.hand_detected || false
+  detectedIndexFinger.value = data.index_finger_detected || false
+  
   // 检查是否检测到区域（手/手指）
   if (!data.selected_region || data.selected_region === 'none') {
     // 未检测到手或手指，更新状态
-    detectedHand.value = false
-    detectedIndexFinger.value = false
     handleFingerLeave()
     return
   }
-  
-  // 检测到手
-  detectedHand.value = true
-  
-  // 简化的手势检测：基于区域判断是否为食指指向
-  // 实际项目中应使用MediaPipe Hands进行更精确的手指检测
-  detectedIndexFinger.value = true
   
   // 映射检测区域到地鼠洞
   const regionMap = {
@@ -522,13 +527,25 @@ html, body {
   font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
 }
 
-/* 整个页面固定16:10比例，不允许拉伸 */
-.fixed-ratio-page {
+/* 页面容器，确保内容居中显示 */
+.page-container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background-color: #1a1a2e;
+  padding: 20px;
+}
+
+/* 严格固定16:10比例的容器，不允许拉伸 */
+.fixed-ratio-container {
   position: relative;
-  width: 100vw;
-  height: 62.5vw; /* 16:10比例 */
-  max-width: 1920px;
-  max-height: 1200px;
+  width: 90vw;
+  max-width: 1600px;
+  /* 严格保持16:10比例：高度 = 宽度 * 10/16 */
+  height: calc(90vw * 10 / 16);
+  max-height: 1000px;
   min-width: 960px;
   min-height: 600px;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -538,21 +555,21 @@ html, body {
   flex-direction: column;
 }
 
-/* 页面内容容器 */
-.page-content {
+/* 内容包装器，所有内容都使用百分比宽高 */
+.content-wrapper {
   width: 100%;
   height: 100%;
   display: flex;
   flex-direction: column;
-  padding: 30px;
+  padding: 3%;
   overflow-y: auto;
 }
 
 /* 四个角的视觉定位点（用于摄像头视觉定位与透视校正） */
 .visual-marker {
   position: absolute;
-  width: 50px;
-  height: 50px;
+  width: 5%;
+  height: 5%;
   z-index: 100;
   display: flex;
   justify-content: center;
@@ -560,8 +577,8 @@ html, body {
 }
 
 .marker-inner {
-  width: 30px;
-  height: 30px;
+  width: 60%;
+  height: 60%;
   background-color: #000;
   border: 3px solid #fff;
   border-radius: 5px;
@@ -578,36 +595,36 @@ html, body {
 }
 
 .marker-inner::before {
-  width: 20px;
-  height: 4px;
+  width: 40%;
+  height: 8%;
 }
 
 .marker-inner::after {
-  width: 4px;
-  height: 20px;
+  width: 8%;
+  height: 40%;
 }
 
-/* 定位点位置 */
+/* 定位点位置 - 固定在四个角落 */
 .visual-marker.top-left {
-  top: 10px;
-  left: 10px;
+  top: 2%;
+  left: 2%;
 }
 
 .visual-marker.top-right {
-  top: 10px;
-  right: 10px;
+  top: 2%;
+  right: 2%;
   transform: rotate(90deg);
 }
 
 .visual-marker.bottom-left {
-  bottom: 10px;
-  left: 10px;
+  bottom: 2%;
+  left: 2%;
   transform: rotate(-90deg);
 }
 
 .visual-marker.bottom-right {
-  bottom: 10px;
-  right: 10px;
+  bottom: 2%;
+  right: 2%;
   transform: rotate(180deg);
 }
 
@@ -688,6 +705,21 @@ html, body {
   background: #ff9800;
 }
 
+/* 调试信息样式 */
+.debug-info {
+  margin-top: 15px;
+  padding: 10px 20px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 10px;
+  color: #ffffff;
+  font-size: 1rem;
+  text-align: center;
+  font-family: monospace;
+  white-space: pre-wrap;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
 /* 游戏容器 */
 .game-container {
   flex: 1;
@@ -709,11 +741,11 @@ html, body {
 /* 游戏区域 */
 .game-area {
   width: 100%;
-  height: 300px;
+  height: 40%;
   background: rgba(255, 255, 255, 0.1);
   backdrop-filter: blur(10px);
   border-radius: 20px;
-  padding: 40px;
+  padding: 5%;
   border: 1px solid rgba(255, 255, 255, 0.2);
   display: flex;
   align-items: center;
@@ -726,14 +758,15 @@ html, body {
   justify-content: space-around;
   align-items: center;
   width: 100%;
-  max-width: 800px;
+  height: 100%;
+  position: relative;
 }
 
 /* 地鼠洞样式 */
 .mole-hole {
-  position: relative;
-  width: 180px;
-  height: 180px;
+  position: absolute;
+  width: 20%;
+  height: 60%;
   background-color: #4a3728;
   border-radius: 50%;
   overflow: hidden;
@@ -742,6 +775,8 @@ html, body {
   justify-content: center;
   align-items: flex-end;
   transition: all 0.3s ease;
+  transform: translateX(-50%);
+  bottom: 0;
 }
 
 .mole-hole::before {
@@ -750,7 +785,7 @@ html, body {
   bottom: 0;
   left: 0;
   right: 0;
-  height: 50px;
+  height: 25%;
   background-color: #3a2a1e;
   border-top: 5px solid #2a1f16;
   z-index: 1;
@@ -764,11 +799,11 @@ html, body {
 /* 地鼠样式 */
 .mole {
   position: relative;
-  width: 120px;
-  height: 120px;
+  width: 80%;
+  height: 80%;
   background-color: #8b4513;
   border-radius: 50% 50% 0 0;
-  bottom: -20px;
+  bottom: -15%;
   transition: transform 0.6s ease-out;
   z-index: 2;
   animation: popUp 0.6s ease-out forwards;

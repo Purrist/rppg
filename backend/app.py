@@ -28,40 +28,141 @@ def get_ip():
         s.close()
     return ip
 
+# 创建全局占位帧，避免重复创建
+placeholder_tablet = np.ones((180, 320, 3), dtype=np.uint8) * 200
+cv2.putText(placeholder_tablet, 'Tablet Camera Disconnected', (10, 90), 
+           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+placeholder_screen = np.ones((180, 320, 3), dtype=np.uint8) * 200
+cv2.putText(placeholder_screen, 'Screen Camera Disconnected', (10, 90), 
+           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+
 @app.route('/tablet_video_feed')
 def tablet_video_feed():
     def generate():
-        while True:
-            frame = tablet_processor.get_frame() if tablet_processor else None
-            if frame is not None:
-                _, jpeg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
-                yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n\r\n')
-            else:
-                # 当摄像头未连接时，返回一个占位图像
-                placeholder = np.ones((480, 640, 3), dtype=np.uint8) * 200
-                cv2.putText(placeholder, 'Tablet Camera Disconnected', (50, 240), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-                _, jpeg = cv2.imencode('.jpg', placeholder)
-                yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n\r\n')
-            time.sleep(0.033)  # 30fps
+        last_frame = None
+        frame_count = 0
+        # 预编码占位帧，避免重复编码
+        _, placeholder_jpeg = cv2.imencode('.jpg', placeholder_tablet, [int(cv2.IMWRITE_JPEG_QUALITY), 15])
+        placeholder_data = placeholder_jpeg.tobytes()
+        placeholder_response = (b'--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ' + 
+                               str(len(placeholder_data)).encode() + 
+                               b'\r\n\r\n' + placeholder_data + b'\r\n\r\n')
+        
+        # 提高帧率到5fps，同时保持画质
+        frame_skip = 2
+        
+        try:
+            while True:
+                # 使用更精确的帧率控制，避免累积误差
+                start_time = time.time()
+                
+                # 从处理器获取帧，避免阻塞
+                frame = None
+                if tablet_processor:
+                    # 直接获取，不阻塞
+                    frame = tablet_processor.get_frame()
+                
+                if frame is not None:
+                    last_frame = frame.copy()
+                
+                if last_frame is not None:
+                    # 只在指定帧时更新，降低实际帧率
+                    if frame_count % frame_skip == 0:
+                        # 提高JPEG质量，减少压缩失真
+                        encode_param = [
+                            int(cv2.IMWRITE_JPEG_QUALITY), 60,
+                            int(cv2.IMWRITE_JPEG_PROGRESSIVE), 0,
+                            int(cv2.IMWRITE_JPEG_OPTIMIZE), 1
+                        ]
+                        _, jpeg = cv2.imencode('.jpg', last_frame, encode_param)
+                        frame_data = jpeg.tobytes()
+                        response = (b'--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ' + 
+                                  str(len(frame_data)).encode() + 
+                                  b'\r\n\r\n' + frame_data + b'\r\n\r\n')
+                        yield response
+                else:
+                    # 使用预编码的占位帧，只在必要时发送
+                    if frame_count % (frame_skip * 2) == 0:
+                        yield placeholder_response
+                
+                frame_count += 1
+                
+                # 精确控制帧率，考虑编码时间
+                elapsed = time.time() - start_time
+                sleep_time = max(0.1 - elapsed, 0.03)  # 确保至少有30ms的休息时间
+                time.sleep(sleep_time)
+        except GeneratorExit:
+            # 客户端断开连接，清理资源
+            print("[平板摄像头] 客户端断开连接，停止视频流")
+        except Exception as e:
+            # 其他异常，记录并停止
+            print(f"[平板摄像头] 视频流异常: {e}")
     return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 @app.route('/screen_video_feed')
 def screen_video_feed():
     def generate():
-        while True:
-            frame = screen_processor.get_frame() if screen_processor else None
-            if frame is not None:
-                _, jpeg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
-                yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n\r\n')
-            else:
-                # 当摄像头未连接时，返回一个占位图像
-                placeholder = np.ones((480, 640, 3), dtype=np.uint8) * 200
-                cv2.putText(placeholder, 'Screen Camera Disconnected', (50, 240), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-                _, jpeg = cv2.imencode('.jpg', placeholder)
-                yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n\r\n')
-            time.sleep(0.033)  # 30fps
+        last_frame = None
+        frame_count = 0
+        # 预编码占位帧，避免重复编码
+        _, placeholder_jpeg = cv2.imencode('.jpg', placeholder_screen, [int(cv2.IMWRITE_JPEG_QUALITY), 15])
+        placeholder_data = placeholder_jpeg.tobytes()
+        placeholder_response = (b'--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ' + 
+                               str(len(placeholder_data)).encode() + 
+                               b'\r\n\r\n' + placeholder_data + b'\r\n\r\n')
+        
+        # 减少帧率到2fps，进一步降低带宽
+        frame_skip = 5
+        
+        try:
+            while True:
+                # 使用更精确的帧率控制，避免累积误差
+                start_time = time.time()
+                
+                # 从处理器获取帧，避免阻塞
+                frame = None
+                if screen_processor:
+                    # 直接获取，不阻塞
+                    frame = screen_processor.get_frame()
+                
+                if frame is not None:
+                    last_frame = frame.copy()
+                
+                if last_frame is not None:
+                    # 只在指定帧时更新，降低实际帧率
+                    if frame_count % frame_skip == 0:
+                        # 使用更低的JPEG质量，进一步减少数据量
+                        # 添加快速编码参数
+                        encode_param = [
+                            int(cv2.IMWRITE_JPEG_QUALITY), 15,
+                            int(cv2.IMWRITE_JPEG_PROGRESSIVE), 0,
+                            int(cv2.IMWRITE_JPEG_OPTIMIZE), 1,
+                            int(cv2.IMWRITE_JPEG_LUMA_QUALITY), 15,
+                            int(cv2.IMWRITE_JPEG_CHROMA_QUALITY), 15
+                        ]
+                        _, jpeg = cv2.imencode('.jpg', last_frame, encode_param)
+                        frame_data = jpeg.tobytes()
+                        response = (b'--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ' + 
+                                  str(len(frame_data)).encode() + 
+                                  b'\r\n\r\n' + frame_data + b'\r\n\r\n')
+                        yield response
+                else:
+                    # 使用预编码的占位帧，只在必要时发送
+                    if frame_count % (frame_skip * 2) == 0:
+                        yield placeholder_response
+                
+                frame_count += 1
+                
+                # 精确控制帧率，考虑编码时间
+                elapsed = time.time() - start_time
+                sleep_time = max(0.1 - elapsed, 0.03)  # 确保至少有30ms的休息时间
+                time.sleep(sleep_time)
+        except GeneratorExit:
+            # 客户端断开连接，清理资源
+            print("[外接摄像头] 客户端断开连接，停止视频流")
+        except Exception as e:
+            # 其他异常，记录并停止
+            print(f"[外接摄像头] 视频流异常: {e}")
     return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 @app.route('/api/physiological_state')
@@ -152,6 +253,10 @@ def main():
     # 从命令行参数获取摄像头URL（如果提供），否则使用配置文件中的默认值
     tablet_camera_url = sys.argv[1] if len(sys.argv) > 1 else CAMERA_CONFIG["tablet"]["url"]
     external_camera_url = sys.argv[2] if len(sys.argv) > 2 else CAMERA_CONFIG["external"]["url"]
+    
+    # 清理URL，移除可能存在的反引号或其他特殊字符
+    tablet_camera_url = tablet_camera_url.strip('`').strip()
+    external_camera_url = external_camera_url.strip('`').strip()
     
     # 更新配置
     CAMERA_CONFIG["tablet"]["url"] = tablet_camera_url

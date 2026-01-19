@@ -38,6 +38,7 @@ class TabletProcessor:
         self.emotion_labels = ["angry", "disgust", "fear", "happy", "sad", "surprise", "neutral"]
     
     def connect_camera(self):
+        """连接摄像头，使用更稳定的连接参数"""
         if self.cap is not None:
             self.cap.release()
         
@@ -52,16 +53,48 @@ class TabletProcessor:
         def connect_task():
             nonlocal self, connect_error
             try:
-                # 直接使用摄像头URL，让OpenCV自动检测协议
-                self.cap = cv2.VideoCapture(self.camera_url)
+                # 对于网络摄像头，使用更稳定的连接参数
+                if isinstance(self.camera_url, str) and (self.camera_url.startswith('http://') or self.camera_url.startswith('https://')):
+                    # 尝试不同的连接参数
+                    self.cap = cv2.VideoCapture()
+                    
+                    # 设置连接超时
+                    self.cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 10000)  # 10秒超时
+                    
+                    # 设置读取超时
+                    self.cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 5000)  # 5秒超时
+                    
+                    # 设置缓存大小为1
+                    self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                    
+                    # 设置为低延迟模式
+                    self.cap.set(cv2.CAP_PROP_FPS, 10)
+                    
+                    # 打开连接
+                    success = self.cap.open(self.camera_url)
+                    
+                    if not success:
+                        connect_error = Exception(f"无法打开平板摄像头: {self.camera_url}")
+                        return
+                else:
+                    # 本地摄像头
+                    self.cap = cv2.VideoCapture(self.camera_url)
                 
                 if not self.cap.isOpened():
                     connect_error = Exception(f"无法打开平板摄像头: {self.camera_url}")
                     return
                 
-                self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-                self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-                self.cap.set(cv2.CAP_PROP_FPS, 30)
+                # 设置较低的分辨率和帧率，减少带宽占用
+                self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)  # 非常低的分辨率
+                self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)  # 非常低的分辨率
+                self.cap.set(cv2.CAP_PROP_FPS, 10)  # 非常低的帧率
+                self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # 减少缓冲区大小
+                
+                # 禁用自动调整
+                self.cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
+                self.cap.set(cv2.CAP_PROP_AUTO_WB, 0)
+                self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0)
+                
             except Exception as e:
                 connect_error = e
         
@@ -70,8 +103,8 @@ class TabletProcessor:
         thread.daemon = True
         thread.start()
         
-        # 等待最多3秒
-        thread.join(timeout=3)
+        # 等待最多15秒
+        thread.join(timeout=15)
         
         if thread.is_alive():
             # 线程超时，强制退出
@@ -304,22 +337,140 @@ class TabletProcessor:
         }
     
     def capture_loop(self):
+        """优化的视频捕获循环，减少断开连接问题"""
+        reconnect_attempts = 0
+        max_reconnect_attempts = 10  # 增加最大重连次数
+        consecutive_fails = 0
+        max_consecutive_fails = 5  # 减少连续失败次数阈值
+        last_valid_frame = None
+        reconnect_delay = 1.0  # 初始重连延迟
+        max_reconnect_delay = 30.0  # 最大重连延迟
+        frame_counter = 0
+        
+        # 创建一个占位帧，避免在相机断开时返回空帧
+        placeholder_frame = np.ones((240, 320, 3), dtype=np.uint8) * 200
+        cv2.putText(placeholder_frame, 'Camera Disconnected', (10, 120), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+        
         while self.running:
-            ret, frame = self.cap.read()
-            if not ret:
-                print(f"[平板摄像头] 读取失败，正在尝试重连...")
+            try:
+                # 检查摄像头是否打开
+                if not self.cap or not self.cap.isOpened():
+                    if reconnect_attempts < max_reconnect_attempts:
+                        print(f"[平板摄像头] 摄像头未打开，尝试重连 ({reconnect_attempts+1}/{max_reconnect_attempts})")
+                        try:
+                            self.connect_camera()
+                            print(f"[平板摄像头] 重连成功")
+                            reconnect_attempts = 0
+                            consecutive_fails = 0
+                            reconnect_delay = 1.0  # 重置重连延迟
+                            frame_counter = 0
+                        except Exception as e:
+                            print(f"[平板摄像头] 重连失败: {e}")
+                            reconnect_attempts += 1
+                            # 指数退避重连
+                            time.sleep(reconnect_delay)
+                            reconnect_delay = min(reconnect_delay * 1.5, max_reconnect_delay)
+                    else:
+                        # 达到最大重连次数，使用占位帧
+                        print(f"[平板摄像头] 达到最大重连次数，使用占位帧")
+                        if not self.frame_queue.full():
+                            try:
+                                self.frame_queue.put(placeholder_frame, timeout=0.1)
+                            except Exception as e:
+                                pass
+                        time.sleep(1.0)
+                        continue
+                
+                # 读取帧，增加超时处理
+                self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # 确保缓冲区大小为1
+                
+                # 使用非阻塞方式读取，避免长时间阻塞
+                self.cap.set(cv2.CAP_PROP_CONVERT_RGB, 1)
+                ret, frame = self.cap.read()
+                frame_counter += 1
+                
+                if ret and frame is not None:
+                    # 重置计数
+                    reconnect_attempts = 0
+                    consecutive_fails = 0
+                    last_valid_frame = frame.copy()  # 保存最新有效帧
+                    
+                    # 处理帧
+                    processed_frame = self.process_frame(frame)
+                    
+                    # 放入队列（非阻塞，避免队列满导致阻塞）
+                    if not self.frame_queue.full():
+                        try:
+                            self.frame_queue.put(processed_frame, timeout=0.05)  # 更短的超时时间
+                        except Exception as e:
+                            # 队列已满，跳过当前帧
+                            pass
+                    
+                else:
+                    # 读取失败
+                    consecutive_fails += 1
+                    print(f"[平板摄像头] 帧读取失败 {consecutive_fails}/{max_consecutive_fails}")
+                    
+                    # 如果有有效帧，继续使用它
+                    if last_valid_frame is not None:
+                        processed_frame = self.process_frame(last_valid_frame)
+                        if not self.frame_queue.full():
+                            try:
+                                self.frame_queue.put(processed_frame, timeout=0.05)
+                            except Exception as e:
+                                pass
+                    else:
+                        # 如果没有有效帧，使用占位帧
+                        if not self.frame_queue.full():
+                            try:
+                                self.frame_queue.put(placeholder_frame, timeout=0.05)
+                            except Exception as e:
+                                pass
+                    
+                    # 只有连续多次失败才尝试重连
+                    if consecutive_fails >= max_consecutive_fails:
+                        print(f"[平板摄像头] 连续 {consecutive_fails} 帧读取失败，尝试重连")
+                        # 释放当前连接
+                        if self.cap:
+                            self.cap.release()
+                            self.cap = None
+                        
+                        # 重置计数器
+                        consecutive_fails = 0
+                        reconnect_attempts += 1
+                        reconnect_delay = 1.0  # 重置重连延迟
+                
+                # 降低CPU使用率，但保持流畅性
+                time.sleep(0.02)  # 降低CPU占用，避免过度轮询
+            
+            except Exception as e:
+                # 捕获所有异常，避免崩溃
+                print(f"[平板摄像头] 捕获异常: {e}")
+                consecutive_fails += 1
+                
+                # 释放当前连接，准备重连
+                if self.cap:
+                    self.cap.release()
+                    self.cap = None
+                
+                # 使用有效帧或占位帧
+                if last_valid_frame is not None:
+                    processed_frame = self.process_frame(last_valid_frame)
+                    if not self.frame_queue.full():
+                        try:
+                            self.frame_queue.put(processed_frame, timeout=0.05)
+                        except Exception as e:
+                            pass
+                else:
+                    if not self.frame_queue.full():
+                        try:
+                            self.frame_queue.put(placeholder_frame, timeout=0.05)
+                        except Exception as e:
+                            pass
+                
+                # 延迟后重试
                 time.sleep(1.0)
-                try:
-                    self.connect_camera()
-                    print(f"[平板摄像头] 重连成功")
-                except Exception as e:
-                    print(f"[平板摄像头] 重连失败: {e}")
-                continue
-            
-            processed_frame = self.process_frame(frame)
-            
-            if not self.frame_queue.full():
-                self.frame_queue.put(processed_frame)
     
     def start(self):
         self.connect_camera()
