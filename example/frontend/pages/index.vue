@@ -1,179 +1,117 @@
 <template>
-  <div class="monitor-page">
-    <header class="top-bar">
-      <div class="brand">
-        <span class="dot"></span> 智慧情绪守护
-      </div>
-      <div class="status-badge" :style="{ backgroundColor: getEmotionColor(streamData.emotion) }">
-        {{ getEmotionText(streamData.emotion) }}
-      </div>
+  <div class="app-container">
+    <header class="header">
+      <div class="logo">守护助手 <span class="engine-tag">AI 视觉引擎</span></div>
+      <div class="timer">训练时长：12:45</div>
     </header>
 
-    <div class="main-stage">
-      <div class="video-container">
-        <img v-if="streamData.image" 
-             :src="'data:image/jpeg;base64,' + streamData.image" 
-             class="live-stream" />
-        <div v-else class="loading-state">
-          <div class="spinner"></div>
-          <p>正在连接视觉AI系统...</p>
+    <div class="main-layout">
+      <section class="video-section">
+        <div class="stream-wrapper">
+          <img :src="'data:image/jpeg;base64,' + stream.image" class="stream-img" v-if="stream.image"/>
+          <div class="overlay-info" :style="{ borderColor: statusColor }">
+            <span class="status-text">{{ currentEmotionName }}</span>
+          </div>
         </div>
-      </div>
-    </div>
+      </section>
 
-    <footer class="bottom-info">
-      <div class="info-card primary">
-        <span class="label">当前状态</span>
-        <span class="value">{{ getEmotionText(streamData.emotion) }}</span>
-      </div>
-      <div class="info-card">
-        <span class="label">置信度</span>
-        <span class="value">{{ streamData.confidence }}%</span>
-      </div>
-      <div class="info-card accent">
-        <span class="label">AI 引擎</span>
-        <span class="value">高精度模式</span>
-      </div>
-    </footer>
+      <section class="data-section">
+        <div class="difficulty-indicator">
+          <p class="label">当前训练状态</p>
+          <div class="level-box" :style="{ background: statusColor }">
+             {{ difficultyAdvice }}
+          </div>
+        </div>
+
+        <div class="chart-container">
+          <div class="chart-label">情绪波动追踪 (过去30秒)</div>
+          <div class="simple-trend">
+            <div v-for="(v, i) in historyStack" :key="i" 
+                 class="bar" 
+                 :style="{ height: (v.val * 30 + 20) + '%', background: v.color }">
+            </div>
+          </div>
+          <div class="chart-axis">
+            <span>难</span><span>准</span><span>易</span>
+          </div>
+        </div>
+      </section>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { io } from 'socket.io-client'
 
-const streamData = ref({
-  image: '',
-  emotion: 'detecting',
-  confidence: 0
+const stream = ref({ image: '', data: { emotion: 'neutral', status_level: 1 } })
+const historyStack = ref([])
+
+const difficultyAdvice = computed(() => {
+  const levels = ["难度偏高，建议降级", "状态极佳，保持训练", "难度较低，建议挑战"]
+  return levels[stream.value.data.status_level] || "正在分析..."
 })
 
-// 情绪翻译与配色映射
-const getEmotionText = (emo) => {
-  const dict = {
-    'happy': '开心', 'sad': '忧伤', 'angry': '愤怒', 
-    'neutral': '平静', 'fear': '恐惧', 'surprise': '惊讶', 'detecting': '识别中'
-  }
-  return dict[emo] || emo
-}
+const statusColor = computed(() => {
+  const colors = ["#FB4422", "#33B555", "#2AAADD"] // 你的提示色 & 辅助色
+  return colors[stream.value.data.status_level] || "#FF7222"
+})
 
-const getEmotionColor = (emo) => {
-  if (emo === 'happy') return '#33B555' // 提示色：绿
-  if (emo === 'sad' || emo === 'angry') return '#FB4422' // 提示色：红
-  return '#FF7222' // 主题色：橙
-}
+const currentEmotionName = computed(() => {
+  const dict = { 'happy': '愉悦', 'sad': '沮丧', 'angry': '愤怒', 'neutral': '平静', 'fear': '紧张', 'surprise': '惊讶' }
+  return dict[stream.value.data.emotion] || '识别中'
+})
 
 onMounted(() => {
-  // 关键修复：动态获取 IP 地址，确保平板能连上后端
-  const backendUrl = `http://${window.location.hostname}:8081`
-  const socket = io(backendUrl)
-
-  socket.on('video_frame', (data) => {
-    streamData.value = data
+  const socket = io(`http://${window.location.hostname}:8081`)
+  socket.on('video_frame', (res) => {
+    stream.value = res
+    // 更新可视化简图数据
+    if (historyStack.value.length > 20) historyStack.value.shift()
+    historyStack.value.push({
+      val: res.data.status_level,
+      color: statusColor.value
+    })
   })
 })
 </script>
 
 <style scoped>
-/* 全局样式：白底、温暖、灵动 */
-.monitor-page {
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
-  background-color: #FFFFFF;
-  color: #333;
-  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
-  overflow: hidden;
+.app-container {
+  height: 100vh; display: flex; flex-direction: column;
+  background: #FFFFFF; font-family: 'PingFang SC';
+}
+.header {
+  padding: 20px 40px; display: flex; justify-content: space-between; align-items: center;
+  border-bottom: 2px solid #f0f0f0;
+}
+.logo { font-size: 32px; font-weight: 800; color: #FF7222; } /* 主题色 */
+.main-layout { flex: 1; display: grid; grid-template-columns: 1.2fr 0.8fr; padding: 20px; gap: 20px; }
+
+.stream-wrapper {
+  width: 100%; height: 100%; position: relative;
+  border-radius: 40px; overflow: hidden; border: 12px solid #FFD111; /* 辅助色：黄 */
+}
+.stream-img { width: 100%; height: 100%; object-fit: cover; }
+
+.overlay-info {
+  position: absolute; top: 30px; left: 30px;
+  padding: 10px 30px; border-radius: 50px; background: rgba(255,255,255,0.9);
+  border-left: 10px solid #FF7222; font-size: 24px; font-weight: bold;
 }
 
-/* 顶部：灵动感 */
-.top-bar {
-  padding: 2vh 4vw;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+.data-section { display: flex; flex-direction: column; gap: 20px; }
+.difficulty-indicator {
+  padding: 30px; border-radius: 30px; background: #FFF9F5; text-align: center;
 }
-.brand {
-  font-size: 28px;
-  font-weight: 800;
-  color: #FF7222;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.dot {
-  width: 12px; height: 12px;
-  background: #1DD1BB; /* 点缀色 */
-  border-radius: 50%;
-}
-.status-badge {
-  padding: 8px 24px;
-  border-radius: 50px;
-  color: white;
-  font-weight: bold;
-  font-size: 20px;
-  transition: all 0.3s ease;
+.level-box {
+  margin-top: 15px; padding: 20px; border-radius: 20px; color: white; font-size: 28px; font-weight: 900;
 }
 
-/* 视频区域：解决溢出问题的核心 */
-.main-stage {
-  flex: 1;
-  min-height: 0; /* 关键：允许 flex 项目缩小 */
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  padding: 0 4vw;
+.simple-trend {
+  height: 150px; display: flex; align-items: flex-end; gap: 4px; padding: 10px;
+  background: #F8F8F8; border-radius: 15px;
 }
-.video-container {
-  width: 100%;
-  height: 100%;
-  max-width: 1200px;
-  background: #F5F5F7;
-  border-radius: 24px;
-  overflow: hidden;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  border: 4px solid #FFD111; /* 辅助色：黄 */
-}
-.live-stream {
-  width: 100%;
-  height: 100%;
-  object-fit: contain; /* 保证画面不被裁剪且完整显示 */
-}
-
-/* 底部：适老化、大色块、温暖 */
-.bottom-info {
-  height: 18vh;
-  display: flex;
-  gap: 20px;
-  padding: 2vh 4vw;
-  background: #FFF9F5; /* 淡淡的暖色底 */
-}
-.info-card {
-  flex: 1;
-  background: white;
-  border-radius: 16px;
-  padding: 15px 20px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  box-shadow: 0 4px 15px rgba(255, 114, 34, 0.1);
-  border-bottom: 5px solid #2AAADD; /* 辅助色：蓝 */
-}
-.info-card.primary { border-bottom-color: #FF7222; }
-.info-card.accent { border-bottom-color: #7555FF; }
-
-.label { font-size: 16px; color: #888; margin-bottom: 5px; }
-.value { font-size: 32px; font-weight: 900; color: #333; }
-
-/* 正在加载动画 */
-.spinner {
-  width: 50px; height: 50px;
-  border: 5px solid #f3f3f3;
-  border-top: 5px solid #FF7222;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
-@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+.bar { flex: 1; border-radius: 4px; transition: all 0.3s ease; }
+.chart-axis { display: flex; justify-content: space-between; padding: 5px 10px; color: #999; }
 </style>
