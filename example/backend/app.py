@@ -1,47 +1,31 @@
-from flask import Flask, jsonify, Response
+import sys
+from flask import Flask
+from flask_socketio import SocketIO
 from flask_cors import CORS
-import cv2
+from processor import EmotionProcessor
 
 app = Flask(__name__)
-CORS(app)  # 先用最宽松的
+CORS(app)
+# 设置 async_mode 为 eventlet 提升并发性能
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
-camera = cv2.VideoCapture(0)  # 或你的 IP Webcam URL
+# 获取命令行参数中的 IP Webcam 地址
+VIDEO_URL = sys.argv[1] if len(sys.argv) > 1 else "http://192.168.137.97:8080/video"
 
+processor = EmotionProcessor(VIDEO_URL)
 
-@app.route("/")
-def index():
-    return jsonify({"msg": "backend alive"})
-
-
-def gen_frames():
+def stream_worker():
+    """持续推送画面线程"""
     while True:
-        success, frame = camera.read()
-        if not success:
-            continue
-        _, buffer = cv2.imencode(".jpg", frame)
-        frame_bytes = buffer.tobytes()
-        yield (
-            b"--frame\r\n"
-            b"Content-Type: image/jpeg\r\n\r\n" + frame_bytes + b"\r\n"
-        )
+        data = processor.get_ui_frame()
+        if data:
+            socketio.emit('video_frame', data)
+        socketio.sleep(0.03) # 约 30fps 的推送速度
 
-
-@app.route("/video")
-def video():
-    return Response(
-        gen_frames(),
-        mimetype="multipart/x-mixed-replace; boundary=frame"
-    )
-
-
-@app.route("/status")
-def status():
-    return jsonify({
-        "emotion": "neutral",
-        "confidence": 0.5,
-        "fps": 25
-    })
-
+@socketio.on('connect')
+def handle_connect():
+    print("Client connected")
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080, threaded=True)
+    socketio.start_background_task(stream_worker)
+    socketio.run(app, host="0.0.0.0", port=8081)
