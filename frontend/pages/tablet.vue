@@ -29,19 +29,21 @@
           <div class="camera-panel">
             <h2>📷 平板摄像头（人脸追踪）</h2>
             <div class="camera-area">
-              <!-- 只在client mounted之后显示视频流，确保浏览器能正确处理MJPEG -->
-              <img 
-                v-if="host" 
-                :src="`http://${host}:8080/tablet_video_feed`" 
-                alt="平板摄像头" 
-                class="camera-img"
-              />
-              <div v-else class="camera-placeholder">
-                <div class="placeholder-content">
-                  <div class="placeholder-icon">📷</div>
-                  <div class="placeholder-text">摄像头连接中...</div>
-                </div>
+              <!-- 使用SocketIO接收视频流，提高流畅度 -->
+          <div class="camera-stream">
+            <img 
+              v-if="tabletStream.image" 
+              :src="`data:image/jpeg;base64,${tabletStream.image}`" 
+              alt="平板摄像头" 
+              class="camera-img"
+            />
+            <div v-else class="camera-placeholder">
+              <div class="placeholder-content">
+                <div class="placeholder-icon">📷</div>
+                <div class="placeholder-text">摄像头连接中...</div>
               </div>
+            </div>
+          </div>
             </div>
             <div class="chart-area">
               <canvas ref="chartRef" height="120"></canvas>
@@ -137,6 +139,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { io } from 'socket.io-client'
 
 // 基本状态
 const host = ref('')
@@ -148,6 +151,10 @@ const trainingHistory = ref([])
 // 摄像头 + 面部追踪 refs
 const overlayRef = ref(null)
 const chartRef = ref(null)
+
+// Socket.IO 相关状态
+const tabletStream = ref({ image: '', data: {} })
+const socket = ref(null)
 
 // rPPG 缓冲与绘图数据
 const bpmHistory = ref([])
@@ -164,7 +171,7 @@ const connectionStatusText = computed(() => {
 })
 
 const emotionText = computed(() => {
-  const emotion = physiologicalState.value.emotion
+  const emotion = tabletStream.value.data.emotion || physiologicalState.value.emotion
   const map = {
     'happy': '开心',
     'neutral': '中性',
@@ -177,7 +184,7 @@ const emotionText = computed(() => {
 })
 
 const fatigueText = computed(() => {
-  const fatigue = physiologicalState.value.fatigue_level
+  const fatigue = tabletStream.value.data.fatigue_level || physiologicalState.value.fatigue_level
   const map = {
     'low': '低',
     'medium': '中',
@@ -188,7 +195,7 @@ const fatigueText = computed(() => {
 })
 
 const postureText = computed(() => {
-  const posture = physiologicalState.value.posture_state
+  const posture = tabletStream.value.data.posture_state || physiologicalState.value.posture_state
   const map = {
     'focused': '专注',
     'relaxed': '放松',
@@ -201,9 +208,9 @@ const postureText = computed(() => {
 })
 
 const healthScore = computed(() => {
-  const bpm = physiologicalState.value.bpm || 0
-  const fatigue = physiologicalState.value.fatigue_level || 'medium'
-  const emotion = physiologicalState.value.emotion || 'neutral'
+  const bpm = tabletStream.value.data.bpm || physiologicalState.value.bpm || 0
+  const fatigue = tabletStream.value.data.fatigue_level || physiologicalState.value.fatigue_level || 'medium'
+  const emotion = tabletStream.value.data.emotion || physiologicalState.value.emotion || 'neutral'
   
   let score = 100
   
@@ -316,6 +323,44 @@ const updateRecommendations = (state) => {
 onMounted(() => {
   // 只在客户端mounted之后设置host，确保浏览器能正确处理MJPEG流
   host.value = window.location.hostname
+  
+  // 初始化Socket.IO连接
+  socket.value = io(`http://${host.value}:8080`)
+  
+  // 监听连接事件
+  socket.value.on('connect', () => {
+    console.log('Socket.IO 连接成功')
+    connectionStatus.value = 'connected'
+  })
+  
+  // 监听断开连接事件
+  socket.value.on('disconnect', () => {
+    console.log('Socket.IO 断开连接')
+    connectionStatus.value = 'disconnected'
+  })
+  
+  // 监听连接错误事件
+  socket.value.on('connect_error', (error) => {
+    console.error('Socket.IO 连接错误:', error)
+    connectionStatus.value = 'error'
+  })
+  
+  // 监听平板视频帧事件
+  socket.value.on('tablet_video_frame', (data) => {
+    tabletStream.value = data
+    
+    // 更新生理状态
+    physiologicalState.value = data.data || {}
+    
+    // 更新心率图表
+    if (data.data && data.data.bpm && typeof data.data.bpm === 'number') {
+      updateBpmHistory(data.data.bpm)
+    }
+    
+    // 更新推荐
+    updateRecommendations(data.data || {})
+  })
+  
   fetchPhysiologicalState()
   fetchTrainingHistory()
 
@@ -324,12 +369,17 @@ onMounted(() => {
     setupChart()
   }, 100)
 
-  setInterval(fetchPhysiologicalState, 1000)
+  // 定期获取历史数据，保持数据最新
   setInterval(fetchTrainingHistory, 5000)
 })
 
 onUnmounted(() => {
   running = false
+  
+  // 断开Socket.IO连接
+  if (socket.value) {
+    socket.value.disconnect()
+  }
   
   // 销毁图表实例
   if (chartInstance) {

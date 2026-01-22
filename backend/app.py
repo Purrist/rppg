@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 from flask import Flask, Response, jsonify, request
 from flask_cors import CORS
+from flask_socketio import SocketIO
 import sys
 import time
 
@@ -11,10 +12,57 @@ from state_manager import StateManager
 
 app = Flask(__name__)
 CORS(app)
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 tablet_processor = None
 screen_processor = None
 state_manager = None
+
+# SocketIO 视频流推送线程
+def tablet_stream_worker():
+    """持续推送平板摄像头画面"""
+    while True:
+        if tablet_processor:
+            frame = tablet_processor.get_frame()
+            if frame is not None:
+                # 提高JPEG质量，减少压缩失真
+                _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                # 转换为base64字符串
+                import base64
+                image_data = base64.b64encode(buffer).decode('utf-8')
+                # 发送视频帧
+                socketio.emit('tablet_video_frame', {
+                    'image': image_data,
+                    'data': tablet_processor.get_state()
+                })
+        socketio.sleep(0.033)  # 约30fps
+
+def screen_stream_worker():
+    """持续推送外接摄像头画面"""
+    while True:
+        if screen_processor:
+            frame = screen_processor.get_frame()
+            if frame is not None:
+                # 提高JPEG质量，减少压缩失真
+                _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                # 转换为base64字符串
+                import base64
+                image_data = base64.b64encode(buffer).decode('utf-8')
+                # 发送视频帧
+                socketio.emit('screen_video_frame', {
+                    'image': image_data,
+                    'data': screen_processor.get_state()
+                })
+        socketio.sleep(0.033)  # 约30fps
+
+# SocketIO 连接事件
+@socketio.on('connect')
+def handle_connect():
+    print("SocketIO client connected")
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    print("SocketIO client disconnected")
 
 def get_ip():
     import socket
@@ -311,7 +359,12 @@ def main():
         print(f"   融合状态: http://{local_ip}:8080/api/fused_state")
         print("="*60 + "\n")
         
-        app.run(host="0.0.0.0", port=8080, debug=False)
+        # 启动视频流推送线程
+        socketio.start_background_task(tablet_stream_worker)
+        socketio.start_background_task(screen_stream_worker)
+        
+        # 使用 SocketIO 运行应用
+        socketio.run(app, host="0.0.0.0", port=8080, debug=False)
         
     except KeyboardInterrupt:
         print("\n[系统] 正在关闭...")

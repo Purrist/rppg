@@ -25,7 +25,6 @@ class ScreenProcessor:
         self.camera_url = camera_url
         self.cap = None
         self.running = False
-        self.thread = None
         
         # MediaPipe Hands初始化，优化参数以提高半手掌检测准确性
         self.hands = mp_hands.Hands(
@@ -35,6 +34,10 @@ class ScreenProcessor:
             min_tracking_confidence=0.25,   # 进一步降低跟踪阈值，提高跟踪稳定性
             model_complexity=0            # 使用低复杂度模型，提高性能
         )
+        
+        # 核心：分离捕获和分析线程，提高性能
+        self.raw_frame = None
+        self.processed_frame = None
         
         # 区域识别状态
         self.regions_detected = False
@@ -51,7 +54,9 @@ class ScreenProcessor:
         self.selection_start_time = None
         self.MIN_SELECTION_TIME = 1.5  # 从3秒缩短到1.5秒
         
-        self.frame_queue = Queue(maxsize=1)
+        # 线程控制
+        self.capture_thread = None
+        self.analysis_thread = None
         
         # 调试信息
         self.debug_info = "初始化中..."
@@ -68,13 +73,21 @@ class ScreenProcessor:
             "lower": np.array([0, 20, 70]),
             "upper": np.array([20, 255, 255])
         }
+        
+        # 连接摄像头
+        self.connect_camera()
+        
+        # 启动线程
+        self.start()
     
     def connect_camera(self):
         """连接摄像头，使用更稳定的连接参数"""
         if self.cap is not None:
             self.cap.release()
         
-        print(f"[外接摄像头] 正在连接: {self.camera_url}")
+        # 清理URL，移除可能存在的反引号或其他特殊字符
+        camera_url = self.camera_url.strip('`').strip()
+        print(f"[外接摄像头] 正在连接: {camera_url}")
         
         # 使用多线程实现超时控制
         import threading
@@ -83,10 +96,10 @@ class ScreenProcessor:
         connect_error = None
         
         def connect_task():
-            nonlocal self, connect_error
+            nonlocal self, connect_error, camera_url
             try:
                 # 对于网络摄像头，使用更稳定的连接参数
-                if isinstance(self.camera_url, str) and (self.camera_url.startswith('http://') or self.camera_url.startswith('https://')):
+                if isinstance(camera_url, str) and (camera_url.startswith('http://') or camera_url.startswith('https://')):
                     # 尝试不同的连接参数
                     self.cap = cv2.VideoCapture()
                     
@@ -96,24 +109,24 @@ class ScreenProcessor:
                     # 设置读取超时
                     self.cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 3000)  # 3秒超时
                     
-                    # 设置缓存大小为1
+                    # 重置摄像头
+                    self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    
+                    # 关闭缓冲，减少延迟
                     self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                     
-                    # 设置为低延迟模式
-                    self.cap.set(cv2.CAP_PROP_FPS, 6)
-                    
                     # 打开连接
-                    success = self.cap.open(self.camera_url)
+                    success = self.cap.open(camera_url)
                     
                     if not success:
-                        connect_error = Exception(f"无法打开外接摄像头: {self.camera_url}")
+                        connect_error = Exception(f"无法打开外接摄像头: {camera_url}")
                         return
                 else:
                     # 本地摄像头
-                    self.cap = cv2.VideoCapture(self.camera_url)
+                    self.cap = cv2.VideoCapture(camera_url)
                 
                 if not self.cap.isOpened():
-                    connect_error = Exception(f"无法打开外接摄像头: {self.camera_url}")
+                    connect_error = Exception(f"无法打开外接摄像头: {camera_url}")
                     return
                 
                 # 设置更低的分辨率和帧率，减少带宽占用
@@ -595,23 +608,153 @@ class ScreenProcessor:
                 # 延迟后重试
                 time.sleep(1.0)
     
+    def _capture_loop(self):
+        """独立的视频捕获循环，专注于获取原始帧"""
+        reconnect_attempts = 0
+        max_reconnect_attempts = 10
+        consecutive_fails = 0
+        max_consecutive_fails = 5
+        last_valid_frame = None
+        reconnect_delay = 1.0
+        max_reconnect_delay = 30.0
+        mjpeg_error_count = 0
+        max_mjpeg_errors = 3
+        
+        # 创建占位帧
+        placeholder_frame = np.ones((240, 320, 3), dtype=np.uint8) * 200
+        cv2.putText(placeholder_frame, 'Camera Disconnected', (10, 120), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+        
+        while self.running:
+            try:
+                if not self.cap or not self.cap.isOpened():
+                    if reconnect_attempts < max_reconnect_attempts:
+                        print(f"[外接摄像头] 尝试重连 ({reconnect_attempts+1}/{max_reconnect_attempts})")
+                        try:
+                            self.connect_camera()
+                            reconnect_attempts = 0
+                            consecutive_fails = 0
+                            mjpeg_error_count = 0
+                            reconnect_delay = 1.0
+                        except Exception as e:
+                            print(f"[外接摄像头] 重连失败: {e}")
+                            reconnect_attempts += 1
+                            time.sleep(reconnect_delay)
+                            reconnect_delay = min(reconnect_delay * 1.5, max_reconnect_delay)
+                    else:
+                        # 使用占位帧
+                        self.raw_frame = placeholder_frame
+                        time.sleep(1.0)
+                        continue
+                
+                # 设置缓冲区大小为1，减少延迟
+                self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                
+                # 尝试读取帧
+                ret, frame = self.cap.read()
+                
+                # 检查是否读取成功
+                if ret and frame is not None:
+                    # 重置错误计数
+                    reconnect_attempts = 0
+                    consecutive_fails = 0
+                    mjpeg_error_count = 0
+                    
+                    # 保存有效帧
+                    last_valid_frame = frame.copy()
+                    self.raw_frame = frame
+                else:
+                    consecutive_fails += 1
+                    
+                    # 检查是否需要重连
+                    if consecutive_fails >= max_consecutive_fails:
+                        print(f"[外接摄像头] 连续 {consecutive_fails} 帧读取失败，尝试重连")
+                        if self.cap:
+                            self.cap.release()
+                            self.cap = None
+                        consecutive_fails = 0
+                        reconnect_attempts += 1
+                        mjpeg_error_count = 0
+                        reconnect_delay = 1.0
+                    elif last_valid_frame is not None:
+                        # 使用最后一个有效帧
+                        self.raw_frame = last_valid_frame
+                    else:
+                        # 使用占位帧
+                        self.raw_frame = placeholder_frame
+                
+                # 降低捕获频率，减少CPU占用
+                time.sleep(0.01)
+            except cv2.error as e:
+                # 处理MJPEG解码错误
+                mjpeg_error_count += 1
+                print(f"[外接摄像头] MJPEG解码错误 {mjpeg_error_count}/{max_mjpeg_errors}: {e}")
+                
+                # 如果连续发生MJPEG错误，重置摄像头
+                if mjpeg_error_count >= max_mjpeg_errors:
+                    print(f"[外接摄像头] 连续 {mjpeg_error_count} 次MJPEG解码错误，重置摄像头")
+                    if self.cap:
+                        self.cap.release()
+                        self.cap = None
+                    mjpeg_error_count = 0
+                    reconnect_attempts += 1
+                    consecutive_fails = 0
+                
+                time.sleep(0.5)
+            except Exception as e:
+                # 处理其他异常
+                print(f"[外接摄像头] 捕获异常: {e}")
+                
+                # 释放摄像头，触发重连
+                if self.cap:
+                    self.cap.release()
+                    self.cap = None
+                
+                reconnect_attempts += 1
+                consecutive_fails = 0
+                mjpeg_error_count = 0
+                time.sleep(1.0)
+    
+    def _analysis_loop(self):
+        """独立的视频分析循环，专注于处理原始帧"""
+        while self.running:
+            if self.raw_frame is not None:
+                try:
+                    # 处理帧
+                    frame = self.raw_frame.copy()
+                    processed_frame = self.process_frame(frame)
+                    self.processed_frame = processed_frame
+                except Exception as e:
+                    print(f"[外接摄像头] 分析异常: {e}")
+            
+            # 控制分析频率，平衡性能和实时性
+            time.sleep(0.02)
+    
     def start(self):
-        self.connect_camera()
+        """启动外接摄像头处理"""
         self.running = True
-        self.thread = threading.Thread(target=self.capture_loop)
-        self.thread.daemon = True
-        self.thread.start()
+        
+        # 启动捕获线程
+        self.capture_thread = threading.Thread(target=self._capture_loop, daemon=True)
+        self.capture_thread.start()
+        
+        # 启动分析线程
+        self.analysis_thread = threading.Thread(target=self._analysis_loop, daemon=True)
+        self.analysis_thread.start()
+        
         print("[外接摄像头] 处理线程已启动")
     
     def stop(self):
+        """停止外接摄像头处理"""
         self.running = False
-        if self.thread:
-            self.thread.join(timeout=2)
+        if self.capture_thread:
+            self.capture_thread.join(timeout=2)
+        if self.analysis_thread:
+            self.analysis_thread.join(timeout=2)
         if self.cap:
             self.cap.release()
         print("[外接摄像头] 已停止")
     
     def get_frame(self):
-        if not self.frame_queue.empty():
-            return self.frame_queue.get()
-        return None
+        """获取处理后的帧，立即返回，不阻塞"""
+        return self.processed_frame
