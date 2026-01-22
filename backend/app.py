@@ -1,386 +1,45 @@
-import cv2
-import numpy as np
-from flask import Flask, Response, jsonify, request
-from flask_cors import CORS
-from flask_socketio import SocketIO
+import os
 import sys
 import time
-
+import threading
+from flask import Flask
+from flask_socketio import SocketIO
+from flask_cors import CORS
 from tablet_processor import TabletProcessor
-from screen_processor import ScreenProcessor
-from state_manager import StateManager
 
 app = Flask(__name__)
 CORS(app)
-socketio = SocketIO(app, cors_allowed_origins="*")
+# Windows + VSCode 调试环境下，threading 模式是最稳定的
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
-tablet_processor = None
-screen_processor = None
-state_manager = None
+# 获取命令行地址
+VIDEO_URL = sys.argv[1] if len(sys.argv) > 1 else "http://192.168.137.97:8080/video"
+processor = TabletProcessor(VIDEO_URL)
 
-# SocketIO 视频流推送线程
-def tablet_stream_worker():
-    """持续推送平板摄像头画面"""
+def stream_worker():
+    """彻底对齐：调用你写的 get_ui_data 方法"""
+    print(f"🚀 推送线程已启动，目标源: {VIDEO_URL}")
     while True:
-        if tablet_processor:
-            frame = tablet_processor.get_frame()
-            if frame is not None:
-                # 提高JPEG质量，减少压缩失真
-                _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-                # 转换为base64字符串
-                import base64
-                image_data = base64.b64encode(buffer).decode('utf-8')
-                # 发送视频帧
+        try:
+            # 调用你 TabletProcessor 里的 get_ui_data
+            result = processor.get_ui_data()
+            if result:
+                # 这里的 result 包含你的 image (base64) 和 state (dict)
                 socketio.emit('tablet_video_frame', {
-                    'image': image_data,
-                    'data': tablet_processor.get_state()
+                    'image': result['image'],
+                    'data': result['state']
                 })
-        socketio.sleep(0.033)  # 约30fps
-
-def screen_stream_worker():
-    """持续推送外接摄像头画面"""
-    while True:
-        if screen_processor:
-            frame = screen_processor.get_frame()
-            if frame is not None:
-                # 提高JPEG质量，减少压缩失真
-                _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-                # 转换为base64字符串
-                import base64
-                image_data = base64.b64encode(buffer).decode('utf-8')
-                # 发送视频帧
-                socketio.emit('screen_video_frame', {
-                    'image': image_data,
-                    'data': screen_processor.get_state()
-                })
-        socketio.sleep(0.033)  # 约30fps
-
-# SocketIO 连接事件
-@socketio.on('connect')
-def handle_connect():
-    print("SocketIO client connected")
-
-@socketio.on('disconnect')
-def handle_disconnect():
-    print("SocketIO client disconnected")
-
-def get_ip():
-    import socket
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        s.connect(('8.8.8.8', 80))
-        ip = s.getsockname()[0]
-    except Exception:
-        ip = '127.0.0.1'
-    finally:
-        s.close()
-    return ip
-
-# 创建全局占位帧，避免重复创建
-placeholder_tablet = np.ones((180, 320, 3), dtype=np.uint8) * 200
-cv2.putText(placeholder_tablet, 'Tablet Camera Disconnected', (10, 90), 
-           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
-placeholder_screen = np.ones((180, 320, 3), dtype=np.uint8) * 200
-cv2.putText(placeholder_screen, 'Screen Camera Disconnected', (10, 90), 
-           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
-
-@app.route('/tablet_video_feed')
-def tablet_video_feed():
-    def generate():
-        last_frame = None
-        frame_count = 0
-        # 预编码占位帧，避免重复编码
-        _, placeholder_jpeg = cv2.imencode('.jpg', placeholder_tablet, [int(cv2.IMWRITE_JPEG_QUALITY), 15])
-        placeholder_data = placeholder_jpeg.tobytes()
-        placeholder_response = (b'--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ' + 
-                               str(len(placeholder_data)).encode() + 
-                               b'\r\n\r\n' + placeholder_data + b'\r\n\r\n')
-        
-        # 提高帧率到5fps，同时保持画质
-        frame_skip = 2
-        
-        try:
-            while True:
-                # 使用更精确的帧率控制，避免累积误差
-                start_time = time.time()
-                
-                # 从处理器获取帧，避免阻塞
-                frame = None
-                if tablet_processor:
-                    # 直接获取，不阻塞
-                    frame = tablet_processor.get_frame()
-                
-                if frame is not None:
-                    last_frame = frame.copy()
-                
-                if last_frame is not None:
-                    # 只在指定帧时更新，降低实际帧率
-                    if frame_count % frame_skip == 0:
-                        # 提高JPEG质量，减少压缩失真
-                        encode_param = [
-                            int(cv2.IMWRITE_JPEG_QUALITY), 60,
-                            int(cv2.IMWRITE_JPEG_PROGRESSIVE), 0,
-                            int(cv2.IMWRITE_JPEG_OPTIMIZE), 1
-                        ]
-                        _, jpeg = cv2.imencode('.jpg', last_frame, encode_param)
-                        frame_data = jpeg.tobytes()
-                        response = (b'--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ' + 
-                                  str(len(frame_data)).encode() + 
-                                  b'\r\n\r\n' + frame_data + b'\r\n\r\n')
-                        yield response
-                else:
-                    # 使用预编码的占位帧，只在必要时发送
-                    if frame_count % (frame_skip * 2) == 0:
-                        yield placeholder_response
-                
-                frame_count += 1
-                
-                # 精确控制帧率，考虑编码时间
-                elapsed = time.time() - start_time
-                sleep_time = max(0.1 - elapsed, 0.03)  # 确保至少有30ms的休息时间
-                time.sleep(sleep_time)
-        except GeneratorExit:
-            # 客户端断开连接，清理资源
-            print("[平板摄像头] 客户端断开连接，停止视频流")
         except Exception as e:
-            # 其他异常，记录并停止
-            print(f"[平板摄像头] 视频流异常: {e}")
-    return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
+            print(f"推送循环崩溃: {e}")
+        time.sleep(0.04) # 限制约 25FPS
 
-@app.route('/screen_video_feed')
-def screen_video_feed():
-    def generate():
-        last_frame = None
-        frame_count = 0
-        # 预编码占位帧，避免重复编码
-        _, placeholder_jpeg = cv2.imencode('.jpg', placeholder_screen, [int(cv2.IMWRITE_JPEG_QUALITY), 15])
-        placeholder_data = placeholder_jpeg.tobytes()
-        placeholder_response = (b'--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ' + 
-                               str(len(placeholder_data)).encode() + 
-                               b'\r\n\r\n' + placeholder_data + b'\r\n\r\n')
-        
-        # 减少帧率到2fps，进一步降低带宽
-        frame_skip = 5
-        
-        try:
-            while True:
-                # 使用更精确的帧率控制，避免累积误差
-                start_time = time.time()
-                
-                # 从处理器获取帧，避免阻塞
-                frame = None
-                if screen_processor:
-                    # 直接获取，不阻塞
-                    frame = screen_processor.get_frame()
-                
-                if frame is not None:
-                    last_frame = frame.copy()
-                
-                if last_frame is not None:
-                    # 只在指定帧时更新，降低实际帧率
-                    if frame_count % frame_skip == 0:
-                        # 使用更低的JPEG质量，进一步减少数据量
-                        # 添加快速编码参数
-                        encode_param = [
-                            int(cv2.IMWRITE_JPEG_QUALITY), 15,
-                            int(cv2.IMWRITE_JPEG_PROGRESSIVE), 0,
-                            int(cv2.IMWRITE_JPEG_OPTIMIZE), 1,
-                            int(cv2.IMWRITE_JPEG_LUMA_QUALITY), 15,
-                            int(cv2.IMWRITE_JPEG_CHROMA_QUALITY), 15
-                        ]
-                        _, jpeg = cv2.imencode('.jpg', last_frame, encode_param)
-                        frame_data = jpeg.tobytes()
-                        response = (b'--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ' + 
-                                  str(len(frame_data)).encode() + 
-                                  b'\r\n\r\n' + frame_data + b'\r\n\r\n')
-                        yield response
-                else:
-                    # 使用预编码的占位帧，只在必要时发送
-                    if frame_count % (frame_skip * 2) == 0:
-                        yield placeholder_response
-                
-                frame_count += 1
-                
-                # 精确控制帧率，考虑编码时间
-                elapsed = time.time() - start_time
-                sleep_time = max(0.1 - elapsed, 0.03)  # 确保至少有30ms的休息时间
-                time.sleep(sleep_time)
-        except GeneratorExit:
-            # 客户端断开连接，清理资源
-            print("[外接摄像头] 客户端断开连接，停止视频流")
-        except Exception as e:
-            # 其他异常，记录并停止
-            print(f"[外接摄像头] 视频流异常: {e}")
-    return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
-
-@app.route('/api/physiological_state')
-def get_physiological_state():
-    return jsonify(tablet_processor.get_state())
-
-@app.route('/api/screen_state')
-def get_screen_state():
-    return jsonify(screen_processor.get_state())
-
-@app.route('/api/interaction_state')
-def get_interaction_state():
-    # 返回脚踩踏状态数据
-    return jsonify({
-        "person_detected": screen_processor.hand_detected,
-        "body_position": {"x": 0.5, "y": 0.5},
-        "gesture": "none",
-        "gesture_confidence": 0.0,
-        "interaction_target": screen_processor.selected_region or "none",
-        "activity_level": "medium",
-        "foot_detected": screen_processor.hand_detected,
-        "foot_position": {"x": 0.5, "y": 0.8}
-    })
-
-@app.route('/api/fused_state')
-def get_fused_state():
-    return jsonify(state_manager.get_fused_state())
-
-@app.route('/api/start_training', methods=['POST'])
-def start_training():
-    data = request.get_json() or {}
-    mode = data.get('mode', 'memory_game')
-    difficulty = data.get('difficulty', 'medium')
+if __name__ == '__main__':
+    # 启动你写的 start() 以开启内部 _capture 和 _analyze 线程
+    processor.start()
     
-    result = state_manager.start_training(mode, difficulty)
-    return jsonify(result)
-
-@app.route('/api/stop_training', methods=['POST'])
-def stop_training():
-    result = state_manager.stop_training()
-    return jsonify(result)
-
-@app.route('/api/training_status')
-def get_training_status():
-    return jsonify(state_manager.get_training_status())
-
-@app.route('/api/update_score', methods=['POST'])
-def update_score():
-    data = request.get_json() or {}
-    correct = data.get('correct', True)
+    # 启动 SocketIO 推送线程
+    t = threading.Thread(target=stream_worker, daemon=True)
+    t.start()
     
-    state_manager.update_score(correct)
-    return jsonify({"status": "success"})
-
-@app.route('/api/training_history')
-def get_training_history():
-    limit = request.args.get('limit', 10, type=int)
-    history = state_manager.get_training_history(limit)
-    return jsonify({"sessions": history})
-
-@app.route('/api/health')
-def health_check():
-    return jsonify({
-        "status": "running",
-        "tablet_camera": tablet_processor is not None,
-        "screen_camera": screen_processor is not None,
-        "state_manager": state_manager is not None
-    })
-
-def main():
-    global tablet_processor, screen_processor, state_manager
-    
-    # 摄像头配置 - 可以在这里集中管理所有摄像头设置
-    # 用户可以直接修改下面的URL来更换摄像头
-    CAMERA_CONFIG = {
-        "tablet": {
-            "name": "平板摄像头",
-            "url": "http://10.117.42.45:8080/video",  # 平板摄像头URL
-            "type": "tablet"  # 摄像头类型
-        },
-        "external": {
-            "name": "外接摄像头",
-            "url": "http://10.117.42.174:8080/video",  # 外接摄像头URL
-            "type": "external"  # 摄像头类型
-        }
-    }
-    
-    # 从命令行参数获取摄像头URL（如果提供），否则使用配置文件中的默认值
-    tablet_camera_url = sys.argv[1] if len(sys.argv) > 1 else CAMERA_CONFIG["tablet"]["url"]
-    external_camera_url = sys.argv[2] if len(sys.argv) > 2 else CAMERA_CONFIG["external"]["url"]
-    
-    # 清理URL，移除可能存在的反引号或其他特殊字符
-    tablet_camera_url = tablet_camera_url.strip('`').strip()
-    external_camera_url = external_camera_url.strip('`').strip()
-    
-    # 更新配置
-    CAMERA_CONFIG["tablet"]["url"] = tablet_camera_url
-    CAMERA_CONFIG["external"]["url"] = external_camera_url
-    
-    print(f"使用{CAMERA_CONFIG['tablet']['name']}: {tablet_camera_url}")
-    print(f"使用{CAMERA_CONFIG['external']['name']}: {external_camera_url}")
-    
-    try:
-        state_manager = StateManager()
-        print("[系统] 状态管理器已初始化")
-        
-        # 尝试启动平板摄像头
-        tablet_processor = None
-        try:
-            # 使用简单的try-except，不使用线程
-            tablet_processor = TabletProcessor(tablet_camera_url)
-            tablet_processor.start()
-            print("[系统] 平板摄像头已启动")
-        except Exception as e:
-            print(f"[系统] 平板摄像头启动失败: {e}")
-        
-        # 尝试启动外接摄像头
-        screen_processor = None
-        try:
-            # 使用简单的try-except，不使用线程
-            screen_processor = ScreenProcessor(external_camera_url)
-            screen_processor.start()
-            print("[系统] 外接摄像头已启动")
-        except Exception as e:
-            print(f"[系统] 外接摄像头启动失败: {e}")
-        
-        # 即使没有摄像头，也要让系统运行，方便调试
-        print("\n" + "="*60)
-        print("双摄像头感知系统启动成功！")
-        print("="*60)
-        
-        local_ip = get_ip()
-        print(f"\n📡 局域网访问地址:")
-        print(f"   平板控制界面: http://{local_ip}:3000/tablet")
-        print(f"   投影训练界面: http://{local_ip}:3000/training")
-        print(f"\n⚙️  后端 API 地址:")
-        print(f"   http://{local_ip}:8080")
-        print(f"\n📹 视频流:")
-        if tablet_processor:
-            print(f"   平板摄像头: http://{local_ip}:8080/tablet_video_feed")
-        if screen_processor:
-            print(f"   外接摄像头: http://{local_ip}:8080/screen_video_feed")
-        print(f"\n📊 API 接口:")
-        print(f"   生理状态: http://{local_ip}:8080/api/physiological_state")
-        print(f"   屏幕状态: http://{local_ip}:8080/api/screen_state")
-        print(f"   融合状态: http://{local_ip}:8080/api/fused_state")
-        print("="*60 + "\n")
-        
-        # 启动视频流推送线程
-        socketio.start_background_task(tablet_stream_worker)
-        socketio.start_background_task(screen_stream_worker)
-        
-        # 使用 SocketIO 运行应用
-        socketio.run(app, host="0.0.0.0", port=8080, debug=False)
-        
-    except KeyboardInterrupt:
-        print("\n[系统] 正在关闭...")
-    except Exception as e:
-        print(f"\n[系统] 错误: {e}")
-        print("\n请检查:")
-        print("1. 平板摄像头 URL 是否正确")
-        print("2. 平板和电脑是否在同一 Wi-Fi 网络")
-        print("3. 平板上的摄像头应用是否已启动")
-        print("4. 外接摄像头 URL 是否正确")
-    finally:
-        if tablet_processor:
-            tablet_processor.stop()
-        if screen_processor:
-            screen_processor.stop()
-        print("[系统] 已关闭")
-
-if __name__ == "__main__":
-    main()
+    print(f"✅ 服务运行在: http://localhost:8080")
+    socketio.run(app, host='0.0.0.0', port=8080, debug=False)

@@ -1,30 +1,18 @@
 {
   "version": "0.2.0",
   "configurations": [
-
     {
-      "name": "Backend (Flask)",
+      "name": "🚀 启动后端 (Flask)",
       "type": "debugpy",
       "request": "launch",
       "program": "app.py",
       "cwd": "${workspaceFolder}/backend",
-      "python": "D:/anaconda/envs/rppg/python.exe",
-      "env": {
-          "PYTHONPATH": "${workspaceFolder}/backend"
-      },
-      "args": [
-        /*
-        "http://10.117.42.45:8080/video",
-        "http://10.117.42.174:8080/video"
-        */
-        "http://192.168.137.97:8080/video",
-        "http://192.168.137.113:8080/video"        
-
-      ],
+      "args": ["http://192.168.137.97:8080/video"],
+      "env": { "PYTHONPATH": "${workspaceFolder}/backend" },
       "console": "integratedTerminal"
     },
     {
-      "name": "Frontend (Nuxt)",
+      "name": "🚀 启动前端 (Nuxt)",
       "type": "node-terminal",
       "request": "launch",
       "command": "npm run dev",
@@ -34,9 +22,8 @@
   ],
   "compounds": [
     {
-      "name": "🚀 一键启动",
-      "configurations": ["Backend (Flask)", "Frontend (Nuxt)"],
-      "stopAll": true
+      "name": "一键启动全套系统",
+      "configurations": ["🚀 启动后端 (Flask)", "🚀 启动前端 (Nuxt)"]
     }
   ]
 }
