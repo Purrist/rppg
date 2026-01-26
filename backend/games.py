@@ -21,6 +21,10 @@ class BaseGame:
         self.playing = False
 
 class WhackAMole(BaseGame):
+    def start(self):
+        super().start()
+        self.timer = 60 # 设置为60秒
+        self.score = 0
     """打地鼠游戏逻辑类"""
     def __init__(self, socketio):
         super().__init__(socketio)

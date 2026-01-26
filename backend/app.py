@@ -1,83 +1,53 @@
-import os
-import sys
-import time
-import threading
+import sys, time, threading
 from flask import Flask
 from flask_socketio import SocketIO
 from flask_cors import CORS
 from tablet_processor import TabletProcessor
 from screen_processor import ScreenProcessor
+from games import WhackAMole # 导入游戏类
 
 app = Flask(__name__)
 CORS(app)
-# Windows + VSCode 调试环境下，threading 模式是最稳定的
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
-# 获取命令行地址
-VIDEO_URL = sys.argv[1] if len(sys.argv) > 1 else "http://192.168.137.97:8080/video"
-processor = TabletProcessor(VIDEO_URL)
+# 初始化处理器
+processor = TabletProcessor(sys.argv[1] if len(sys.argv) > 1 else "http://192.168.137.97:8080/video")
+screen_proc = ScreenProcessor(sys.argv[2] if len(sys.argv) > 2 else "http://192.168.137.113:8080/video")
 
-def stream_worker():
-    """彻底对齐：调用你写的 get_ui_data 方法"""
-    print(f"🚀 推送线程已启动，目标源: {VIDEO_URL}")
+# 实例化游戏（后续可以根据前端指令切换不同的游戏实例）
+current_game = WhackAMole(socketio)
+
+def main_worker():
+    """统一的后台处理线程"""
     while True:
-        try:
-            # 调用你 TabletProcessor 里的 get_ui_data
-            result = processor.get_ui_data()
-            if result:
-                # 这里的 result 包含你的 image (base64) 和 state (dict)
-                socketio.emit('tablet_video_frame', {
-                    'image': result['image'],
-                    'data': result['state']
-                })
-        except Exception as e:
-            print(f"推送循环崩溃: {e}")
-        time.sleep(0.04) # 限制约 25FPS
+        # 1. 处理平板数据推送
+        t_data = processor.get_ui_data()
+        if t_data:
+            socketio.emit('tablet_stream', {'image': t_data['image'], 'state': t_data['state']})
+
+        # 2. 处理投影识别与游戏逻辑
+        s_img, interact = screen_proc.get_debug_frame()
+        if s_img:
+            socketio.emit('screen_stream', {'image': s_img, 'interact': interact})
+            # 如果判定击中，交给游戏类处理
+            if interact["hit_index"] != -1:
+                current_game.handle_hit(interact["hit_index"])
+
+        # 3. 驱动游戏内部逻辑更新
+        current_game.update()
         
-SCREEN_URL = sys.argv[2] if len(sys.argv) > 2 else "http://192.168.137.113:8080/video"
-screen_proc = ScreenProcessor(SCREEN_URL)
+        time.sleep(0.04)
 
 @socketio.on('start_game')
-def on_start(data):
-    # 当平板点击开始，广播给投影端
-    socketio.emit('game_command', {'action': 'start'})
+def handle_start():
+    current_game.start()
 
 @socketio.on('game_event')
-def on_event(data):
-    # 处理暂停、重开逻辑
-    socketio.emit('game_command', data)
-
-def screen_worker():
-    print(f"🎮 投影识别线程启动: {SCREEN_URL}")
-    while True:
-        res = screen_proc.get_interaction()
-        if res:
-            # 发送给平板（显示进度）和投影端（显示动画）
-            socketio.emit('interaction_update', res)
-        time.sleep(0.05)
+def handle_event(data):
+    if data['action'] == 'pause':
+        current_game.playing = not current_game.playing
 
 if __name__ == '__main__':
-    # 1. 启动平板处理器（内部开启 _capture 和 _analyze 线程）
-    # 负责面部情绪、rPPG心率等监测
     processor.start()
-    
-    # 2. 启动平板视频流推送线程 (stream_worker)
-    # 将处理后的画面和生理数据发往前端
-    t_tablet = threading.Thread(target=stream_worker, daemon=True)
-    t_tablet.start()
-    
-    # 3. 启动投影识别线程 (screen_worker)
-    # 负责手机摄像头流的手势/进度判定
-    t_screen = threading.Thread(target=screen_worker, daemon=True)
-    t_screen.start()
-    
-    print("=" * 50)
-    print(f"✅ 系统核心已启动")
-    print(f"🔗 平板流源: {VIDEO_URL}")
-    print(f"🔗 投影流源: {SCREEN_URL}")
-    print(f"🌍 服务运行在: http://localhost:8080")
-    print("=" * 50)
-
-    # 4. 启动 SocketIO 主服务
-    # 注意：debug=False 是为了防止在 VSCode 中因热重载导致线程重复启动
+    threading.Thread(target=main_worker, daemon=True).start()
     socketio.run(app, host='0.0.0.0', port=8080, debug=False)

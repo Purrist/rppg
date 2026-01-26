@@ -1,129 +1,77 @@
 <template>
-  <div class="dev-container">
-    <div class="header">
-      <h1>🛠 开发者诊断后台</h1>
-      <button @click="$router.back()" class="back-btn">返回主页</button>
+  <div class="dev-page">
+    <div class="top-nav">
+      <h2>🛠 视觉引擎控制台</h2>
+      <button @click="$router.push('/')">退出后台</button>
     </div>
 
-    <div class="main-layout">
-      <div class="card video-card">
-        <h3>实时画面 (TabletProcessor)</h3>
-        <div class="monitor">
-          <img v-if="stream.image" :src="'data:image/jpeg;base64,' + stream.image" />
-          <div v-else class="loading-box">等待视频流接入...</div>
-        </div>
+    <div class="video-grid">
+      <div class="monitor-card">
+        <h3>平板端摄像头 (生理/情绪)</h3>
+        <img v-if="tabletImg" :src="'data:image/jpeg;base64,' + tabletImg" />
+        <div v-else class="placeholder">等待平板视频流...</div>
       </div>
 
-      <div class="card data-card">
-        <h3>引擎内部状态 (state)</h3>
-        <div class="state-item">
-          <span class="label">当前情绪:</span>
-          <span class="value">{{ stream.data.emotion || '--' }}</span>
-        </div>
-        <div class="state-item">
-          <span class="label">BPM/信号值:</span>
-          <span class="value">{{ stream.data.bpm || '--' }}</span>
-        </div>
-        <hr />
-        <pre class="raw-json">{{ stream.data }}</pre>
+      <div class="monitor-card">
+        <h3>外接摄像头 (投影区域识别)</h3>
+        <img v-if="screenImg" :src="'data:image/jpeg;base64,' + screenImg" />
+        <div v-else class="placeholder">等待投影视频流...</div>
       </div>
+    </div>
+    
+    <div class="debug-logs">
+      <h3>系统日志</h3>
+      <pre>{{ logs }}</pre>
     </div>
   </div>
 </template>
 
 <script setup>
+import { ref, onMounted, onUnmounted } from 'vue'
 import { io } from 'socket.io-client'
 
-const stream = ref({
-  image: '',
-  data: {}
-})
+// --- 核心修复：显式声明响应式变量 ---
+const tabletImg = ref('')
+const screenImg = ref('')
+const logs = ref('系统初始化...\n')
+
+let socket = null
 
 onMounted(() => {
-  const socket = io(`http://${window.location.hostname}:8080`)
-  
-  socket.on('tablet_video_frame', (res) => {
-    stream.value = res
+  socket = io(`http://${window.location.hostname}:8080`)
+
+  socket.on('connect', () => {
+    logs.value += '[Socket] 已连接到后端服务器\n'
   })
 
-  onUnmounted(() => {
-    socket.disconnect()
+  socket.on('tablet_stream', (data) => {
+    tabletImg.value = data.image
   })
+
+  socket.on('screen_stream', (data) => {
+    screenImg.value = data.image
+  })
+
+  socket.on('game_update', (data) => {
+    logs.value += `[Game] 状态更新: Score=${data.score}, Timer=${data.timer}\n`
+  })
+})
+
+onUnmounted(() => {
+  if (socket) socket.disconnect()
 })
 </script>
 
 <style scoped>
-/* 严格要求：白底主题 */
-.dev-container {
-  min-height: 100vh;
-  background: #FFFFFF;
-  padding: 40px;
-  color: #333;
-  font-family: 'PingFang SC', sans-serif;
+.dev-page { 
+  background: #fff; height: 100vh; width: 100vw; 
+  padding: 40px; color: #000; overflow-y: auto; 
 }
-
-.header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 30px;
-}
-
-.back-btn {
-  padding: 10px 25px;
-  border-radius: 12px;
-  border: 1px solid #ddd;
-  background: #fff;
-  cursor: pointer;
-  font-weight: bold;
-}
-
-.main-layout {
-  display: grid;
-  grid-template-columns: 1.2fr 0.8fr;
-  gap: 30px;
-}
-
-.card {
-  background: #F8F9FA;
-  border: 2px solid #F0F0F0;
-  border-radius: 25px;
-  padding: 25px;
-}
-
-.monitor {
-  width: 100%;
-  aspect-ratio: 16/10;
-  background: #000;
-  border-radius: 15px;
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.monitor img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-
-.loading-box { color: #666; }
-
-.state-item {
-  margin: 15px 0;
-  font-size: 20px;
-}
-
-.state-item .label { color: #888; margin-right: 10px; }
-.state-item .value { font-weight: bold; color: #FF7222; }
-
-.raw-json {
-  background: #eee;
-  padding: 15px;
-  border-radius: 10px;
-  font-size: 14px;
-  margin-top: 20px;
-  white-space: pre-wrap;
-}
+.top-nav { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+.video-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.monitor-card { background: #f4f4f4; padding: 15px; border-radius: 12px; }
+.monitor-card img { width: 100%; border-radius: 8px; background: #000; min-height: 300px; }
+.placeholder { height: 300px; display: flex; align-items: center; justify-content: center; color: #999; }
+.debug-logs { margin-top: 30px; background: #222; color: #0f0; padding: 20px; border-radius: 10px; }
+.debug-logs pre { white-space: pre-wrap; font-family: monospace; height: 200px; overflow-y: auto; }
 </style>
