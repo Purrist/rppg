@@ -4,50 +4,61 @@ from flask_socketio import SocketIO
 from flask_cors import CORS
 from tablet_processor import TabletProcessor
 from screen_processor import ScreenProcessor
-from games import WhackAMole # 导入游戏类
+from games import WhackAMole
 
 app = Flask(__name__)
 CORS(app)
+# 使用 threading 模式确保非阻塞通信
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
-# 初始化处理器
+# 初始化状态感知处理器
 processor = TabletProcessor(sys.argv[1] if len(sys.argv) > 1 else "http://192.168.137.97:8080/video")
 screen_proc = ScreenProcessor(sys.argv[2] if len(sys.argv) > 2 else "http://192.168.137.113:8080/video")
-
-# 实例化游戏（后续可以根据前端指令切换不同的游戏实例）
 current_game = WhackAMole(socketio)
 
-def main_worker():
-    """统一的后台处理线程：负责高效分发"""
-    while True:
-        # 1. 平板端数据 (生理信号/情绪)
-        # 获取最新的缓存数据，不阻塞主循环
-        t_data = processor.get_ui_data()
-        if t_data:
-            # 移除 buffer=False，直接发送
-            socketio.emit('tablet_stream', {
-                'image': t_data['image'], 
-                'state': t_data['state']
-            })
+@socketio.on('game_control')
+def handle_game_control(data):
+    """处理平板端发送的交互控制指令"""
+    action = data.get('action')
+    if action == 'ready':
+        current_game.set_ready()
+    elif action == 'stop':
+        current_game.stop()
+    elif action == 'pause':
+        # 扩展逻辑：暂停当前状态切换
+        pass
 
-        # 2. 投影交互数据 (交互识别)
+def main_worker():
+    """核心分发线程：实现无感状态监测与实时同步"""
+    while True:
+        t_data = processor.get_ui_data()
         s_data = screen_proc.get_latest()
-        if s_data:
-            # 移除 buffer=False，直接发送
-            socketio.emit('screen_stream', {
-                'image': s_data['image'], 
-                'interact': s_data['interact']
-            })
-            
-            # 游戏逻辑处理：如果击中，立即更新得分
-            if s_data['interact']["hit_index"] != -1:
-                current_game.handle_hit(s_data['interact']["hit_index"])
-            
-            # 驱动游戏逻辑（倒计时、地鼠位置刷新等）
-            current_game.update()
         
-        # 维持 100Hz 的检查频率，同时释放 CPU 给 eventlet 协程
-        socketio.sleep(0.01)
+        health_state = t_data['state'] if t_data else None
+
+        if s_data:
+            interact = s_data['interact']
+            # 逻辑判定：在 READY (白圈) 状态下，如果中间感应区进度满100，正式激活
+            if current_game.status == "READY":
+                if interact["progress"][1] >= 100:
+                    current_game.start_game()
+            
+            # 运行中判定：如果击中地鼠，触发逻辑更新
+            if current_game.status == "PLAYING":
+                if interact["hit_index"] != -1:
+                    current_game.handle_hit(interact["hit_index"])
+            
+            # 更新游戏逻辑（包含基于生理反馈的动态调节）
+            current_game.update(health_state)
+            
+            # 推送投影端所需数据
+            socketio.emit('screen_stream', {'image': s_data['image'], 'interact': interact})
+        
+        if t_data:
+            # 推送平板端状态感知数据
+            socketio.emit('tablet_stream', {'image': t_data['image'], 'state': t_data['state']})
+            
+        socketio.sleep(0.01) # 维持 100Hz 刷新，释放 CPU 资源
 
 if __name__ == '__main__':
     processor.start()

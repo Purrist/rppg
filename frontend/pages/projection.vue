@@ -1,115 +1,106 @@
 <template>
-  <div class="projection-canvas" :class="{ 'game-active': game.playing }">
-    <div v-if="!game.playing" class="standby-screen">
-      <div class="start-trigger">
-        <svg viewBox="0 0 100 100" class="trigger-svg">
-          <circle cx="50" cy="50" r="48" class="bg-ring" />
-          <circle cx="50" cy="50" r="48" class="progress-ring"
-            :style="{ strokeDashoffset: 301 - (301 * startProgress / 100) }" />
+  <div class="projection-canvas" :class="{ 'is-sleep': game.status === 'SLEEP' }">
+    
+    <div v-if="game.status === 'SLEEP'" class="sleep-mode"></div>
+
+    <div v-else-if="game.status === 'READY'" class="ready-mode">
+      <div class="trigger-circle">
+        <svg viewBox="0 0 100 100">
+          <circle cx="50" cy="50" r="48" class="track" />
+          <circle cx="50" cy="50" r="48" class="bar"
+            :style="{ strokeDashoffset: 301 - (301 * interactProgress[1] / 100) }" />
         </svg>
-        <div class="trigger-label">将手放于此处<br>1秒后开始</div>
-      </div>
-      
-      <div v-if="lastScore !== null" class="result-overlay">
-        <h2>太棒了！</h2>
-        <div class="final-score">最终得分：{{ lastScore }}</div>
+        <div class="center-text">请将手放入<br>目标区域</div>
       </div>
     </div>
 
-    <template v-else>
-      <div class="header">
-        <div class="stat-item">倒计时: {{ game.timer }}s</div>
-        <div class="stat-item score">得分: {{ game.score }}</div>
+    <div v-else-if="game.status === 'PLAYING'" class="playing-mode">
+      <div class="game-header">
+        <div class="score-display">得分：{{ game.score }}</div>
+        <div class="difficulty-tag">难度：{{ game.difficulty }}</div>
       </div>
-
-      <div class="game-area">
-        <div v-for="i in 3" :key="i" class="mole-hole">
-          <div class="ring-box">
-            <svg viewBox="0 0 100 100">
-              <circle cx="50" cy="50" r="45" class="game-bg-circle" />
-              <circle cx="50" cy="50" r="45" class="game-progress-bar"
-                :style="{ strokeDashoffset: 283 - (283 * holeProgress[i-1] / 100) }" />
-            </svg>
-          </div>
-          <transition name="mole-jump">
-            <div v-if="game.current_mole === i-1" class="mole-actor">🐹</div>
-          </transition>
-          <div class="hole-base"></div>
+      
+      <div class="holes-container">
+        <div v-for="(hole, i) in 3" :key="i" class="hole-item">
+          <div v-if="game.current_mole === i" class="mole-avatar">🐹</div>
+          <div class="hit-progress" :style="{ height: interactProgress[i] + '%' }"></div>
         </div>
       </div>
-    </template>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { io } from 'socket.io-client'
 
-const socket = io(`http://${window.location.hostname}:8080`)
-const game = ref({ score: 0, timer: 0, playing: false, current_mole: -1 })
-const holeProgress = ref([0, 0, 0])
-const startProgress = ref(0)
-const lastScore = ref(null)
+const game = ref({ status: 'SLEEP', score: 0, current_mole: -1, difficulty: '正常' })
+const interactProgress = ref([0, 0, 0])
+let socket = null
 
-socket.on('game_update', (data) => {
-  // 监测游戏从 运行 -> 停止 的瞬间，记录分数
-  if (game.value.playing && !data.playing) {
-    lastScore.value = game.value.score
-  }
-  game.value = data
+onMounted(() => {
+  socket = io(`http://${window.location.hostname}:8080`)
+  
+  socket.on('game_update', (data) => {
+    game.value = data
+  })
+
+  socket.on('screen_stream', (data) => {
+    if (data.interact) {
+      interactProgress.value = data.interact.progress
+    }
+  })
 })
 
-socket.on('screen_stream', (res) => {
-  holeProgress.value = res.interact.progress
-  // 使用中间那个“洞”（索引1）的进度作为开始触发器
-  if (!game.value.playing) {
-    startProgress.value = res.interact.progress[1] 
-    if (startProgress.value >= 100) {
-      socket.emit('start_game')
-      lastScore.value = null // 开始新游戏时清空旧分
-    }
-  }
+onUnmounted(() => {
+  if (socket) socket.disconnect()
 })
 </script>
 
 <style scoped>
+/* 投影端样式：严格 16:9 全屏，样式冻结 */
 .projection-canvas {
-  width: 1920px; height: 1080px; background: #000; color: #fff;
-  position: fixed; inset: 0; overflow: hidden;
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  transition: background 0.5s;
+  width: 100vw; height: 100vh; background: #000;
+  overflow: hidden; position: relative;
 }
-.projection-canvas.game-active { background: #FFFFFF; color: #333; }
+.is-sleep { background: #000 !important; }
 
-/* 待机界面样式 */
-.standby-screen { display: flex; flex-direction: column; align-items: center; gap: 50px; }
-.start-trigger { position: relative; width: 400px; height: 400px; }
-.trigger-svg { transform: rotate(-90deg); }
-.bg-ring { fill: none; stroke: rgba(255,255,255,0.1); stroke-width: 4; }
-.progress-ring { 
-  fill: none; stroke: #FFFFFF; stroke-width: 6; 
+/* 预备态样式 */
+.ready-mode {
+  height: 100%; display: flex; align-items: center; justify-content: center;
+}
+.trigger-circle { position: relative; width: 500px; height: 500px; }
+.trigger-circle svg { transform: rotate(-90deg); }
+.track { fill: none; stroke: rgba(255,255,255,0.1); stroke-width: 4; }
+.bar { 
+  fill: none; stroke: #FFF; stroke-width: 4; 
   stroke-dasharray: 301; transition: stroke-dashoffset 0.1s;
 }
-.trigger-label {
-  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-  text-align: center; font-size: 32px; color: #fff; line-height: 1.5;
+.center-text {
+  position: absolute; inset: 0; display: flex; align-items: center; 
+  justify-content: center; text-align: center; color: #FFF; font-size: 40px; font-weight: bold;
 }
 
-/* 结算显示 */
-.result-overlay { text-align: center; animation: fadeIn 0.5s; }
-.result-overlay h2 { font-size: 80px; color: #FFD111; margin-bottom: 20px; }
-.final-score { font-size: 50px; }
-
-/* 游戏过程样式 */
-.header { width: 100%; padding: 60px 100px; display: flex; justify-content: space-between; font-size: 70px; font-weight: 900; }
-.score { color: #FF7222; }
-.game-area { flex: 1; width: 100%; display: flex; justify-content: space-around; align-items: center; }
-.mole-hole { width: 400px; height: 500px; position: relative; }
-.ring-box { position: absolute; top: 0; left: 0; width: 400px; height: 400px; z-index: 10; }
-.game-bg-circle { fill: none; stroke: rgba(0,0,0,0.05); stroke-width: 8; }
-.game-progress-bar { fill: none; stroke: #FF7222; stroke-width: 10; stroke-dasharray: 283; transform: rotate(-90deg); transform-origin: 50% 50%; }
-.mole-actor { position: absolute; top: 50px; left: 50px; width: 300px; height: 300px; font-size: 200px; display: flex; align-items: center; justify-content: center; z-index: 5; }
-.hole-base { position: absolute; bottom: 50px; width: 400px; height: 100px; background: #EEE; border-radius: 50%; }
-
-@keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+/* 运行态样式 */
+.playing-mode {
+  height: 100%; display: flex; flex-direction: column;
+}
+.game-header {
+  padding: 60px 100px; display: flex; justify-content: space-between;
+  font-size: 60px; font-weight: 900; color: #FFF;
+}
+.holes-container {
+  flex: 1; display: flex; justify-content: space-around; align-items: center;
+}
+.hole-item {
+  width: 350px; height: 350px; border: 8px solid rgba(255,255,255,0.2);
+  border-radius: 50%; position: relative; overflow: hidden;
+}
+.mole-avatar {
+  font-size: 180px; text-align: center; line-height: 350px;
+}
+.hit-progress {
+  position: absolute; bottom: 0; left: 0; width: 100%;
+  background: rgba(255, 114, 34, 0.4); transition: height 0.1s;
+}
 </style>
