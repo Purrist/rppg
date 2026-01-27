@@ -8,57 +8,47 @@ from games import WhackAMole
 
 app = Flask(__name__)
 CORS(app)
-# 使用 threading 模式确保非阻塞通信
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+# 使用 threading 模式并限制发送队列大小
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading', max_http_buffer_size=10**6)
 
-# 初始化状态感知处理器
 processor = TabletProcessor(sys.argv[1] if len(sys.argv) > 1 else "http://192.168.137.97:8080/video")
 screen_proc = ScreenProcessor(sys.argv[2] if len(sys.argv) > 2 else "http://192.168.137.113:8080/video")
 current_game = WhackAMole(socketio)
 
 @socketio.on('game_control')
 def handle_game_control(data):
-    """处理平板端发送的交互控制指令"""
     action = data.get('action')
-    if action == 'ready':
-        current_game.set_ready()
-    elif action == 'stop':
-        current_game.stop()
-    elif action == 'pause':
-        # 扩展逻辑：暂停当前状态切换
-        pass
+    if action == 'ready': current_game.set_ready()
+    elif action == 'start': current_game.start_game()
+    elif action == 'pause': current_game.toggle_pause()
+    elif action == 'stop': current_game.stop()
 
 def main_worker():
-    """核心分发线程：实现无感状态监测与实时同步"""
+    last_emit_time = 0
     while True:
+        now = time.time()
         t_data = processor.get_ui_data()
-        s_data = screen_proc.get_latest()
+        s_data = screen_proc.get_latest() # 假设该方法获取最新帧并清空缓存
         
-        health_state = t_data['state'] if t_data else None
-
-        if s_data:
+        # 1. 处理游戏逻辑判定 (不受帧率限制)
+        if s_data and current_game.status != "PAUSED":
             interact = s_data['interact']
-            # 逻辑判定：在 READY (白圈) 状态下，如果中间感应区进度满100，正式激活
-            if current_game.status == "READY":
-                if interact["progress"][1] >= 100:
-                    current_game.start_game()
-            
-            # 运行中判定：如果击中地鼠，触发逻辑更新
-            if current_game.status == "PLAYING":
-                if interact["hit_index"] != -1:
-                    current_game.handle_hit(interact["hit_index"])
-            
-            # 更新游戏逻辑（包含基于生理反馈的动态调节）
-            current_game.update(health_state)
-            
-            # 推送投影端所需数据
-            socketio.emit('screen_stream', {'image': s_data['image'], 'interact': interact})
+            if current_game.status == "READY" and interact["progress"][1] >= 100:
+                current_game.start_game()
+            elif current_game.status == "PLAYING" and interact["hit_index"] != -1:
+                current_game.handle_hit(interact["hit_index"])
         
-        if t_data:
-            # 推送平板端状态感知数据
-            socketio.emit('tablet_stream', {'image': t_data['image'], 'state': t_data['state']})
-            
-        socketio.sleep(0.01) # 维持 100Hz 刷新，释放 CPU 资源
+        current_game.update(t_data['state'] if t_data else None)
+
+        # 2. 限制视频流推送频率 (Max 25fps) 解决堆积延迟
+        if now - last_emit_time > 0.04:
+            if s_data:
+                socketio.emit('screen_stream', {'image': s_data['image'], 'interact': s_data['interact']}, room=None)
+            if t_data:
+                socketio.emit('tablet_stream', {'image': t_data['image'], 'state': t_data['state']}, room=None)
+            last_emit_time = now
+        
+        socketio.sleep(0.01)
 
 if __name__ == '__main__':
     processor.start()

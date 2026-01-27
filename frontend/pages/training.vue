@@ -1,51 +1,35 @@
 <template>
-  <div class="training-page">
-    <div class="header-control-area">
-      <div class="status-info">
-        <h1>互动状态：{{ game.status === 'PLAYING' ? '运行中' : '待机中' }}</h1>
-        <p v-if="game.status === 'READY'" class="hint-text">请进入目标区域开始游戏</p>
+  <div class="training-container">
+    <div class="header-control">
+      <div class="info">
+        <h1>状态感知：{{ game.status === 'PAUSED' ? '已暂停' : (game.status === 'PLAYING' ? '运行中' : '待机') }}</h1>
+        <p v-if="game.status === 'READY'" class="hint">请进入投影区域激活启动</p>
       </div>
-      <div class="top-btns">
-        <button v-if="game.status === 'PLAYING'" @click="pauseGame" class="btn-large pause-btn">暂 停</button>
-        <button @click="exitGame" class="btn-large exit-btn">退 出</button>
-      </div>
-    </div>
-
-    <div class="metrics-grid">
-      <div class="metric-card">
-        <span class="label">当前难度</span>
-        <span class="value accent">{{ game.difficulty }}</span>
-      </div>
-      <div class="metric-card">
-        <span class="label">实时心率</span>
-        <span class="value">{{ health.bpm }} <small>BPM</small></span>
-      </div>
-      <div class="metric-card">
-        <span class="label">状态感知</span>
-        <span class="value">{{ health.emotionCn }}</span>
-      </div>
-      <div class="metric-card">
-        <span class="label">参与意愿</span>
-        <span class="value accent">{{ game.engagement }}</span>
-      </div>
-      <div class="metric-card">
-        <span class="label">活动负荷</span>
-        <span class="value">{{ game.load }}</span>
-      </div>
-      <div class="metric-card">
-        <span class="label">累计得分</span>
-        <span class="value accent">{{ game.score }}</span>
+      <div class="btns">
+        <button @click="togglePause" class="btn-huge pause">{{ game.status === 'PAUSED' ? '继 续' : '暂 停' }}</button>
+        <button @click="exit" class="btn-huge exit">退 出</button>
       </div>
     </div>
 
-    <div class="visual-charts">
-      <div class="chart-container">
-        <h3>生理状态变化图 (实时)</h3>
-        <div class="chart-mock">图表渲染中...</div>
+    <div class="metrics-row">
+      <div class="m-card"><span>当前难度</span><p>{{ game.difficulty }}</p></div>
+      <div class="m-card"><span>心率 (BPM)</span><p>{{ health.bpm }}</p></div>
+      <div class="m-card"><span>当前情绪</span><p>{{ health.emotionCn }}</p></div>
+      <div class="m-card"><span>参与意愿</span><p>{{ game.engagement }}</p></div>
+    </div>
+
+    <div class="charts-section">
+      <div class="chart-box">
+        <h3>实时心率图 (状态感知)</h3>
+        <svg viewBox="0 0 400 150" class="realtime-svg">
+          <path d="M0,75 L40,75 L50,30 L65,120 L75,75 L120,75" class="heart-line" />
+        </svg>
       </div>
-      <div class="chart-container">
-        <h3>动态负荷分布</h3>
-        <div class="chart-mock">数据分析中...</div>
+      <div class="chart-box">
+        <h3>情绪变化趋势</h3>
+        <div class="emotion-bar-container">
+          <div v-for="e in 5" :key="e" class="emo-bar" :style="{ height: (Math.random()*80+20)+'%' }"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -54,89 +38,48 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { io } from 'socket.io-client'
-import { useRouter } from 'vue-router'
 
-const router = useRouter()
-const game = ref({ status: 'SLEEP', score: 0, difficulty: '正常', engagement: '中', load: '正常' })
+const game = ref({ status: 'SLEEP', difficulty: '正常', engagement: '高' })
 const health = ref({ bpm: '--', emotionCn: '感知中' })
-
-const emotionMap = {
-  'angry': '焦虑', 'disgust': '不适', 'fear': '紧张',
-  'happy': '愉悦', 'sad': '低落', 'surprise': '惊讶', 'neutral': '平静'
-}
-
 let socket = null
+
+const emotionMap = { 'happy': '愉悦', 'neutral': '平静', 'sad': '低落', 'angry': '焦虑' }
 
 onMounted(() => {
   socket = io(`http://${window.location.hostname}:8080`)
-  
-  // 载入页面即通知后端进入预备状态（显示白圈）
   socket.emit('game_control', { action: 'ready' })
-
-  socket.on('game_update', (data) => {
-    game.value = data
-  })
-
-  socket.on('tablet_stream', (res) => {
+  socket.on('game_update', d => game.value = d)
+  socket.on('tablet_stream', res => {
     if (res.state) {
-      const cn = emotionMap[res.state.emotion] || '平静'
-      health.value = { ...res.state, emotionCn: cn }
+      health.value = { ...res.state, emotionCn: emotionMap[res.state.emotion] || '平静' }
     }
   })
 })
 
-onUnmounted(() => {
-  if (socket) {
-    socket.emit('game_control', { action: 'stop' })
-    socket.disconnect()
-  }
-})
-
-const pauseGame = () => {
-  socket.emit('game_control', { action: 'pause' })
-}
-
-const exitGame = () => {
-  socket.emit('game_control', { action: 'stop' })
-  router.back()
-}
+const togglePause = () => socket.emit('game_control', { action: 'pause' })
+const exit = () => { socket.emit('game_control', { action: 'stop' }); useRouter().back() }
 </script>
 
 <style scoped>
-/* 严格保持 16:10 布局，禁止滚动 */
-.training-page {
-  height: 100%; display: flex; flex-direction: column; gap: 30px;
-  padding: 40px; overflow: hidden; background: #FFF;
+.training-container {
+  height: 100%; overflow-y: auto; padding: 40px; display: flex; flex-direction: column; gap: 30px;
+  -ms-overflow-style: none; scrollbar-width: none; /* 隐藏滚动条 */
 }
-.header-control-area {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 30px; background: #F9F9F9; border-radius: 30px;
-}
-.status-info h1 { font-size: 36px; color: #333; }
-.hint-text { font-size: 24px; color: #FF7222; font-weight: bold; margin-top: 10px; }
-.top-btns { display: flex; gap: 20px; }
-.btn-large {
-  width: 220px; height: 90px; border-radius: 45px; font-size: 32px; 
-  font-weight: 900; border: none; cursor: pointer;
-}
-.pause-btn { background: #FFD111; color: #333; }
-.exit-btn { background: #333; color: #FFF; }
+.training-container::-webkit-scrollbar { display: none; }
 
-.metrics-grid {
-  display: grid; grid-template-columns: repeat(3, 1fr); gap: 25px;
-}
-.metric-card {
-  background: #FFF; border: 2px solid #F0F0F0; padding: 30px; 
-  border-radius: 25px; display: flex; flex-direction: column; gap: 10px;
-}
-.metric-card .label { font-size: 20px; color: #888; }
-.metric-card .value { font-size: 48px; font-weight: 900; color: #333; }
-.metric-card .value.accent { color: #FF7222; }
+.header-control { display: flex; justify-content: space-between; align-items: center; background: #F9F9F9; padding: 30px; border-radius: 30px; }
+.btn-huge { width: 220px; height: 100px; border-radius: 50px; font-size: 32px; font-weight: 900; border: none; }
+.pause { background: #FFD111; }
+.exit { background: #333; color: #FFF; }
 
-.visual-charts { display: grid; grid-template-columns: 1fr 1fr; gap: 25px; flex: 1; }
-.chart-container { 
-  background: #F9F9F9; border-radius: 30px; padding: 25px; 
-  display: flex; flex-direction: column; 
-}
-.chart-mock { flex: 1; display: flex; align-items: center; justify-content: center; color: #CCC; font-size: 20px; }
+.metrics-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
+.m-card { background: #FFF; border: 2px solid #F0F0F0; padding: 25px; border-radius: 25px; }
+.m-card span { color: #888; font-size: 18px; }
+.m-card p { font-size: 40px; font-weight: 900; color: #FF7222; margin-top: 10px; }
+
+.charts-section { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; flex: 1; min-height: 400px; }
+.chart-box { background: #F9F9F9; border-radius: 30px; padding: 25px; }
+.heart-line { fill: none; stroke: #FF3B30; stroke-width: 3; stroke-linecap: round; }
+.emotion-bar-container { height: 200px; display: flex; align-items: flex-end; gap: 15px; justify-content: center; }
+.emo-bar { width: 30px; background: #FF7222; border-radius: 15px 15px 0 0; }
 </style>

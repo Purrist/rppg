@@ -126,6 +126,10 @@ const closeAkon = () => {
 </script>
 
 <style>
+* {
+  -webkit-tap-highlight-color: transparent; 
+  touch-action: manipulation;
+}
 /* 基础全局重置 */
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body { 
@@ -180,10 +184,23 @@ html, body {
 
 /* 阿康球悬浮样式 */
 .akon-ball {
-  position: fixed; width: 90px; height: 90px; background: #FF7222;
-  border-radius: 50%; display: flex; align-items: center; justify-content: center;
-  z-index: 500; cursor: pointer; transition: left 0.3s cubic-bezier(0.18, 0.89, 0.32, 1.28), opacity 0.3s;
+  position: fixed; 
+  width: 90px; 
+  height: 90px; 
+  background: #FF7222;
+  border-radius: 50%; 
+  display: flex; 
+  align-items: center; 
+  justify-content: center;
+  z-index: 500; 
+  cursor: pointer; 
+  /* 开启 3D 加速解决平板卡顿 */
+  transform: translate3d(0, 0, 0);
+  transition: left 0.3s cubic-bezier(0.18, 0.89, 0.32, 1.28), opacity 0.3s;
   box-shadow: 0 8px 25px rgba(255,114,34,0.4);
+  /* 禁止平板系统默认长按菜单和手势 */
+  touch-action: none; 
+  user-select: none;
 }
 .akon-icon { font-size: 45px; }
 /* 吸附过渡动画.side-docked { transition: all 0.4s cubic-bezier(0.18, 0.89, 0.32, 1.28); } */
