@@ -18,34 +18,36 @@ screen_proc = ScreenProcessor(sys.argv[2] if len(sys.argv) > 2 else "http://192.
 current_game = WhackAMole(socketio)
 
 def main_worker():
-    """统一的后台处理线程"""
+    """统一的后台处理线程：负责高效分发"""
     while True:
-        # 1. 处理平板数据推送
+        # 1. 平板端数据 (生理信号/情绪)
+        # 获取最新的缓存数据，不阻塞主循环
         t_data = processor.get_ui_data()
         if t_data:
-            socketio.emit('tablet_stream', {'image': t_data['image'], 'state': t_data['state']})
+            # 移除 buffer=False，直接发送
+            socketio.emit('tablet_stream', {
+                'image': t_data['image'], 
+                'state': t_data['state']
+            })
 
-        # 2. 处理投影识别与游戏逻辑
-        s_img, interact = screen_proc.get_debug_frame()
-        if s_img:
-            socketio.emit('screen_stream', {'image': s_img, 'interact': interact})
-            # 如果判定击中，交给游戏类处理
-            if interact["hit_index"] != -1:
-                current_game.handle_hit(interact["hit_index"])
-
-        # 3. 驱动游戏内部逻辑更新
-        current_game.update()
+        # 2. 投影交互数据 (交互识别)
+        s_data = screen_proc.get_latest()
+        if s_data:
+            # 移除 buffer=False，直接发送
+            socketio.emit('screen_stream', {
+                'image': s_data['image'], 
+                'interact': s_data['interact']
+            })
+            
+            # 游戏逻辑处理：如果击中，立即更新得分
+            if s_data['interact']["hit_index"] != -1:
+                current_game.handle_hit(s_data['interact']["hit_index"])
+            
+            # 驱动游戏逻辑（倒计时、地鼠位置刷新等）
+            current_game.update()
         
-        time.sleep(0.04)
-
-@socketio.on('start_game')
-def handle_start():
-    current_game.start()
-
-@socketio.on('game_event')
-def handle_event(data):
-    if data['action'] == 'pause':
-        current_game.playing = not current_game.playing
+        # 维持 100Hz 的检查频率，同时释放 CPU 给 eventlet 协程
+        socketio.sleep(0.01)
 
 if __name__ == '__main__':
     processor.start()

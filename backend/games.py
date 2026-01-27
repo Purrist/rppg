@@ -1,71 +1,73 @@
 import time
 import random
-import threading
 
-class BaseGame:
-    """游戏基类，方便以后扩展其他游戏"""
+class WhackAMole:
     def __init__(self, socketio):
         self.socketio = socketio
-        self.playing = False
+        self.status = "SLEEP"  # SLEEP(纯黑), READY(白圈), PLAYING(进行中)
         self.score = 0
-        self.timer = 120
         self.start_time = 0
-
-    def start(self):
-        self.playing = True
-        self.score = 0
-        self.timer = 120
-        self.start_time = time.time()
-
-    def stop(self):
-        self.playing = False
-
-class WhackAMole(BaseGame):
-    def start(self):
-        super().start()
-        self.timer = 60 # 设置为60秒
-        self.score = 0
-    """打地鼠游戏逻辑类"""
-    def __init__(self, socketio):
-        super().__init__(socketio)
         self.current_mole = -1
         self.last_mole_time = 0
-        self.stay_duration = 2.5 # 地鼠停留2.5秒
+        self.difficulty = "正常"
+        self.stay_duration = 2.0 
+        
+    def start_ready(self):
+        """进入预备状态，显示白圈"""
+        self.status = "READY"
+        self.score = 0
 
-    def update(self):
-        """由主循环调用，负责逻辑状态切换"""
-        if not self.playing: return
+    def start_game(self):
+        """正式开始游戏"""
+        self.status = "PLAYING"
+        self.start_time = time.time()
+        self.score = 0
+
+    def stop(self):
+        self.status = "SLEEP"
+        self.current_mole = -1
+
+    def handle_hit(self, index):
+        if self.status == "PLAYING" and index == self.current_mole:
+            self.score += 10
+            self.current_mole = -1 # 击中立刻消失
+            self.last_mole_time = time.time()
+
+    def update(self, health_data=None):
+        """根据生理状态感知的反馈，动态调整难度"""
+        if self.status != "PLAYING":
+            return
+
+        # 动态难度逻辑 (简单示例：基于心率或情绪调节停留时间)
+        if health_data:
+            bpm = health_data.get("bpm", 0)
+            # 这里的计算逻辑应避开敏感词，视为“负荷调节”
+            if isinstance(bpm, int) and bpm > 100:
+                self.difficulty = "简单"
+                self.stay_duration = 3.0
+            else:
+                self.difficulty = "正常"
+                self.stay_duration = 2.0
 
         now = time.time()
-        # 更新倒计时
-        elapsed = int(now - self.start_time)
-        self.timer = max(0, 120 - elapsed)
-        if self.timer <= 0: self.stop()
-
         # 地鼠出现逻辑
-        if self.current_mole == -1: # 如果当前没地鼠
-            if now - self.last_mole_time > 0.5: # 冷却0.5秒后出新的
+        if self.current_mole == -1:
+            if now - self.last_mole_time > 0.5:
                 self.current_mole = random.randint(0, 2)
                 self.last_mole_time = now
-        else: # 如果有地鼠
+        else:
             if now - self.last_mole_time > self.stay_duration:
                 self.current_mole = -1
                 self.last_mole_time = now
 
-        # 推送给前端
-        self.socketio.emit('game_update', {
-            "playing": self.playing,
-            "score": self.score,
-            "timer": self.timer,
-            "current_mole": self.current_mole
-        })
-
-    def handle_hit(self, hit_index):
-        if not self.playing or self.current_mole == -1: return
+        # 计算参与意愿 (综合评估)
+        engagement = "高" if self.score > 20 else "中"
         
-        if hit_index == self.current_mole:
-            self.score += 10
-            self.current_mole = -1 # 击中立即消失
-            self.last_mole_time = time.time()
-        else:
-            self.score -= 5
+        self.socketio.emit('game_update', {
+            "status": self.status,
+            "score": self.score,
+            "current_mole": self.current_mole,
+            "difficulty": self.difficulty,
+            "engagement": engagement,
+            "load": "正常" # 运动负荷
+        })

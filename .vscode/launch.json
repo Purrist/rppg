@@ -2,7 +2,7 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "🚀 启动后端 (Flask)",
+      "name": "后端 (Flask)",
       "type": "debugpy",
       "request": "launch",
       "program": "app.py",
@@ -12,7 +12,7 @@
       "console": "integratedTerminal"
     },
     {
-      "name": "🚀 启动前端 (Nuxt)",
+      "name": "前端 (Nuxt)",
       "type": "node-terminal",
       "request": "launch",
       "command": "npm run dev",
@@ -22,8 +22,8 @@
   ],
   "compounds": [
     {
-      "name": "一键启动全套系统",
-      "configurations": ["🚀 启动后端 (Flask)", "🚀 启动前端 (Nuxt)"]
+      "name": "一键启动",
+      "configurations": ["后端 (Flask)", "前端 (Nuxt)"]
     }
   ]
 }

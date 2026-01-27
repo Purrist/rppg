@@ -182,46 +182,6 @@
 - 交互方式：
   - 通过脚踩或停留在对应投影区域完成选择
 
----
-
-## 六、当前阶段的硬件替代方案（关键说明）
-
-### 现实限制
-
-- 暂无投影仪
-- 暂无外接摄像头
-
----
-
-### 当前替代验证方案
-
-#### 1. 投影交互替代方式
-
-- 使用电脑屏幕模拟地面投影
-- 在屏幕上绘制与未来投影一致的交互区域
-- 用户用手遮挡某一区域 ≥ 2 秒
-  - 等价于“脚踩投影区域”
-
-对应关系：
-手部遮挡 ≈ 脚部踩踏
-电脑屏幕 ≈ 地面投影
-
-#### 2. 摄像头方案
-
-- 使用手机后置摄像头 IP Webcam
-- - 识别人与投影UI（暂用电脑屏幕模拟）的交互
-  - 暂时代替外接摄像头
-
----
-
-### 当前阶段验证重点
-
-- 是否能稳定、高效、准确获取各种数据
-- 是否利用数据，形成完整交互闭环
-- 是否支持未来硬件无缝迁移
-
----
-
 ## 七、最终预期产出
 
 ### 1. 调研报告（背书）
@@ -274,48 +234,25 @@
 ├── backend（系统后端）
 │   ├── app.py
 │   ├── screen_processor.py
-│   ├── state_manager.py
+│   ├── games.py
 │   ├── tablet_processor.py
 │   └── training_history.json
-├── example（一个暂时用来测试 流畅的情绪识别 的文件夹，已经可以流畅实现情绪识别和视频显示）
-│   ├── backend
-│   │   ├── app.py
-│   │   ├── processor.py
-│   │   └── requirements_all.txt
-│   ├── frontend
-│   │   ├── pages
-│   │   │   └── index.vue
-│   │   ├── public
-│   │   │   ├── js
-│   │   │   ├── favicon.ico
-│   │   │   └── robots.txt
-│   │   ├── .gitignore
-│   │   ├── README.md
-│   │   ├── app.vue
-│   │   ├── nuxt.config.ts
-│   │   ├── package-lock.json
-│   │   ├── package.json
-│   │   └── tsconfig.json
-│   └── index.html
 ├── frontend（系统前端）
 │   ├── pages
-│   │   ├── index.vue
-│   │   ├── judge.vue
-│   │   ├── occlusion.vue
-│   │   ├── tablet.vue
-│   │   └── training.vue
-│   ├── public
-│   │   ├── js
-│   │   ├── favicon.ico
-│   │   └── robots.txt
-│   ├── .gitignore
-│   ├── README.md
-│   ├── app.vue
-│   ├── nuxt.config.ts
-│   ├── package-lock.json
-│   ├── package.json
-│   └── tsconfig.json
-├── .gitignore
-├── .hintrc
+│   │   ├── index.vue（首页）
+│   │   ├── health.vue（健康页）
+│   │   ├── entertainment.vue（娱乐页）
+│   │   ├── learning.vue（益智页）
+│   │   ├── developer.vue（全屏16：9的电脑后台）
+│   │   ├── projection.vue（全屏16：9的电脑投影页面）
+│   │   └── training.vue（点认知游戏后平板上显示的信息）
+│   └──  app.vue（整体布局，侧边栏，）
 ├── README.md（本系统实现规划与当前进度）
 └── instruction.md（本说明文档所在地，不可更改此文档）
+
+开题报告需要具备：
+一、本课题研究（设计）的目的：
+二、研究（设计）现状和发展趋势：
+三、研究（设计）的重点与难点，拟采用的途径（研究手段）：
+四、研究（设计）进度计划：
+五、参考文献：
