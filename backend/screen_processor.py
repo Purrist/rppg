@@ -6,9 +6,14 @@ import threading
 
 class ScreenProcessor:
     def __init__(self, url):
-        self.url = url
-        self.cap = cv2.VideoCapture(url)
-        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1) # 最小化缓冲区
+        # 最小改动：确保如果是数字字符串 "1"，能转成 int 1 给 OpenCV 使用
+        try:
+            self.url = int(url) if str(url).isdigit() else url
+        except:
+            self.url = url
+            
+        self.cap = cv2.VideoCapture(self.url)
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         
         self.mp_hands = mp.solutions.hands.Hands(
             static_image_mode=False,
