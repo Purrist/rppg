@@ -53,7 +53,7 @@ onMounted(() => {
   })
 
   socket.on('game_update', (data) => {
-    logs.value += `[Game] 状态更新: Score=${data.score}, Timer=${data.timer}\n`
+    // 不再向 logs 字符串追加内容，防止内存溢出导致卡顿
   })
 })
 

@@ -1,8 +1,8 @@
 一、比例与布局“死命令”：
 
-1.平板端 UI（entertainment.vue、health.vue、index.vue、learning.vue、settings.vue、training.vue）：必须严格锁定 16:10 物理比例（2560*1600），承载于 .tablet-frame 容器中。
+1.平板端 UI（entertainment.vue、health.vue、index.vue、learning.vue、settings.vue、training.vue）：必须严格锁定 16:10 物理比例（2560*1600），承载于 .tablet-frame 容器中。这些页面允许滚动不允许有滚动条。
 
-2.绝对无滚动无缩放无边框无白边原则：页面严禁出现水平或垂直滚动条。所有容器必须设置 overflow: hidden，利用 Flex 布局和视口单位（vh/vw）自适应，确保底部信息在任何缩放级别下都不丢失。
+2.整体容器绝对无滚动无缩放无边框无白边原则：页面严禁出现水平或垂直滚动条。所有容器必须设置 overflow: hidden，利用 Flex 布局和视口单位（vh/vw）自适应，确保底部信息在任何缩放级别下都不丢失。
 
 3.投影与开发者页（developer.vue、projection.vue）：必须撑满整个电脑屏幕（1920*1080, 16:9），严禁侧边栏和阿康（Akon）悬浮球，实现纯净沉浸感。
 

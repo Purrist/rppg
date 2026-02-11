@@ -5,6 +5,7 @@ from flask_cors import CORS
 from tablet_processor import TabletProcessor
 from screen_processor import ScreenProcessor
 from games import WhackAMole
+from akon_agent import ask_akon
 
 app = Flask(__name__)
 CORS(app)
@@ -15,6 +16,21 @@ processor = TabletProcessor(sys.argv[1] if len(sys.argv) > 1 else "http://192.16
 screen_proc = ScreenProcessor(sys.argv[2] if len(sys.argv) > 2 else "http://192.168.137.113:8080/video")
 current_game = WhackAMole(socketio)
 
+@app.route('/api/chat', methods=['POST'])
+def chat():
+    data = request.json
+    user_input = data.get('message', '')
+    
+    response, action_name, action_params = ask_akon(user_input)
+    
+    return jsonify({
+        'response': response,
+        'action': {
+            'name': action_name,
+            'params': action_params
+        }
+    })
+    
 @socketio.on('game_control')
 def handle_game_control(data):
     action = data.get('action')
