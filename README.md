@@ -441,3 +441,13 @@ Akon 卡顿深度治理：
 校准说明：
 - 首次启动弹出 Calibration 窗口，按顺序点击：左上→右上→右下→左下
 - 必须检测到完整人体才会判定交互，扫把等物体不会被误判
+
+22
+开发者后台可视化校准系统上线：
+- 数组形状错误修复：添加边界检查，确保 warped 图像不会越界写入 final_display
+- 配置持久化：新增 calibration_config.json，自动保存/加载校准点和地鼠洞区域
+- 双模式切换：开发者后台支持"监控模式"和"校准模式"
+- 投影区域校准：在画布上点击或拖拽4个彩色顶点，实时预览透视效果
+- 地鼠洞自定义：3个地鼠洞区域支持输入归一化坐标(X1,X2,Y1,Y2)，实时在画布上显示
+- Socket.IO 事件：新增 update_calibration_point / update_hole / save_calibration / reset_calibration
+- 画布交互：支持拖拽已有的顶点，拖拽时实时更新并通过Socket同步到后端

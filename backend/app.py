@@ -27,7 +27,7 @@ try:
 except:
     screen_cam_source = 1
 
-screen_proc = ScreenProcessor(screen_cam_source)
+screen_proc = ScreenProcessor(screen_cam_source, socketio)
 current_game = WhackAMole(socketio)
 
 # --- Socket 交互逻辑 ---
@@ -49,6 +49,34 @@ def handle_game_control(data):
     elif action == 'start': current_game.start_game()
     elif action == 'pause': current_game.toggle_pause()
     elif action == 'stop': current_game.stop()
+
+@socketio.on('update_calibration_point')
+def handle_update_point(data):
+    """更新校准点"""
+    index = data.get('index')
+    x = data.get('x')
+    y = data.get('y')
+    screen_proc.update_calibration_point(index, x, y)
+
+@socketio.on('update_hole')
+def handle_update_hole(data):
+    """更新地鼠洞区域"""
+    index = data.get('index')
+    x1 = data.get('x1')
+    x2 = data.get('x2')
+    y1 = data.get('y1')
+    y2 = data.get('y2')
+    screen_proc.update_hole(index, x1, x2, y1, y2)
+
+@socketio.on('save_calibration')
+def handle_save_calibration():
+    """保存校准配置"""
+    screen_proc.save_config()
+
+@socketio.on('reset_calibration')
+def handle_reset_calibration():
+    """重置校准"""
+    screen_proc.reset_calibration()
 
 def main_worker():
     """中心化逻辑处理与状态广播线程"""
@@ -84,7 +112,7 @@ def main_worker():
             
             # 推送视频流与感知结果
             if s_data:
-                socketio.emit('screen_stream', {'image': s_data['image'], 'interact': s_data['interact']})
+                socketio.emit('screen_stream', {'image': s_data['image'], 'interact': s_data['interact'], 'calibration': s_data.get('calibration')})
             if t_data:
                 socketio.emit('tablet_stream', {'image': t_data['image'], 'state': t_data['state']})
             
