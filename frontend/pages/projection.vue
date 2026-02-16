@@ -42,7 +42,7 @@ let socket = null
 
 const getRingColor = (idx) => {
   if (progress.value[idx] <= 0) return 'off'
-  if (progress.value[idx] < 100) return 'loading' // 加载中：白色
+  if (progress.value[idx] < 100) return 'loading' // 加载中：灰蓝色
   return game.value.current_mole === idx ? 'hit' : 'miss' // 100%判定
 }
 
@@ -71,9 +71,9 @@ onMounted(() => {
 .mini-progress { position: absolute; top: -50px; width: 350px; height: 350px; transform: rotate(-90deg); }
 .ring { fill: none; stroke-width: 8; stroke-dasharray: 301; transition: stroke-dashoffset 0.05s linear; }
 .off { opacity: 0; }
-.loading { stroke: #FFF; opacity: 1; }
-.hit { stroke: #00FF00; opacity: 1; stroke-width: 12; }
-.miss { stroke: #FF0000; opacity: 1; stroke-width: 12; }
+.loading { stroke: #6496C8; opacity: 1; }
+.hit { stroke: #33B555; opacity: 1; stroke-width: 12; }
+.miss { stroke: #FB4422; opacity: 1; stroke-width: 12; }
 
 .mole-space { height: 200px; }
 .mole { font-size: 150px; }

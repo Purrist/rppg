@@ -1,4 +1,5 @@
 import cv2
+import mediapipe as mp
 import time
 import base64
 import threading
@@ -16,17 +17,11 @@ class ScreenProcessor:
         self.progress = [0, 0, 0]
         
         # --- 校准变量 ---
-        self.calibration_mode = False
         self.calibration_points = []  # 四个角点 [左上, 右上, 右下, 左下]
         self.calibrated = False
         self.perspective_matrix = None
         self.warped_width = 800
         self.warped_height = 500
-        
-        # --- 背景减法 ---
-        self.bg_subtractor = cv2.createBackgroundSubtractorMOG2(history=500, varThreshold=40, detectShadows=False)
-        self.background_ready = False
-        self.bg_frame_count = 0
         
         # --- 地鼠洞区域（归一化坐标，在 warp 后的空间中）---
         self.holes = [
@@ -35,14 +30,27 @@ class ScreenProcessor:
             {"id": 2, "norm_rect": (0.72, 0.92, 0.45, 0.85)}
         ]
         
+        # --- 媒体管道 ---
+        self.mp_pose = mp.solutions.pose.Pose(
+            static_image_mode=False,
+            model_complexity=1,
+            smooth_landmarks=True,
+            min_detection_confidence=0.6,
+            min_tracking_confidence=0.6
+        )
+        
         threading.Thread(target=self._run, daemon=True).start()
     
-    def flip_frame(self, frame):
-        """水平翻转帧，解决左右镜像问题"""
-        return cv2.flip(frame, 1)
+    def rotate_frame(self, frame):
+        """处理摄像头90度旋转，水平翻转"""
+        # 旋转90度
+        rotated = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+        # 水平翻转
+        flipped = cv2.flip(rotated, 1)
+        return flipped
     
     def manual_calibration_click(self, event, x, y, flags, param):
-        """用于手动校准的鼠标回调（如果自动检测失败）"""
+        """用于手动校准的鼠标回调"""
         if event == cv2.EVENT_LBUTTONDOWN:
             if len(self.calibration_points) < 4:
                 self.calibration_points.append([x, y])
@@ -80,37 +88,42 @@ class ScreenProcessor:
         )
         return warped
     
-    def detect_foot_by_motion(self, warped_frame):
-        """使用背景减法检测脚部位置"""
-        if not self.background_ready:
-            return None
-        
-        # 应用背景减法
-        fg_mask = self.bg_subtractor.apply(warped_frame)
-        
-        # 形态学操作，去除噪点
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
-        fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, kernel)
-        fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_CLOSE, kernel)
-        
-        # 找轮廓
-        contours, _ = cv2.findContours(fg_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    def detect_foot_from_pose(self, warped_frame):
+        """使用MediaPipe Pose检测人体，然后找到脚部位置"""
+        rgb = cv2.cvtColor(warped_frame, cv2.COLOR_BGR2RGB)
+        results = self.mp_pose.process(rgb)
         
         foot_pos = None
-        max_area = 0
+        h, w, _ = warped_frame.shape
         
-        for cnt in contours:
-            area = cv2.contourArea(cnt)
-            if area > 500 and area > max_area:  # 面积阈值
-                max_area = area
-                # 计算质心
-                M = cv2.moments(cnt)
-                if M["m00"] != 0:
-                    cx = int(M["m10"] / M["m00"])
-                    cy = int(M["m01"] / M["m00"])
-                    foot_pos = (cx, cy)
+        if results.pose_landmarks:
+            landmarks = results.pose_landmarks.landmark
+            
+            # 检测关键点可见性
+            left_ankle = landmarks[27]    # 左踝
+            left_foot_idx = landmarks[31] # 左脚尖
+            right_ankle = landmarks[28]   # 右踝
+            right_foot_idx = landmarks[32]# 右脚尖
+            
+            candidates = []
+            
+            # 收集可见的脚部关键点
+            if left_ankle.visibility > 0.6:
+                candidates.append( (left_ankle.x, left_ankle.y) )
+            if left_foot_idx.visibility > 0.6:
+                candidates.append( (left_foot_idx.x, left_foot_idx.y) )
+            if right_ankle.visibility > 0.6:
+                candidates.append( (right_ankle.x, right_ankle.y) )
+            if right_foot_idx.visibility > 0.6:
+                candidates.append( (right_foot_idx.x, right_foot_idx.y) )
+            
+            if candidates:
+                # 选择y坐标最大的点（最下方的脚）
+                candidates.sort(key=lambda p: p[1], reverse=True)
+                fx, fy = candidates[0]
+                foot_pos = (int(fx * w), int(fy * h))
         
-        return foot_pos, fg_mask
+        return foot_pos, results
     
     def check_hole_interaction(self, foot_pos):
         """检查脚是否在某个地鼠洞内"""
@@ -140,57 +153,53 @@ class ScreenProcessor:
                 time.sleep(0.01)
                 continue
             
-            # 1. 水平翻转
-            frame = self.flip_frame(frame)
+            # 1. 旋转 + 翻转
+            frame = self.rotate_frame(frame)
             display_frame = frame.copy()
             
             # 2. 如果未校准，提示用户点击四个角
             if not self.calibrated:
                 cv2.putText(display_frame, "请点击投影的四个角（左上 -> 右上 -> 右下 -> 左下）", 
-                            (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+                            (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
                 
-                # 显示已选点
                 for i, pt in enumerate(self.calibration_points):
-                    cv2.circle(display_frame, tuple(pt), 8, (0, 255, 0), -1)
-                    cv2.putText(display_frame, str(i+1), (pt[0]+10, pt[1]), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                    cv2.circle(display_frame, tuple(pt), 10, (0, 255, 0), -1)
+                    cv2.putText(display_frame, str(i+1), (pt[0]+15, pt[1]), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
                 
-                # 窗口用于校准（暂时启用窗口）
                 cv2.namedWindow("Calibration", cv2.WINDOW_NORMAL)
                 cv2.setMouseCallback("Calibration", self.manual_calibration_click)
                 cv2.imshow("Calibration", display_frame)
-                if cv2.waitKey(1) & 0xFF == 27:  # ESC 退出
-                    cv2.destroyWindow("Calibration")
+                cv2.waitKey(1)
                 
             # 3. 透视变换
             warped = None
             if self.calibrated:
                 warped = self.warp_perspective(frame)
-                
-                # 4. 学习背景
-                if not self.background_ready:
-                    self.bg_frame_count += 1
-                    self.bg_subtractor.apply(warped)
-                    if self.bg_frame_count > 30:
-                        self.background_ready = True
-                        print("背景学习完成！")
             
-            # 5. 检测脚部并计算进度
+            # 4. 检测脚部并计算进度
             active_index = -1
             foot_pos = None
-            fg_mask = None
+            pose_results = None
             
-            if warped is not None and self.background_ready:
-                foot_pos, fg_mask = self.detect_foot_by_motion(warped)
+            if warped is not None:
+                foot_pos, pose_results = self.detect_foot_from_pose(warped)
                 active_index = self.check_hole_interaction(foot_pos)
                 
-                # 在 warp 图上绘制检测结果
-                if foot_pos:
-                    cv2.circle(warped, foot_pos, 25, (0, 255, 0), -1)
-                    cv2.putText(warped, "FOOT", (foot_pos[0]-30, foot_pos[1]-30),
-                                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                # 绘制骨架
+                if pose_results and pose_results.pose_landmarks:
+                    mp.solutions.drawing_utils.draw_landmarks(
+                        warped, 
+                        pose_results.pose_landmarks, 
+                        mp.solutions.pose.POSE_CONNECTIONS
+                    )
                 
-                # 绘制地鼠洞区域
+                # 绘制脚部和区域
+                if foot_pos:
+                    cv2.circle(warped, foot_pos, 30, (0, 255, 0), -1)
+                    cv2.putText(warped, "FOOT DETECTED", (foot_pos[0]-80, foot_pos[1]-40),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+                
                 for i, hole in enumerate(self.holes):
                     r = hole["norm_rect"]
                     x1 = int(r[0] * self.warped_width)
@@ -198,17 +207,17 @@ class ScreenProcessor:
                     y1 = int(r[2] * self.warped_height)
                     y2 = int(r[3] * self.warped_height)
                     
-                    # 根据进度改变颜色
+                    color = (200, 200, 200)
                     if self.progress[i] > 0:
-                        color = (0, 255, 0) if self.progress[i] < 100 else (0, 255, 255)
-                    else:
-                        color = (0, 165, 255)
+                        color = (100, 150, 200)  # 灰蓝色加载
+                    if self.progress[i] >= 100:
+                        color = (0, 255, 0)
                     
-                    cv2.rectangle(warped, (x1, y1), (x2, y2), color, 4)
-                    cv2.putText(warped, f"Hole {i+1}", (x1+10, y1+30),
-                                cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
+                    cv2.rectangle(warped, (x1, y1), (x2, y2), color, 5)
+                    cv2.putText(warped, f"Hole {i+1}", (x1+15, y1+40),
+                                cv2.FONT_HERSHEY_SIMPLEX, 1.2, color, 3)
             
-            # 6. 进度计算
+            # 5. 进度计算：2秒
             now = time.time()
             hit_index = -1
             
@@ -216,26 +225,20 @@ class ScreenProcessor:
                 if i == active_index:
                     if self.hover_start[i] == 0:
                         self.hover_start[i] = now
-                    # 1.5秒进度（稍微快一点）
-                    self.progress[i] = min(100, int((now - self.hover_start[i]) / 1.5 * 100))
+                    self.progress[i] = min(100, int((now - self.hover_start[i]) / 2.0 * 100))
                     if self.progress[i] >= 100:
                         hit_index = i
-                        self.hover_start[i] = 0  # 触发后重置
+                        self.hover_start[i] = now + 0.5  # 冷却0.5秒
                 else:
-                    self.hover_start[i] = 0
-                    self.progress[i] = 0
+                    if self.hover_start[i] != 0 and now - self.hover_start[i] > 0.5:
+                        self.hover_start[i] = 0
+                        self.progress[i] = 0
             
-            # 7. 编码图像
+            # 6. 编码图像
             final_display = display_frame
             if warped is not None:
-                # 将 warp 图画在角落
-                warped_small = cv2.resize(warped, (400, 250))
-                final_display[10:260, 10:410] = warped_small
-                
-                if fg_mask is not None:
-                    fg_mask_small = cv2.resize(fg_mask, (200, 125))
-                    fg_mask_color = cv2.cvtColor(fg_mask_small, cv2.COLOR_GRAY2BGR)
-                    final_display[270:395, 10:210] = fg_mask_color
+                warped_small = cv2.resize(warped, (480, 300))
+                final_display[20:320, 20:500] = warped_small
             
             _, buffer = cv2.imencode('.jpg', final_display)
             self.processed_data = {
