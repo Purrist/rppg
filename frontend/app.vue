@@ -7,10 +7,10 @@
     <div v-else class="tablet-frame">
       <aside class="side-nav">
         <div class="nav-links">
-          <NuxtLink :to="isGameActive ? '' : '/'" class="nav-item" @click.native="handleNavLock">🏠<br>首页</NuxtLink>
-          <NuxtLink :to="isGameActive ? '' : '/health'" class="nav-item" @click.native="handleNavLock">❤️<br>健康</NuxtLink>
-          <NuxtLink :to="isGameActive ? '' : '/entertainment'" class="nav-item" @click.native="handleNavLock">🎵<br>娱乐</NuxtLink>
-          <NuxtLink :to="isGameActive ? '' : '/learning'" class="nav-item" @click.native="handleNavLock">🧩<br>益智</NuxtLink> 
+          <div class="nav-item" :class="{ 'active-custom': route.path === '/' }" @click="handleNavRequest('/')">🏠<br>首页</div>
+          <div class="nav-item" :class="{ 'active-custom': route.path === '/health' }" @click="handleNavRequest('/health')">❤️<br>健康</div>
+          <div class="nav-item" :class="{ 'active-custom': route.path === '/entertainment' }" @click="handleNavRequest('/entertainment')">🎵<br>娱乐</div>
+          <div class="nav-item" :class="{ 'active-custom': route.path === '/learning' }" @click="handleNavRequest('/learning')">🧩<br>益智</div> 
         </div>
         <div class="user-zone" @click.stop="ui.menu = !ui.menu">
           <div class="avatar">👴</div>
@@ -54,8 +54,9 @@
 </template>
 
 <script setup>
-import { reactive, computed, onMounted } from 'vue'
+import { reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { io } from 'socket.io-client'
 
 const route = useRoute()
 const router = useRouter()
@@ -63,11 +64,61 @@ const isPurePage = computed(() => ['projection', 'developer'].includes(route.nam
 const isGameActive = computed(() => route.path === '/training')
 const ui = reactive({ menu: false, akon: false })
 
+let socket = null
+
 const ball = reactive({
   x: 0, y: 0, status: 'half', isDragging: false,
   startX: 0, startY: 0, moveDist: 0
 })
 
+// --- 核心修改：中心化路由同步逻辑 ---
+
+const handleNavRequest = (path) => {
+  if (isGameActive.value) {
+    alert("请先点击“退出游戏”")
+    return
+  }
+  // 不再本地直接跳转，而是向后端发送请求
+  if (socket) {
+    socket.emit('request_nav', { page: path })
+  } else {
+    // 降级处理：socket未连接时本地跳转
+    router.push(path)
+  }
+}
+
+const handleAdminNav = (path) => {
+  if (isGameActive.value) { alert("请先点击“退出游戏”"); return; }
+  ui.menu = false; 
+  router.push(path); // 后台页不参与全局同步，本地直接跳
+}
+
+onMounted(() => {
+  // 初始化 Socket 连接
+  socket = io(`http://${window.location.hostname}:8080`)
+
+  // 监听后端强制跳转信号（多网页联动的关键）
+  socket.on('navigate_to', (data) => {
+    // 排除掉不参与同步的独立终端页面
+    if (!isPurePage.value && route.path !== data.page) {
+      router.push(data.page)
+    }
+  })
+
+  // 原有 UI 逻辑
+  ball.x = window.innerWidth - 45
+  ball.y = window.innerHeight / 2 - 45
+  window.addEventListener('mousemove', handleDragging); 
+  window.addEventListener('mouseup', handleDragEnd)
+  window.addEventListener('touchmove', handleDragging, { passive: false }); 
+  window.addEventListener('touchend', handleDragEnd)
+})
+
+onUnmounted(() => {
+  if (socket) socket.disconnect()
+})
+
+// --- 原有球体拖拽与吸附逻辑（保持现状） ---
 const updateDockPos = () => {
   const winW = window.innerWidth
   if (ball.x < winW / 2) {
@@ -76,22 +127,6 @@ const updateDockPos = () => {
     ball.x = ball.status === 'half' ? winW - 45 : winW - 110
   }
 }
-
-// 导航锁定函数
-const handleNavLock = () => {
-  if (isGameActive.value) alert("请先点击“退出游戏”")
-}
-const handleAdminNav = (path) => {
-  if (isGameActive.value) { alert("请先点击“退出游戏”"); return; }
-  ui.menu = false; router.push(path);
-}
-
-onMounted(() => {
-  ball.x = window.innerWidth - 45
-  ball.y = window.innerHeight / 2 - 45
-  window.addEventListener('mousemove', handleDragging); window.addEventListener('mouseup', handleDragEnd)
-  window.addEventListener('touchmove', handleDragging, { passive: false }); window.addEventListener('touchend', handleDragEnd)
-})
 
 const handleDragStart = (e) => {
   ball.isDragging = true; ball.moveDist = 0
@@ -102,7 +137,6 @@ const handleDragStart = (e) => {
 const handleDragging = (e) => {
   if (!ball.isDragging) return
   const event = e.touches ? e.touches[0] : e
-  // 零延迟关键：直接赋值，利用 transform 优化渲染
   ball.x = event.clientX - ball.startX
   ball.y = event.clientY - ball.startY
   ball.moveDist++
@@ -124,7 +158,7 @@ const closeAkon = () => { ui.akon = false; ball.status = 'half'; updateDockPos()
 </script>
 
 <style>
-/* 核心：严禁改动视觉风格，仅处理比例锁定和卡顿 */
+/* 核心样式：严格遵循死命令，禁止修改视觉风格 */
 * {
   -webkit-tap-highlight-color: transparent; 
   touch-action: manipulation;
@@ -139,27 +173,28 @@ html, body {
 .app-viewport { 
   width: 100vw; height: 100vh; 
   display: flex; justify-content: center; align-items: center; 
-  overflow: hidden; /* 强制拦截任何滚动 */
+  overflow: hidden; 
 }
 
-/* 16:10 平板框架：死命令锁定 */
 .tablet-frame {
-  width: 100vw; height: 62.5vw; /* 严格 16:10 比例公式 */
+  width: 100vw; height: 62.5vw; 
   max-height: 100vh; max-width: 160vh;
   background: #FFFFFF; display: flex; position: relative; overflow: hidden;
 }
 
-/* 侧边栏：恢复原有 140px 宽度 */
 .side-nav {
   width: 140px; background: #F8F9FA; display: flex; flex-direction: column;
   padding: 40px 0; border-right: 1px solid #EEE; z-index: 100;
 }
 .nav-links { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 30px; }
+
+/* 模拟原来的 NuxtLink 样式 */
 .nav-item { 
-  text-decoration: none; color: #333; font-size: 22px; font-weight: bold; 
+  cursor: pointer; color: #333; font-size: 22px; font-weight: bold; 
   text-align: center; width: 100px; padding: 15px 0; border-radius: 20px;
+  transition: all 0.2s;
 }
-.router-link-active { background: #FF7222 !important; color: #FFF !important; }
+.active-custom { background: #FF7222 !important; color: #FFF !important; }
 
 .main-content { 
   flex: 1; height: 100%; overflow-y: auto; 
@@ -167,12 +202,11 @@ html, body {
 }
 .main-content::-webkit-scrollbar { display: none; }
 
-/* 阿康球：注入 GPU 加速，解决卡顿 */
 .akon-ball {
   position: fixed; width: 90px; height: 90px; background: #FF7222;
   border-radius: 50%; display: flex; align-items: center; justify-content: center;
   z-index: 500; cursor: pointer;
-  transform: translate3d(0, 0, 0); /* 开启硬件加速 */
+  transform: translate3d(0, 0, 0); 
   will-change: left, top;
   transition: opacity 0.3s;
   box-shadow: 0 8px 25px rgba(255,114,34,0.4);
@@ -180,7 +214,6 @@ html, body {
 }
 .akon-icon { font-size: 45px; pointer-events: none; }
 
-/* 其他弹窗样式原封不动保留... */
 .user-zone { text-align: center; position: relative; cursor: pointer; margin-top: auto; }
 .avatar { font-size: 50px; }
 .name { font-size: 20px; font-weight: bold; margin-top: 5px; }

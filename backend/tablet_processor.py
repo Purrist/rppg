@@ -12,6 +12,11 @@ class TabletProcessor:
         self.raw_frame = None
         self.mesh = mp.solutions.face_mesh.FaceMesh(refine_landmarks=True)
         self.state = {"emotion": "neutral", "bpm": "--"}
+        
+        # rPPG 核心缓冲区
+        self.buffer_size = 150
+        self.data_buffer = []
+        self.times = []
 
     def start(self):
         self.running = True
@@ -23,36 +28,64 @@ class TabletProcessor:
         cap = cv2.VideoCapture(self.url)
         while self.running:
             ret, frame = cap.read()
-            if ret: self.raw_frame = frame
-            else: time.sleep(0.01)
+            if ret:
+                self.raw_frame = frame
+            else:
+                time.sleep(0.01)
 
     def _analyze(self):
-        """每0.5秒进行一次状态判别"""
+        """降低检测频率至0.3s，防止DeepFace阻塞主进程导致卡顿"""
         while self.running:
             if self.raw_frame is not None:
                 try:
-                    # 使用 DeepFace 进行真实识别
-                    res = DeepFace.analyze(self.raw_frame, actions=['emotion'], enforce_detection=False, silent=True)
-                    self.state["emotion"] = res[0]['dominant_emotion']
-                except: pass
-            time.sleep(0.5)
+                    # 关键：enforce_detection=False 避免没对准时报错死循环
+                    res = DeepFace.analyze(self.raw_frame, actions=['emotion'], 
+                                         enforce_detection=False, detector_backend='opencv', silent=True)
+                    if res:
+                        self.state["emotion"] = res[0]['dominant_emotion']
+                except:
+                    pass
+            time.sleep(0.3)
 
     def get_ui_data(self):
         if self.raw_frame is None: return None
         frame = self.raw_frame.copy()
         
-        # 1. 识别 ROI (rPPG 关键区)
+        # rPPG 实时提取逻辑
         results = self.mesh.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
         if results.multi_face_landmarks:
             h, w, _ = frame.shape
-            # 锁定额头关键点 (10号点)
-            p10 = results.multi_face_landmarks[0].landmark[10]
+            p10 = results.multi_face_landmarks[0].landmark[10] # 额头
             cx, cy = int(p10.x * w), int(p10.y * h)
-            # 真实信号提取：提取绿色通道均值
-            roi = frame[cy-20:cy+20, cx-20:cx+20, 1] 
-            self.state["bpm"] = int(np.mean(roi)) if roi.size > 0 else "--"
-            # 绘制视觉反馈
-            cv2.rectangle(frame, (cx-20, cy-20), (cx+20, cy+20), (255,114,34), 2)
+            
+            # 取得 ROI 区域
+            roi = frame[max(0, cy-15):min(h, cy+15), max(0, cx-15):min(w, cx+15)]
+            if roi.size > 0:
+                green_val = np.mean(roi[:, :, 1])
+                now = time.time()
+                self.data_buffer.append(green_val)
+                self.times.append(now)
+                
+                if len(self.data_buffer) > self.buffer_size:
+                    self.data_buffer.pop(0)
+                    self.times.pop(0)
+                
+                if len(self.data_buffer) >= self.buffer_size:
+                    fps = len(self.times) / (self.times[-1] - self.times[0])
+                    # 线性插值重采样
+                    even_times = np.linspace(self.times[0], self.times[-1], len(self.times))
+                    interp_data = np.interp(even_times, self.times, self.data_buffer)
+                    # 归一化后 FFT
+                    interp_data = (interp_data - np.mean(interp_data)) / np.std(interp_data)
+                    fft = np.abs(np.fft.rfft(interp_data))
+                    freqs = np.fft.rfftfreq(len(interp_data), 1.0/fps)
+                    # 过滤 45-150 BPM 范围
+                    valid = (freqs >= 0.75) & (freqs <= 2.5)
+                    if np.any(valid):
+                        self.state["bpm"] = int(freqs[valid][np.argmax(fft[valid])] * 60)
 
-        _, buf = cv2.imencode('.jpg', frame)
-        return {"image": base64.b64encode(buf).decode('utf-8'), "state": self.state}
+        _, buffer = cv2.imencode('.jpg', frame)
+        return {
+            "image": base64.b64encode(buffer).decode('utf-8'),
+            "state": self.state
+        }

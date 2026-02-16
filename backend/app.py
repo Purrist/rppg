@@ -1,5 +1,5 @@
 import sys, time, threading
-from flask import Flask, request, jsonify  # 补上了之前代码可能缺失的 request, jsonify
+from flask import Flask, request, jsonify
 from flask_socketio import SocketIO
 from flask_cors import CORS
 from tablet_processor import TabletProcessor
@@ -9,18 +9,20 @@ from akon_agent import ask_akon
 
 app = Flask(__name__)
 CORS(app)
-# 使用 threading 模式并限制发送队列大小
+# 使用 threading 模式并限制发送队列大小，确保流传输流畅
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading', max_http_buffer_size=10**6)
 
-# --- 1. 平板端摄像头：维持现状，用于采集老人状态 ---
-processor = TabletProcessor(sys.argv[1] if len(sys.argv) > 1 else "http://192.168.137.29:8080/video")
+# --- 全局系统状态 ---
+system_state = {
+    "current_page": "/",  # 追踪当前平板端应该显示的页面
+}
 
-# --- 2. 外接摄像头 (camera1)：用于识别投影交互 ---
-# 修改重点：如果你的 test_cam.py 运行结果显示 camera_index = 1 是外接摄像头，这里就填 1
-# 同时也保留了从命令行参数 sys.argv[2] 传入的可能性
+# --- 1. 平板端摄像头（老人状态感知） ---
+processor = TabletProcessor(sys.argv[1] if len(sys.argv) > 1 else "http://192.168.2.8:8080/video")
+
+# --- 2. 投影端摄像头（交互识别） ---
 try:
-    # 尝试将参数转为数字，如果失败（比如传入的是URL）则保持原样
-    raw_arg = sys.argv[2] if len(sys.argv) > 2 else 1  # 默认值改为 1
+    raw_arg = sys.argv[2] if len(sys.argv) > 2 else "1"
     screen_cam_source = int(raw_arg) if str(raw_arg).isdigit() else raw_arg
 except:
     screen_cam_source = 1
@@ -28,8 +30,20 @@ except:
 screen_proc = ScreenProcessor(screen_cam_source)
 current_game = WhackAMole(socketio)
 
+# --- Socket 交互逻辑 ---
+
+@socketio.on('request_nav')
+def handle_nav(data):
+    """处理导航请求：点击行为转化为全局信号"""
+    target_page = data.get('page')
+    if target_page:
+        system_state["current_page"] = target_page
+        # 广播给所有客户端（平板/浏览器标签）进行同步跳转
+        socketio.emit('navigate_to', {"page": target_page})
+
 @socketio.on('game_control')
 def handle_game_control(data):
+    """处理游戏控制信号"""
     action = data.get('action')
     if action == 'ready': current_game.set_ready()
     elif action == 'start': current_game.start_game()
@@ -37,43 +51,65 @@ def handle_game_control(data):
     elif action == 'stop': current_game.stop()
 
 def main_worker():
+    """中心化逻辑处理与状态广播线程"""
     last_emit_time = 0
     while True:
         now = time.time()
         t_data = processor.get_ui_data()
         s_data = screen_proc.get_latest() 
         
-        # 1. 处理游戏逻辑判定
+        # 1. 游戏逻辑判定（由后端统一控制状态机）
         if s_data and current_game.status != "PAUSED":
             interact = s_data['interact']
-            # 根据逻辑：手放在圈内进度 100% 开始
+            # READY 状态：中间白圈进度满 1s 开始
             if current_game.status == "READY" and interact["progress"][1] >= 100:
                 current_game.start_game()
-            # 游戏中命中判断
+            # PLAYING 状态：命中判定
             elif current_game.status == "PLAYING" and interact["hit_index"] != -1:
                 current_game.handle_hit(interact["hit_index"])
         
-        # 联动：将平板端采集到的健康数据传给游戏，用于自适应调节
+        # 传入生理状态数据，实现自适应难度调节
         current_game.update(t_data['state'] if t_data else None)
 
-        # 2. 限制视频流推送频率
-        if now - last_emit_time > 0.04:
+        # 2. 定时广播（中心化同步的关键）
+        if now - last_emit_time > 0.05: # 约 20fps 同步率
+            # 广播游戏核心状态，确保多页面完全同步
+            game_state = {
+                "status": current_game.status,
+                "score": current_game.score,
+                "timer": current_game.timer,
+                "current_mole": current_game.current_mole
+            }
+            socketio.emit('game_update', game_state)
+            
+            # 推送视频流与感知结果
             if s_data:
-                socketio.emit('screen_stream', {'image': s_data['image'], 'interact': s_data['interact']}, room=None)
+                socketio.emit('screen_stream', {'image': s_data['image'], 'interact': s_data['interact']})
             if t_data:
-                socketio.emit('tablet_stream', {'image': t_data['image'], 'state': t_data['state']}, room=None)
+                socketio.emit('tablet_stream', {'image': t_data['image'], 'state': t_data['state']})
+            
             last_emit_time = now
         
         socketio.sleep(0.01)
 
+# --- HTTP API 接口 ---
+
 @app.route('/api/akon/chat', methods=['POST'])
 def akon_chat():
-    """处理阿康的对话请求"""
+    """处理阿康对话及自主指令跳转"""
     data = request.json
     user_message = data.get('message', '')
     sid = data.get('sid')
     
+    # 获取模型回复及动作提取
     response_text, action_name, action_params = ask_akon(user_message)
+    
+    # 自主跳转逻辑实现：如果模型决定去某个页面
+    if action_name == "navigate_to" and action_params:
+        target_page = action_params[0]
+        system_state["current_page"] = target_page
+        # 触发全局跳转信号
+        socketio.emit('navigate_to', {"page": target_page})
     
     result = {
         'reply': response_text,
@@ -90,7 +126,6 @@ def akon_chat():
 
 if __name__ == '__main__':
     processor.start()
-    # 启动 ScreenProcessor 的读取线程（如果内部有读取循环）
-    # 如果 screen_processor.py 没写线程启动，确保它在 __init__ 里已经 start 了
+    # 启动中心化逻辑处理线程
     threading.Thread(target=main_worker, daemon=True).start()
     socketio.run(app, host='0.0.0.0', port=8080, debug=False)
