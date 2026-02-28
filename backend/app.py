@@ -60,13 +60,10 @@ def handle_update_point(data):
 
 @socketio.on('update_hole')
 def handle_update_hole(data):
-    """更新地鼠洞区域"""
+    """更新地鼠洞区域（4个点）"""
     index = data.get('index')
-    x1 = data.get('x1')
-    x2 = data.get('x2')
-    y1 = data.get('y1')
-    y2 = data.get('y2')
-    screen_proc.update_hole(index, x1, x2, y1, y2)
+    points = data.get('points')
+    screen_proc.update_hole(index, points)
 
 @socketio.on('save_calibration')
 def handle_save_calibration():

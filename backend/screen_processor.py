@@ -27,11 +27,11 @@ class ScreenProcessor:
         self.warped_width = 800
         self.warped_height = 500
         
-        # --- 地鼠洞区域（归一化坐标，在 warp 后的空间中）---
+        # --- 地鼠洞区域（归一化坐标，4个点的多边形，在 warp 后的空间中）---
         self.holes = [
-            {"id": 0, "norm_rect": (0.08, 0.28, 0.45, 0.85)},
-            {"id": 1, "norm_rect": (0.36, 0.64, 0.45, 0.85)},
-            {"id": 2, "norm_rect": (0.72, 0.92, 0.45, 0.85)}
+            {"id": 0, "points": [[0.08, 0.45], [0.28, 0.45], [0.28, 0.85], [0.08, 0.85]]},
+            {"id": 1, "points": [[0.36, 0.45], [0.64, 0.45], [0.64, 0.85], [0.36, 0.85]]},
+            {"id": 2, "points": [[0.72, 0.45], [0.92, 0.45], [0.92, 0.85], [0.72, 0.85]]}
         ]
         
         # --- 媒体管道 ---
@@ -59,7 +59,16 @@ class ScreenProcessor:
                         if len(self.calibration_points) == 4:
                             self.calibrate_perspective(self.calibration_points)
                     if 'holes' in config:
-                        self.holes = config['holes']
+                        # 转换旧格式（norm_rect）到新格式（points）
+                        loaded_holes = config['holes']
+                        for i, hole in enumerate(loaded_holes):
+                            if 'norm_rect' in hole and 'points' not in hole:
+                                x1, x2, y1, y2 = hole['norm_rect']
+                                loaded_holes[i] = {
+                                    "id": hole.get("id", i),
+                                    "points": [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
+                                }
+                        self.holes = loaded_holes
                 print("已加载校准配置！")
             except Exception as e:
                 print(f"加载配置失败: {e}")
@@ -94,10 +103,10 @@ class ScreenProcessor:
             return True
         return False
     
-    def update_hole(self, index, x1, x2, y1, y2):
-        """更新地鼠洞区域（从前端调用）"""
-        if 0 <= index < 3:
-            self.holes[index]["norm_rect"] = (x1, x2, y1, y2)
+    def update_hole(self, index, points):
+        """更新地鼠洞区域（从前端调用，4个点）"""
+        if 0 <= index < 3 and len(points) == 4:
+            self.holes[index]["points"] = points
             return True
         return False
     
@@ -106,6 +115,12 @@ class ScreenProcessor:
         self.calibration_points = []
         self.calibrated = False
         self.perspective_matrix = None
+        # 重置地鼠洞为默认值
+        self.holes = [
+            {"id": 0, "points": [[0.08, 0.45], [0.28, 0.45], [0.28, 0.85], [0.08, 0.85]]},
+            {"id": 1, "points": [[0.36, 0.45], [0.64, 0.45], [0.64, 0.85], [0.36, 0.85]]},
+            {"id": 2, "points": [[0.72, 0.45], [0.92, 0.45], [0.92, 0.85], [0.72, 0.85]]}
+        ]
         if os.path.exists(self.config_file):
             os.remove(self.config_file)
         print("校准已重置！")
@@ -168,6 +183,26 @@ class ScreenProcessor:
         
         return foot_pos, results
     
+    def point_in_polygon(self, point, polygon):
+        """使用射线法判断点是否在多边形内"""
+        x, y = point
+        n = len(polygon)
+        inside = False
+        
+        p1x, p1y = polygon[0]
+        for i in range(n + 1):
+            p2x, p2y = polygon[i % n]
+            if y > min(p1y, p2y):
+                if y <= max(p1y, p2y):
+                    if x <= max(p1x, p2x):
+                        if p1y != p2y:
+                            xinters = (y - p1y) * (p2x - p1x) / (p2y - p1y) + p1x
+                        if p1x == p2x or x <= xinters:
+                            inside = not inside
+            p1x, p1y = p2x, p2y
+        
+        return inside
+    
     def check_hole_interaction(self, foot_pos):
         """检查脚是否在某个地鼠洞内"""
         if foot_pos is None:
@@ -177,13 +212,13 @@ class ScreenProcessor:
         active_index = -1
         
         for i, hole in enumerate(self.holes):
-            r = hole["norm_rect"]
-            x1 = int(r[0] * self.warped_width)
-            x2 = int(r[1] * self.warped_width)
-            y1 = int(r[2] * self.warped_height)
-            y2 = int(r[3] * self.warped_height)
+            # 将归一化坐标转换为实际像素坐标
+            polygon = [
+                (p[0] * self.warped_width, p[1] * self.warped_height)
+                for p in hole["points"]
+            ]
             
-            if x1 < fx < x2 and y1 < fy < y2:
+            if self.point_in_polygon((fx, fy), polygon):
                 active_index = i
                 break
         
@@ -224,11 +259,12 @@ class ScreenProcessor:
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
                 
                 for i, hole in enumerate(self.holes):
-                    r = hole["norm_rect"]
-                    x1 = int(r[0] * self.warped_width)
-                    x2 = int(r[1] * self.warped_width)
-                    y1 = int(r[2] * self.warped_height)
-                    y2 = int(r[3] * self.warped_height)
+                    # 将归一化坐标转换为实际像素坐标
+                    polygon = np.array([
+                        (int(p[0] * self.warped_width), int(p[1] * self.warped_height))
+                        for p in hole["points"]
+                    ], np.int32)
+                    polygon = polygon.reshape((-1, 1, 2))
                     
                     color = (200, 200, 200)
                     if self.progress[i] > 0:
@@ -236,9 +272,14 @@ class ScreenProcessor:
                     if self.progress[i] >= 100:
                         color = (0, 255, 0)
                     
-                    cv2.rectangle(warped, (x1, y1), (x2, y2), color, 5)
-                    cv2.putText(warped, f"Hole {i+1}", (x1+15, y1+40),
-                                cv2.FONT_HERSHEY_SIMPLEX, 1.2, color, 3)
+                    cv2.polylines(warped, [polygon], True, color, 5)
+                    # 计算中心点用于放置文字
+                    M = cv2.moments(polygon)
+                    if M["m00"] != 0:
+                        cx = int(M["m10"] / M["m00"])
+                        cy = int(M["m01"] / M["m00"])
+                        cv2.putText(warped, f"Hole {i+1}", (cx-40, cy+10),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, color, 3)
             
             now = time.time()
             hit_index = -1

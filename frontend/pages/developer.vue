@@ -98,9 +98,9 @@ const calibrationMode = ref(false)
 const projectionPoints = ref([null, null, null, null])
 
 const holes = ref([
-  {"id": 0, "norm_rect": [0.08, 0.28, 0.45, 0.85]},
-  {"id": 1, "norm_rect": [0.36, 0.64, 0.45, 0.85]},
-  {"id": 2, "norm_rect": [0.72, 0.92, 0.45, 0.85]}
+  {"id": 0, "points": [[0.08, 0.45], [0.28, 0.45], [0.28, 0.85], [0.08, 0.85]]},
+  {"id": 1, "points": [[0.36, 0.45], [0.64, 0.45], [0.64, 0.85], [0.36, 0.85]]},
+  {"id": 2, "points": [[0.72, 0.45], [0.92, 0.45], [0.92, 0.85], [0.72, 0.85]]}
 ])
 
 const holePoints = ref([
@@ -131,35 +131,10 @@ const toggleCalibrationMode = () => {
 
 const initHolePoints = () => {
   holes.value.forEach((hole, hIdx) => {
-    const [x1, x2, y1, y2] = hole.norm_rect
-    holePoints.value[hIdx] = [
-      [x1, y1],
-      [x2, y1],
-      [x2, y2],
-      [x1, y2]
-    ]
+    if (hole.points && hole.points.length === 4) {
+      holePoints.value[hIdx] = hole.points.map(p => [...p])
+    }
   })
-}
-
-const rectToPoints = (rect) => {
-  const [x1, x2, y1, y2] = rect
-  return [
-    [x1, y1],
-    [x2, y1],
-    [x2, y2],
-    [x1, y2]
-  ]
-}
-
-const pointsToRect = (points) => {
-  const xs = points.map(p => p[0])
-  const ys = points.map(p => p[1])
-  return [
-    Math.min(...xs),
-    Math.max(...xs),
-    Math.min(...ys),
-    Math.max(...ys)
-  ]
 }
 
 const selectPoint = (type, idx) => {
@@ -270,14 +245,10 @@ const updateProjection = () => {
 }
 
 const updateHole = (idx) => {
-  const rect = pointsToRect(holePoints.value[idx])
-  holes.value[idx].norm_rect = rect
+  holes.value[idx].points = holePoints.value[idx].map(p => [...p])
   socket.emit('update_hole', {
     index: idx,
-    x1: rect[0],
-    x2: rect[1],
-    y1: rect[2],
-    y2: rect[3]
+    points: holePoints.value[idx]
   })
 }
 
@@ -291,9 +262,9 @@ const resetCalibration = () => {
     socket.emit('reset_calibration')
     projectionPoints.value = [null, null, null, null]
     holes.value = [
-      {"id": 0, "norm_rect": [0.08, 0.28, 0.45, 0.85]},
-      {"id": 1, "norm_rect": [0.36, 0.64, 0.45, 0.85]},
-      {"id": 2, "norm_rect": [0.72, 0.92, 0.45, 0.85]}
+      {"id": 0, "points": [[0.08, 0.45], [0.28, 0.45], [0.28, 0.85], [0.08, 0.85]]},
+      {"id": 1, "points": [[0.36, 0.45], [0.64, 0.45], [0.64, 0.85], [0.36, 0.85]]},
+      {"id": 2, "points": [[0.72, 0.45], [0.92, 0.45], [0.92, 0.85], [0.72, 0.85]]}
     ]
     initHolePoints()
     drawCalibrationCanvas()
