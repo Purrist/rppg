@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-地面投影交互系统 V8
+地面投影交互系统 V4
 修复：
-1. 矩形拖边功能
-2. 区域拖动平移
-3. 圆环加载功能
-4. 彻底修复白线问题
+1. 改回上下布局，避免缩放错位
+2. 修复圆形绘制错误
+3. Projection页面形状与Admin完全一致
 """
 
 import cv2
@@ -17,50 +16,6 @@ import time
 import math
 
 app = Flask(__name__)
-
-# ============================================================================
-# 平滑滤波器
-# ============================================================================
-class SmoothFilter:
-    def __init__(self, alpha=0.5, threshold=30):
-        self.alpha = alpha
-        self.threshold = threshold
-        self.value = None
-    
-    def update(self, new_value):
-        if self.value is None:
-            self.value = new_value
-            return new_value
-        
-        diff = abs(new_value - self.value)
-        if diff > self.threshold:
-            alpha = 0.8
-        else:
-            alpha = self.alpha
-        
-        self.value = alpha * new_value + (1 - alpha) * self.value
-        return self.value
-
-class PositionSmoother:
-    def __init__(self):
-        self.x_filter = SmoothFilter(alpha=0.4, threshold=25)
-        self.y_filter = SmoothFilter(alpha=0.4, threshold=25)
-        self.last_x = None
-        self.last_y = None
-        self.last_time = 0
-    
-    def update(self, x, y, detected):
-        if detected:
-            smooth_x = self.x_filter.update(x)
-            smooth_y = self.y_filter.update(y)
-            self.last_x = smooth_x
-            self.last_y = smooth_y
-            self.last_time = time.time()
-            return int(smooth_x), int(smooth_y), True
-        else:
-            if self.last_x is not None and time.time() - self.last_time < 0.3:
-                return int(self.last_x), int(self.last_y), True
-            return x, y, False
 
 # ============================================================================
 # 全局状态
@@ -77,9 +32,7 @@ state = {
     "feet_detected": False,
     "active_zones": [],
     "matrix": None,
-    "zone_id_counter": 4,
-    "admin_bg": "#ffffff",
-    "projection_bg": "#ffffff"
+    "zone_id_counter": 4
 }
 
 ZONE_COLORS = ["#33B555", "#FF7222", "#2196F3", "#9C27B0", "#FF5722", 
@@ -97,23 +50,20 @@ class Processor:
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        self.cap.set(cv2.CAP_PROP_FPS, 30)
         
         self.frame_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.frame_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         print(f"摄像头: {self.frame_w}x{self.frame_h}")
         
         self.pose = mp.solutions.pose.Pose(
-            min_detection_confidence=0.6,
-            min_tracking_confidence=0.6,
-            model_complexity=1,
-            smooth_landmarks=True
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5,
+            model_complexity=0
         )
         
         self.raw_frame = None
         self.corrected_frame = None
         self.running = True
-        self.position_smoother = PositionSmoother()
         
         threading.Thread(target=self._loop, daemon=True).start()
     
@@ -132,8 +82,8 @@ class Processor:
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             results = self.pose.process(rgb)
             
-            raw_feet_detected = False
-            raw_feet_x, raw_feet_y = 320, 180
+            feet_detected = False
+            feet_x, feet_y = 320, 180
             
             if results.pose_landmarks:
                 mp.solutions.drawing_utils.draw_landmarks(
@@ -160,26 +110,24 @@ class Processor:
                         try:
                             src_pt = np.array([[[center[0], center[1]]]], dtype=np.float32)
                             dst_pt = cv2.perspectiveTransform(src_pt, state["matrix"])[0][0]
-                            raw_feet_x, raw_feet_y = int(dst_pt[0]), int(dst_pt[1])
-                            raw_feet_detected = True
+                            feet_x, feet_y = int(dst_pt[0]), int(dst_pt[1])
+                            feet_detected = True
                         except:
                             pass
             
-            smooth_x, smooth_y, smooth_detected = self.position_smoother.update(
-                raw_feet_x, raw_feet_y, raw_feet_detected
-            )
-            
+            # 判断在哪些区域
             active_zones = []
-            if smooth_detected:
+            if feet_detected:
                 for zone in state["zones"]:
-                    if self._point_in_zone(smooth_x, smooth_y, zone):
+                    if self._point_in_zone(feet_x, feet_y, zone):
                         active_zones.append(zone["id"])
             
-            state["feet_x"] = smooth_x
-            state["feet_y"] = smooth_y
-            state["feet_detected"] = smooth_detected
+            state["feet_x"] = feet_x
+            state["feet_y"] = feet_y
+            state["feet_detected"] = feet_detected
             state["active_zones"] = active_zones
             
+            # 绘制校准框
             pts = np.array([[int(c[0]*w), int(c[1]*h)] for c in state["corners"]], np.int32)
             cv2.polylines(frame, [pts], True, (255, 0, 0), 2)
             for i, c in enumerate(state["corners"]):
@@ -187,6 +135,7 @@ class Processor:
                 cv2.circle(frame, (x, y), 10, (255, 0, 0), -1)
                 cv2.putText(frame, str(i+1), (x-6, y+4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 2)
             
+            # 生成矫正后画面
             corrected = np.ones((360, 640, 3), dtype=np.uint8) * 255
             if state["matrix"] is not None:
                 try:
@@ -194,16 +143,18 @@ class Processor:
                 except:
                     pass
             
+            # 绘制所有区域
             for zone in state["zones"]:
                 self._draw_zone(corrected, zone, zone["id"] in active_zones)
             
-            if smooth_detected:
-                cv2.circle(corrected, (smooth_x, smooth_y), 20, (0, 200, 0), -1)
+            # 绘制脚部位置
+            if feet_detected:
+                cv2.circle(corrected, (feet_x, feet_y), 20, (0, 200, 0), -1)
             
             self.raw_frame = frame
             self.corrected_frame = corrected
             
-            time.sleep(0.005)
+            time.sleep(0.01)
     
     def _point_in_zone(self, x, y, zone):
         zone_type = zone.get("type", "rect")
@@ -224,6 +175,7 @@ class Processor:
         bgr = (rgb[2], rgb[1], rgb[0])
         
         if zone_type == "circle":
+            # 确保是整数
             cx = int(zone["center"][0])
             cy = int(zone["center"][1])
             r = int(zone["radius"])
@@ -276,7 +228,7 @@ def delayed_init():
 threading.Thread(target=delayed_init, daemon=True).start()
 
 # ============================================================================
-# HTML模板 - Admin页面
+# HTML模板 - Admin页面（上下布局）
 # ============================================================================
 HTML_ADMIN = """
 <!DOCTYPE html>
@@ -287,21 +239,16 @@ HTML_ADMIN = """
     <title>Admin - 校准管理</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        html, body {
-            width: 100%;
-            height: 100%;
-            overflow-x: hidden;
-        }
         body {
-            background: #ffffff;
+            background: #fff;
             color: #333;
             font-family: 'Microsoft YaHei', sans-serif;
             padding: 10px;
-            transition: background-color 0.3s;
         }
         h1 { font-size: 16px; margin-bottom: 5px; }
         .hint { color: #666; font-size: 11px; margin-bottom: 8px; }
         
+        /* 视频容器 - 固定尺寸避免缩放问题 */
         .video-container {
             width: 640px;
             max-width: 100%;
@@ -312,6 +259,7 @@ HTML_ADMIN = """
         #video { display: block; width: 100%; }
         #canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: crosshair; }
         
+        /* 矫正画面容器 */
         .corrected-container {
             width: 640px;
             max-width: 100%;
@@ -321,8 +269,9 @@ HTML_ADMIN = """
             margin-bottom: 10px;
         }
         #corrected { display: block; width: 100%; }
-        #corrected-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: move; }
+        #corrected-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: crosshair; }
         
+        /* 状态栏 */
         .status-bar {
             width: 640px;
             max-width: 100%;
@@ -337,6 +286,7 @@ HTML_ADMIN = """
         .detected { color: #33B555; font-weight: bold; }
         .not-detected { color: #ff6b6b; }
         
+        /* 控制面板 */
         .control-panel {
             width: 640px;
             max-width: 100%;
@@ -354,28 +304,7 @@ HTML_ADMIN = """
             border-bottom: 1px solid #ddd;
         }
         
-        .settings-row {
-            display: flex;
-            gap: 20px;
-            margin-bottom: 10px;
-            padding: 8px;
-            background: #fff;
-            border-radius: 4px;
-        }
-        .setting-item {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        .setting-item label { font-size: 12px; color: #666; }
-        .setting-item input[type="color"] {
-            width: 40px;
-            height: 30px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-        
+        /* 添加按钮 */
         .add-buttons {
             display: flex;
             gap: 5px;
@@ -391,7 +320,9 @@ HTML_ADMIN = """
             font-size: 12px;
         }
         .add-btn:hover { background: #e8f5e9; border-color: #33B555; }
+        .add-btn:disabled { opacity: 0.5; cursor: not-allowed; }
         
+        /* 区域列表 */
         .zone-item {
             background: #fff;
             border: 1px solid #ddd;
@@ -405,6 +336,7 @@ HTML_ADMIN = """
             gap: 6px;
             cursor: grab;
         }
+        .zone-header:active { cursor: grabbing; }
         .drag-handle { color: #999; cursor: grab; font-size: 14px; }
         .zone-dot {
             width: 12px;
@@ -441,7 +373,6 @@ HTML_ADMIN = """
         .btn-edit { background: #FF7222; color: #fff; }
         .btn-confirm { background: #33B555; color: #fff; }
         .btn-delete { background: #f44336; color: #fff; }
-        .btn-copy { background: #2196F3; color: #fff; }
         
         .zone-item.editing { border-color: #FF7222; box-shadow: 0 0 4px rgba(255,114,34,0.3); }
         .zone-item.dragging { opacity: 0.5; }
@@ -451,38 +382,30 @@ HTML_ADMIN = """
 </head>
 <body>
     <h1>摄像头校准管理</h1>
-    <p class="hint">矩形：拖边改大小，拖中心移动 | 圆形：拖圆心移动，拖边缘改大小 | 其他：拖顶点</p>
+    <p class="hint">上方：拖动蓝色顶点校准 | 中间：编辑区域 | 下方：拖动排序调整优先级</p>
     
+    <!-- 上方：摄像头画面 -->
     <div class="video-container">
         <img id="video" src="/video_feed">
         <canvas id="canvas"></canvas>
     </div>
     
-    <p class="label">↓ 矫正后的16:9画面 ↓</p>
+    <p class="label">↓ 矫正后的16:9画面（点击编辑后拖动控制点） ↓</p>
     
+    <!-- 中间：矫正画面 -->
     <div class="corrected-container">
         <img id="corrected" src="/corrected_feed">
         <canvas id="corrected-canvas"></canvas>
     </div>
     
+    <!-- 状态栏 -->
     <div class="status-bar">
         <span>脚部: <span id="feet-status" class="not-detected">未检测到</span></span>
         <span>区域: <span id="zone-status">未进入</span></span>
     </div>
     
+    <!-- 下方：控制面板 -->
     <div class="control-panel">
-        <div class="section-title">⚙️ 设置</div>
-        <div class="settings-row">
-            <div class="setting-item">
-                <label>Admin背景:</label>
-                <input type="color" id="admin-bg-input" value="#ffffff" onchange="updateAdminBg(this.value)">
-            </div>
-            <div class="setting-item">
-                <label>Projection背景:</label>
-                <input type="color" id="projection-bg-input" value="#ffffff" onchange="updateProjectionBg(this.value)">
-            </div>
-        </div>
-        
         <div class="section-title">添加区域 (<span id="zone-count">3</span>/12)</div>
         <div class="add-buttons">
             <button class="add-btn" onclick="addZone('rect')">▢ 矩形</button>
@@ -491,11 +414,12 @@ HTML_ADMIN = """
             <button class="add-btn" onclick="addZone('quad')">◇ 四边形</button>
         </div>
         
-        <div class="section-title">区域列表（拖动排序）</div>
+        <div class="section-title">区域列表（拖动排序，越靠前优先级越高）</div>
         <div class="zone-list" id="zone-list"></div>
     </div>
 
     <script>
+        // ========== 全局变量 ==========
         const video = document.getElementById('video');
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
@@ -507,64 +431,33 @@ HTML_ADMIN = """
         let corners = [[0.15, 0.2], [0.85, 0.2], [0.85, 0.85], [0.15, 0.85]];
         let zones = [];
         let zoneIdCounter = 4;
-        let adminBg = "#ffffff";
-        let projectionBg = "#ffffff";
         
         let draggingCorner = -1;
+        let draggingZone = -1;
+        let draggingPoint = -1;
         let editingZone = null;
         let mouseDown = false;
         let draggedZoneId = null;
-        
-        // 拖动状态
-        let dragMode = null;  // 'move', 'edge-top', 'edge-bottom', 'edge-left', 'edge-right', 'point-N'
-        let dragStartPos = null;
-        let dragStartData = null;
 
         const COLORS = ["#33B555", "#FF7222", "#2196F3", "#9C27B0", "#FF5722", 
                         "#00BCD4", "#E91E63", "#795548", "#607D8B", "#FFEB3B",
                         "#4CAF50", "#3F51B5"];
 
+        // ========== 初始化 ==========
         function init() {
             fetch('/api/config').then(r => r.json()).then(d => {
                 if (d.corners) corners = d.corners;
                 if (d.zones) zones = d.zones;
                 if (d.zone_id_counter) zoneIdCounter = d.zone_id_counter;
-                if (d.admin_bg) {
-                    adminBg = d.admin_bg;
-                    document.getElementById('admin-bg-input').value = adminBg;
-                    document.body.style.backgroundColor = adminBg;
-                }
-                if (d.projection_bg) {
-                    projectionBg = d.projection_bg;
-                    document.getElementById('projection-bg-input').value = projectionBg;
-                }
                 renderZoneList();
             });
             resize();
             requestAnimationFrame(draw);
-            setInterval(updateStatus, 300);
-        }
-        
-        function updateAdminBg(color) {
-            adminBg = color;
-            document.body.style.backgroundColor = color;
-            saveSettings();
-        }
-        
-        function updateProjectionBg(color) {
-            projectionBg = color;
-            saveSettings();
-        }
-        
-        function saveSettings() {
-            fetch('/api/settings', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({admin_bg: adminBg, projection_bg: projectionBg})
-            });
+            setInterval(updateStatus, 500);
         }
 
         function resize() {
+            // 使用实际尺寸
             canvas.width = video.offsetWidth;
             canvas.height = video.offsetHeight;
             correctedCanvas.width = correctedImg.offsetWidth;
@@ -575,7 +468,9 @@ HTML_ADMIN = """
         window.onresize = resize;
         setTimeout(resize, 500);
 
+        // ========== 绘制 ==========
         function draw() {
+            // 上方校准框
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             const w = canvas.width, h = canvas.height;
             
@@ -605,6 +500,7 @@ HTML_ADMIN = """
                 ctx.fillText(i + 1, x, y);
             });
             
+            // 下方区域
             correctedCtx.clearRect(0, 0, correctedCanvas.width, correctedCanvas.height);
             const cw = correctedCanvas.width, ch = correctedCanvas.height;
             const scaleX = cw / 640, scaleY = ch / 360;
@@ -631,132 +527,54 @@ HTML_ADMIN = """
                 ctx.stroke();
                 
                 if (isEditing) {
-                    // 中心控制点（移动）
                     ctx.beginPath();
-                    ctx.arc(cx, cy, 12, 0, Math.PI * 2);
-                    ctx.fillStyle = '#fff';
-                    ctx.fill();
-                    ctx.strokeStyle = zone.color;
-                    ctx.lineWidth = 3;
-                    ctx.stroke();
-                    ctx.fillStyle = zone.color;
-                    ctx.font = 'bold 10px Arial';
-                    ctx.textAlign = 'center';
-                    ctx.textBaseline = 'middle';
-                    ctx.fillText('✥', cx, cy);
-                    
-                    // 边缘控制点（改大小）
-                    ctx.beginPath();
-                    ctx.arc(cx + r, cy, 10, 0, Math.PI * 2);
+                    ctx.arc(cx, cy, 8, 0, Math.PI * 2);
                     ctx.fillStyle = '#fff';
                     ctx.fill();
                     ctx.strokeStyle = zone.color;
                     ctx.lineWidth = 2;
                     ctx.stroke();
+                    
+                    ctx.beginPath();
+                    ctx.arc(cx + r, cy, 8, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.stroke();
                 }
             } else {
-                const points = zone.points.map(p => [p[0] * scaleX, p[1] * scaleY]);
-                
                 ctx.beginPath();
-                points.forEach((p, i) => {
-                    if (i === 0) ctx.moveTo(p[0], p[1]);
-                    else ctx.lineTo(p[0], p[1]);
+                zone.points.forEach((p, i) => {
+                    const x = p[0] * scaleX, y = p[1] * scaleY;
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
                 });
                 ctx.closePath();
                 ctx.stroke();
                 
                 if (isEditing) {
-                    ctx.fillStyle = zone.color + '30';
+                    ctx.fillStyle = zone.color + '20';
                     ctx.fill();
                     
-                    // 矩形特殊处理：绘制边和中心
-                    if (zone.type === 'rect') {
-                        // 绘制四条边（粗线，可点击）
-                        ctx.lineWidth = 8;
-                        ctx.strokeStyle = zone.color + '60';
-                        
-                        // 上边
+                    zone.points.forEach((p, i) => {
+                        const x = p[0] * scaleX, y = p[1] * scaleY;
                         ctx.beginPath();
-                        ctx.moveTo(points[0][0], points[0][1]);
-                        ctx.lineTo(points[1][0], points[1][1]);
-                        ctx.stroke();
-                        
-                        // 下边
-                        ctx.beginPath();
-                        ctx.moveTo(points[3][0], points[3][1]);
-                        ctx.lineTo(points[2][0], points[2][1]);
-                        ctx.stroke();
-                        
-                        // 左边
-                        ctx.beginPath();
-                        ctx.moveTo(points[0][0], points[0][1]);
-                        ctx.lineTo(points[3][0], points[3][1]);
-                        ctx.stroke();
-                        
-                        // 右边
-                        ctx.beginPath();
-                        ctx.moveTo(points[1][0], points[1][1]);
-                        ctx.lineTo(points[2][0], points[2][1]);
-                        ctx.stroke();
-                        
-                        // 中心移动点
-                        const centerX = (points[0][0] + points[2][0]) / 2;
-                        const centerY = (points[0][1] + points[2][1]) / 2;
-                        ctx.beginPath();
-                        ctx.arc(centerX, centerY, 15, 0, Math.PI * 2);
+                        ctx.arc(x, y, 8, 0, Math.PI * 2);
                         ctx.fillStyle = '#fff';
                         ctx.fill();
                         ctx.strokeStyle = zone.color;
-                        ctx.lineWidth = 3;
+                        ctx.lineWidth = 2;
                         ctx.stroke();
-                        ctx.fillStyle = zone.color;
-                        ctx.font = 'bold 12px Arial';
+                        
+                        ctx.fillStyle = '#333';
+                        ctx.font = 'bold 9px Arial';
                         ctx.textAlign = 'center';
                         ctx.textBaseline = 'middle';
-                        ctx.fillText('✥', centerX, centerY);
-                        
-                        // 四个角点（小一点）
-                        ctx.strokeStyle = zone.color;
-                        ctx.lineWidth = 2;
-                        points.forEach((p, i) => {
-                            ctx.beginPath();
-                            ctx.arc(p[0], p[1], 6, 0, Math.PI * 2);
-                            ctx.fillStyle = '#fff';
-                            ctx.fill();
-                            ctx.stroke();
-                        });
-                    } else {
-                        // 其他形状：顶点控制
-                        points.forEach((p, i) => {
-                            ctx.beginPath();
-                            ctx.arc(p[0], p[1], 10, 0, Math.PI * 2);
-                            ctx.fillStyle = '#fff';
-                            ctx.fill();
-                            ctx.strokeStyle = zone.color;
-                            ctx.lineWidth = 2;
-                            ctx.stroke();
-                            
-                            ctx.fillStyle = '#333';
-                            ctx.font = 'bold 9px Arial';
-                            ctx.textAlign = 'center';
-                            ctx.textBaseline = 'middle';
-                            ctx.fillText(i + 1, p[0], p[1]);
-                        });
-                    }
+                        ctx.fillText(i + 1, x, y);
+                    });
                 }
             }
         }
 
-        // 点到线段距离
-        function distToSegment(p, v, w) {
-            const l2 = (w[0]-v[0])*(w[0]-v[0]) + (w[1]-v[1])*(w[1]-v[1]);
-            if (l2 === 0) return Math.hypot(p[0]-v[0], p[1]-v[1]);
-            let t = ((p[0]-v[0])*(w[0]-v[0]) + (p[1]-v[1])*(w[1]-v[1])) / l2;
-            t = Math.max(0, Math.min(1, t));
-            return Math.hypot(p[0] - (v[0] + t*(w[0]-v[0])), p[1] - (v[1] + t*(w[1]-v[1])));
-        }
-
-        // 校准框交互
+        // ========== 上方校准框交互 ==========
         canvas.onmousedown = (e) => {
             const rect = canvas.getBoundingClientRect();
             const pos = { x: (e.clientX - rect.left) / rect.width, y: (e.clientY - rect.top) / rect.height };
@@ -792,10 +610,9 @@ HTML_ADMIN = """
             draggingCorner = -1;
         };
 
-        // 区域编辑交互
+        // ========== 下方区域交互 ==========
         correctedCanvas.onmousedown = (e) => {
             if (!editingZone) return;
-            
             const rect = correctedCanvas.getBoundingClientRect();
             const pos = {
                 x: (e.clientX - rect.left) / rect.width * 640,
@@ -803,140 +620,75 @@ HTML_ADMIN = """
             };
             const zone = zones.find(z => z.id === editingZone);
             if (!zone) return;
-            
-            dragStartPos = { x: pos.x, y: pos.y };
-            dragStartData = JSON.parse(JSON.stringify(zone));
-            mouseDown = true;
             
             if (zone.type === 'circle') {
                 const cx = zone.center[0], cy = zone.center[1], r = zone.radius;
                 const dCenter = Math.hypot(pos.x - cx, pos.y - cy);
+                const dRadius = Math.hypot(pos.x - (cx + r), pos.y - cy);
                 
-                if (dCenter < 15) {
-                    dragMode = 'move';
-                } else if (Math.abs(Math.hypot(pos.x - cx, pos.y - cy) - r) < 15) {
-                    dragMode = 'resize';
-                } else {
-                    mouseDown = false;
-                }
-            } else if (zone.type === 'rect') {
-                const pts = zone.points;
-                const centerX = (pts[0][0] + pts[2][0]) / 2;
-                const centerY = (pts[0][1] + pts[2][1]) / 2;
-                
-                // 检查是否点击中心（移动）
-                if (Math.hypot(pos.x - centerX, pos.y - centerY) < 20) {
-                    dragMode = 'move';
-                }
-                // 检查是否点击边
-                else if (distToSegment(pos, pts[0], pts[1]) < 12) {
-                    dragMode = 'edge-top';
-                } else if (distToSegment(pos, pts[3], pts[2]) < 12) {
-                    dragMode = 'edge-bottom';
-                } else if (distToSegment(pos, pts[0], pts[3]) < 12) {
-                    dragMode = 'edge-left';
-                } else if (distToSegment(pos, pts[1], pts[2]) < 12) {
-                    dragMode = 'edge-right';
-                } else {
-                    mouseDown = false;
+                if (dCenter < 20) {
+                    draggingZone = editingZone;
+                    draggingPoint = 'center';
+                    mouseDown = true;
+                } else if (dRadius < 20) {
+                    draggingZone = editingZone;
+                    draggingPoint = 'radius';
+                    mouseDown = true;
                 }
             } else {
-                // 其他形状：检查顶点
-                let found = false;
                 for (let i = 0; i < zone.points.length; i++) {
-                    if (Math.hypot(zone.points[i][0] - pos.x, zone.points[i][1] - pos.y) < 15) {
-                        dragMode = 'point-' + i;
-                        found = true;
+                    const d = Math.hypot(zone.points[i][0] - pos.x, zone.points[i][1] - pos.y);
+                    if (d < 20) {
+                        draggingZone = editingZone;
+                        draggingPoint = i;
+                        mouseDown = true;
                         break;
                     }
                 }
-                if (!found) mouseDown = false;
             }
         };
         
         correctedCanvas.onmousemove = (e) => {
-            if (!mouseDown || !editingZone || !dragMode) return;
-            
+            if (!mouseDown || draggingZone < 0 || draggingPoint === -1) return;
             const rect = correctedCanvas.getBoundingClientRect();
             const pos = {
                 x: (e.clientX - rect.left) / rect.width * 640,
                 y: (e.clientY - rect.top) / rect.height * 360
             };
-            const zone = zones.find(z => z.id === editingZone);
+            const zone = zones.find(z => z.id === draggingZone);
             if (!zone) return;
             
-            const dx = pos.x - dragStartPos.x;
-            const dy = pos.y - dragStartPos.y;
-            
             if (zone.type === 'circle') {
-                if (dragMode === 'move') {
-                    zone.center[0] = Math.max(30, Math.min(610, dragStartData.center[0] + dx));
-                    zone.center[1] = Math.max(30, Math.min(330, dragStartData.center[1] + dy));
-                } else if (dragMode === 'resize') {
-                    const newR = Math.hypot(pos.x - zone.center[0], pos.y - zone.center[1]);
-                    zone.radius = Math.max(20, Math.min(150, newR));
-                }
-            } else if (zone.type === 'rect') {
-                if (dragMode === 'move') {
-                    // 移动整个矩形
-                    const w = dragStartData.points[2][0] - dragStartData.points[0][0];
-                    const h = dragStartData.points[2][1] - dragStartData.points[0][1];
-                    let newX = dragStartData.points[0][0] + dx;
-                    let newY = dragStartData.points[0][1] + dy;
-                    
-                    // 边界检查
-                    newX = Math.max(10, Math.min(630 - w, newX));
-                    newY = Math.max(10, Math.min(350 - h, newY));
-                    
-                    zone.points[0] = [newX, newY];
-                    zone.points[1] = [newX + w, newY];
-                    zone.points[2] = [newX + w, newY + h];
-                    zone.points[3] = [newX, newY + h];
-                } else if (dragMode === 'edge-top') {
-                    const newY = Math.max(10, Math.min(dragStartData.points[3][1] - 20, dragStartData.points[0][1] + dy));
-                    zone.points[0][1] = newY;
-                    zone.points[1][1] = newY;
-                } else if (dragMode === 'edge-bottom') {
-                    const newY = Math.max(dragStartData.points[0][1] + 20, Math.min(350, dragStartData.points[2][1] + dy));
-                    zone.points[2][1] = newY;
-                    zone.points[3][1] = newY;
-                } else if (dragMode === 'edge-left') {
-                    const newX = Math.max(10, Math.min(dragStartData.points[1][0] - 20, dragStartData.points[0][0] + dx));
-                    zone.points[0][0] = newX;
-                    zone.points[3][0] = newX;
-                } else if (dragMode === 'edge-right') {
-                    const newX = Math.max(dragStartData.points[0][0] + 20, Math.min(630, dragStartData.points[1][0] + dx));
-                    zone.points[1][0] = newX;
-                    zone.points[2][0] = newX;
+                if (draggingPoint === 'center') {
+                    zone.center = [
+                        Math.max(30, Math.min(610, pos.x)),
+                        Math.max(30, Math.min(330, pos.y))
+                    ];
+                } else if (draggingPoint === 'radius') {
+                    const cx = zone.center[0], cy = zone.center[1];
+                    zone.radius = Math.max(20, Math.min(150, Math.hypot(pos.x - cx, pos.y - cy)));
                 }
             } else {
-                // 其他形状：移动顶点
-                if (dragMode.startsWith('point-')) {
-                    const idx = parseInt(dragMode.split('-')[1]);
-                    zone.points[idx] = [
-                        Math.max(10, Math.min(630, pos.x)),
-                        Math.max(10, Math.min(350, pos.y))
-                    ];
-                }
+                zone.points[draggingPoint] = [
+                    Math.max(10, Math.min(630, pos.x)),
+                    Math.max(10, Math.min(350, pos.y))
+                ];
             }
         };
         
         correctedCanvas.onmouseup = () => {
-            if (mouseDown) saveZones();
             mouseDown = false;
-            dragMode = null;
-            dragStartPos = null;
-            dragStartData = null;
+            draggingZone = -1;
+            draggingPoint = -1;
         };
         
         correctedCanvas.onmouseleave = () => {
-            if (mouseDown) saveZones();
             mouseDown = false;
-            dragMode = null;
-            dragStartPos = null;
-            dragStartData = null;
+            draggingZone = -1;
+            draggingPoint = -1;
         };
 
+        // ========== 区域管理 ==========
         function addZone(type) {
             if (zones.length >= 12) {
                 alert('最多只能添加12个区域！');
@@ -985,36 +737,6 @@ HTML_ADMIN = """
             saveZones();
         }
         
-        function copyZone(id) {
-            if (zones.length >= 12) {
-                alert('最多只能添加12个区域！');
-                return;
-            }
-            
-            const zone = zones.find(z => z.id === id);
-            if (!zone) return;
-            
-            const newId = zoneIdCounter++;
-            const newZone = JSON.parse(JSON.stringify(zone));
-            newZone.id = newId;
-            newZone.name = String(newId);
-            newZone.color = COLORS[(newId - 1) % COLORS.length];
-            
-            if (newZone.type === 'circle') {
-                newZone.center[0] = Math.min(600, newZone.center[0] + 30);
-                newZone.center[1] = Math.min(320, newZone.center[1] + 30);
-            } else {
-                newZone.points = newZone.points.map(p => [
-                    Math.min(620, p[0] + 30),
-                    Math.min(340, p[1] + 30)
-                ]);
-            }
-            
-            zones.push(newZone);
-            renderZoneList();
-            saveZones();
-        }
-        
         function deleteZone(id) {
             if (zones.length <= 1) {
                 alert('至少保留一个区域！');
@@ -1045,6 +767,7 @@ HTML_ADMIN = """
             }
         }
         
+        // ========== 拖拽排序 ==========
         function handleDragStart(e, id) {
             draggedZoneId = id;
             e.dataTransfer.effectAllowed = 'move';
@@ -1101,7 +824,6 @@ HTML_ADMIN = """
                                 ? `<button class="zone-btn btn-confirm" onclick="confirmEdit(${zone.id})">确定</button>`
                                 : `<button class="zone-btn btn-edit" onclick="startEdit(${zone.id})">编辑</button>`
                             }
-                            <button class="zone-btn btn-copy" onclick="copyZone(${zone.id})">复制</button>
                             <button class="zone-btn btn-delete" onclick="deleteZone(${zone.id})">删除</button>
                         </div>
                     </div>
@@ -1109,6 +831,7 @@ HTML_ADMIN = """
             `).join('');
         }
 
+        // ========== 保存 ==========
         function saveCorners() {
             fetch('/api/corners', {
                 method: 'POST',
@@ -1125,6 +848,7 @@ HTML_ADMIN = """
             });
         }
 
+        // ========== 状态更新 ==========
         function updateStatus() {
             fetch('/api/status').then(r => r.json()).then(d => {
                 const feetEl = document.getElementById('feet-status');
@@ -1159,38 +883,26 @@ HTML_ADMIN = """
 """
 
 # ============================================================================
-# HTML模板 - Projection页面
+# HTML模板 - Projection页面（形状与Admin完全一致）
 # ============================================================================
 HTML_PROJECTION = """
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Projection</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        html, body {
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-            background: #ffffff;
-            border: none;
-            outline: none;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            transition: background-color 0.3s;
+            background: #fff;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            position: relative;
         }
         
+        /* 顶部状态文字 */
         #status-text {
             position: absolute;
             top: 2%;
@@ -1204,6 +916,7 @@ HTML_PROJECTION = """
         }
         #status-text.in-zone { color: #33B555; }
         
+        /* 脚部圆点 */
         #foot-point {
             width: 80px;
             height: 80px;
@@ -1225,170 +938,137 @@ HTML_PROJECTION = """
             border-radius: 50%;
         }
         
-        #zones-canvas {
+        /* SVG画布 - 用于绘制精确形状 */
+        #zones-svg {
             position: absolute;
             top: 0; left: 0;
             width: 100%; height: 100%;
             pointer-events: none;
         }
         
-        #loading-ring {
-            position: absolute;
-            width: 150px;
-            height: 150px;
-            transform: translate(-50%, -50%);
-            display: none;
-            z-index: 60;
+        .zone-shape {
+            fill: none;
+            stroke-width: 3;
         }
-        
-        #score-feedback {
-            position: absolute;
-            transform: translate(-50%, -50%);
-            font-size: 4vw;
+        .zone-shape.active {
+            stroke-width: 5;
+            filter: drop-shadow(0 0 8px currentColor);
+        }
+        .zone-fill {
+            opacity: 0.2;
+        }
+        .zone-fill.active {
+            opacity: 0.4;
+        }
+        .zone-label {
+            font-size: 1.5vw;
             font-weight: bold;
-            display: none;
-            z-index: 70;
-            text-shadow: 0 0 30px currentColor;
+            text-anchor: middle;
+            dominant-baseline: middle;
         }
     </style>
 </head>
 <body>
     <div id="status-text">未进入区域</div>
     <div id="foot-point"></div>
-    <canvas id="zones-canvas"></canvas>
-    
-    <svg id="loading-ring" viewBox="0 0 100 100">
-        <circle cx="50" cy="50" r="45" fill="none" stroke="#333" stroke-width="3" opacity="0.3"/>
-        <circle id="progress-circle" cx="50" cy="50" r="45" fill="none" stroke="#33B555" stroke-width="6"
-                stroke-linecap="round" stroke-dasharray="283" stroke-dashoffset="283"
-                transform="rotate(-90 50 50)"/>
-    </svg>
-    
-    <div id="score-feedback"></div>
+    <svg id="zones-svg"></svg>
 
     <script>
         const statusText = document.getElementById('status-text');
         const footPoint = document.getElementById('foot-point');
-        const zonesCanvas = document.getElementById('zones-canvas');
-        const ctx = zonesCanvas.getContext('2d');
-        const loadingRing = document.getElementById('loading-ring');
-        const progressCircle = document.getElementById('progress-circle');
-        const scoreFeedback = document.getElementById('score-feedback');
+        const zonesSvg = document.getElementById('zones-svg');
         
         const projW = 640, projH = 360;
         let zones = [];
         let activeZones = [];
-        let projectionBg = "#ffffff";
-        
-        // 加载状态
-        let loadingZone = null;
-        let loadingProgress = 0;
-        let loadingStartTime = 0;
-        const LOADING_DURATION = 3000;
-        let lastFeedbackZone = null;
-        let canTriggerAgain = true;
 
         function init() {
-            resize();
-            loadConfig();
-            setInterval(update, 30);
-            setInterval(loadConfig, 2000);
-            window.addEventListener('resize', resize);
-        }
-        
-        function resize() {
-            zonesCanvas.width = window.innerWidth;
-            zonesCanvas.height = window.innerHeight;
-            drawZones();
-        }
-        
-        function loadConfig() {
             fetch('/api/config').then(r => r.json()).then(d => {
                 zones = d.zones || [];
-                if (d.projection_bg) {
-                    projectionBg = d.projection_bg;
-                    document.body.style.backgroundColor = projectionBg;
-                    document.documentElement.style.backgroundColor = projectionBg;
-                }
                 drawZones();
             });
+            setInterval(update, 50);
+            setInterval(loadConfig, 2000);
         }
 
         function drawZones() {
-            ctx.clearRect(0, 0, zonesCanvas.width, zonesCanvas.height);
-            
-            const scaleX = zonesCanvas.width / projW;
-            const scaleY = zonesCanvas.height / projH;
+            zonesSvg.innerHTML = '';
             
             zones.forEach(zone => {
                 const isActive = activeZones.includes(zone.id);
-                drawZone(ctx, zone, scaleX, scaleY, isActive);
+                const color = zone.color;
+                
+                if (zone.type === 'circle') {
+                    // 圆形
+                    const cx = (zone.center[0] / projW * 100);
+                    const cy = (zone.center[1] / projH * 100);
+                    const r = (zone.radius / Math.min(projW, projH) * 100);
+                    
+                    // 填充
+                    const fill = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                    fill.setAttribute('cx', cx + '%');
+                    fill.setAttribute('cy', cy + '%');
+                    fill.setAttribute('r', r + '%');
+                    fill.setAttribute('fill', color);
+                    fill.setAttribute('class', 'zone-fill' + (isActive ? ' active' : ''));
+                    zonesSvg.appendChild(fill);
+                    
+                    // 边框
+                    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                    circle.setAttribute('cx', cx + '%');
+                    circle.setAttribute('cy', cy + '%');
+                    circle.setAttribute('r', r + '%');
+                    circle.setAttribute('stroke', color);
+                    circle.setAttribute('class', 'zone-shape' + (isActive ? ' active' : ''));
+                    zonesSvg.appendChild(circle);
+                    
+                    // 标签
+                    const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                    text.setAttribute('x', cx + '%');
+                    text.setAttribute('y', cy + '%');
+                    text.setAttribute('fill', color);
+                    text.setAttribute('class', 'zone-label');
+                    text.textContent = zone.name || zone.id;
+                    zonesSvg.appendChild(text);
+                    
+                } else {
+                    // 多边形（矩形、三角形、四边形）
+                    const points = zone.points.map(p => 
+                        (p[0] / projW * 100) + ',' + (p[1] / projH * 100)
+                    ).join(' ');
+                    
+                    // 填充
+                    const fill = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+                    fill.setAttribute('points', points);
+                    fill.setAttribute('fill', color);
+                    fill.setAttribute('class', 'zone-fill' + (isActive ? ' active' : ''));
+                    zonesSvg.appendChild(fill);
+                    
+                    // 边框
+                    const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+                    polygon.setAttribute('points', points);
+                    polygon.setAttribute('stroke', color);
+                    polygon.setAttribute('class', 'zone-shape' + (isActive ? ' active' : ''));
+                    zonesSvg.appendChild(polygon);
+                    
+                    // 标签
+                    const cx = zone.points.reduce((s, p) => s + p[0], 0) / zone.points.length;
+                    const cy = zone.points.reduce((s, p) => s + p[1], 0) / zone.points.length;
+                    const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                    text.setAttribute('x', (cx / projW * 100) + '%');
+                    text.setAttribute('y', (cy / projH * 100) + '%');
+                    text.setAttribute('fill', color);
+                    text.setAttribute('class', 'zone-label');
+                    text.textContent = zone.name || zone.id;
+                    zonesSvg.appendChild(text);
+                }
             });
-        }
-        
-        function drawZone(ctx, zone, scaleX, scaleY, isActive) {
-            ctx.strokeStyle = zone.color;
-            ctx.lineWidth = isActive ? 5 : 3;
-            
-            if (zone.type === 'circle') {
-                const cx = zone.center[0] * scaleX;
-                const cy = zone.center[1] * scaleY;
-                const r = zone.radius * Math.min(scaleX, scaleY);
-                
-                if (isActive) {
-                    ctx.fillStyle = zone.color + '40';
-                    ctx.beginPath();
-                    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-                    ctx.fill();
-                }
-                
-                ctx.beginPath();
-                ctx.arc(cx, cy, r, 0, Math.PI * 2);
-                ctx.stroke();
-                
-                ctx.fillStyle = zone.color;
-                ctx.font = 'bold ' + (20 * Math.min(scaleX, scaleY)) + 'px Arial';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillText(zone.name || zone.id, cx, cy);
-                
-            } else {
-                const points = zone.points.map(p => [p[0] * scaleX, p[1] * scaleY]);
-                
-                if (isActive) {
-                    ctx.fillStyle = zone.color + '40';
-                    ctx.beginPath();
-                    points.forEach((p, i) => {
-                        if (i === 0) ctx.moveTo(p[0], p[1]);
-                        else ctx.lineTo(p[0], p[1]);
-                    });
-                    ctx.closePath();
-                    ctx.fill();
-                }
-                
-                ctx.beginPath();
-                points.forEach((p, i) => {
-                    if (i === 0) ctx.moveTo(p[0], p[1]);
-                    else ctx.lineTo(p[0], p[1]);
-                });
-                ctx.closePath();
-                ctx.stroke();
-                
-                const cx = points.reduce((s, p) => s + p[0], 0) / points.length;
-                const cy = points.reduce((s, p) => s + p[1], 0) / points.length;
-                ctx.fillStyle = zone.color;
-                ctx.font = 'bold ' + (20 * Math.min(scaleX, scaleY)) + 'px Arial';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillText(zone.name || zone.id, cx, cy);
-            }
         }
 
         function update() {
             fetch('/api/status')
                 .then(r => r.json())
                 .then(d => {
-                    // 更新状态文字
                     if (d.active_zones && d.active_zones.length > 0) {
                         const names = d.active_zones.map(id => {
                             const z = zones.find(zone => zone.id === id);
@@ -1401,7 +1081,6 @@ HTML_PROJECTION = """
                         statusText.className = '';
                     }
                     
-                    // 更新脚部位置
                     if (d.feet_detected) {
                         footPoint.style.display = 'block';
                         footPoint.style.left = (d.feet_x / projW * 100) + '%';
@@ -1410,108 +1089,18 @@ HTML_PROJECTION = """
                         footPoint.style.display = 'none';
                     }
                     
-                    // 处理加载
-                    handleLoading(d.active_zones || [], d.feet_x, d.feet_y, d.feet_detected);
-                    
-                    // 更新区域高亮
                     if (JSON.stringify(d.active_zones || []) !== JSON.stringify(activeZones)) {
                         activeZones = d.active_zones || [];
                         drawZones();
                     }
-                })
-                .catch(err => console.error(err));
+                });
         }
         
-        function handleLoading(currentZones, feetX, feetY, feetDetected) {
-            if (!feetDetected) {
-                // 没检测到脚，重置
-                resetLoading();
-                return;
-            }
-            
-            if (currentZones.length > 0) {
-                const zoneId = currentZones[0];
-                const zone = zones.find(z => z.id === zoneId);
-                
-                // 新区域
-                if (loadingZone !== zoneId) {
-                    resetLoading();
-                    loadingZone = zoneId;
-                    loadingStartTime = Date.now();
-                    loadingProgress = 0;
-                    canTriggerAgain = true;
-                    
-                    loadingRing.style.display = 'block';
-                    loadingRing.style.left = (feetX / projW * 100) + '%';
-                    loadingRing.style.top = (feetY / projH * 100) + '%';
-                    
-                    if (zone) {
-                        progressCircle.setAttribute('stroke', zone.color);
-                    }
-                }
-                
-                // 更新进度
-                loadingRing.style.left = (feetX / projW * 100) + '%';
-                loadingRing.style.top = (feetY / projH * 100) + '%';
-                
-                const elapsed = Date.now() - loadingStartTime;
-                loadingProgress = Math.min(100, (elapsed / LOADING_DURATION) * 100);
-                
-                // 更新圆环
-                const offset = 283 - (283 * loadingProgress / 100);
-                progressCircle.setAttribute('stroke-dashoffset', offset);
-                
-                // 加载完成
-                if (loadingProgress >= 100 && canTriggerAgain) {
-                    showFeedback(zoneId, feetX, feetY);
-                    canTriggerAgain = false;
-                    
-                    // 准备下一次
-                    setTimeout(() => {
-                        if (loadingZone === zoneId) {
-                            loadingStartTime = Date.now();
-                            loadingProgress = 0;
-                            canTriggerAgain = true;
-                        }
-                    }, 500);
-                }
-            } else {
-                resetLoading();
-            }
-        }
-        
-        function resetLoading() {
-            if (loadingZone !== null) {
-                loadingZone = null;
-                loadingProgress = 0;
-                loadingRing.style.display = 'none';
-                scoreFeedback.style.display = 'none';
-                canTriggerAgain = true;
-            }
-        }
-        
-        function showFeedback(zoneId, feetX, feetY) {
-            const zone = zones.find(z => z.id === zoneId);
-            if (!zone) return;
-            
-            const isCircle = zone.type === 'circle';
-            const score = isCircle ? '+5' : '-5';
-            const color = isCircle ? '#33B555' : '#ff4444';
-            
-            // 更新圆环颜色
-            progressCircle.setAttribute('stroke', color);
-            
-            // 显示得分
-            scoreFeedback.textContent = score;
-            scoreFeedback.style.color = color;
-            scoreFeedback.style.left = (feetX / projW * 100) + '%';
-            scoreFeedback.style.top = ((feetY / projH * 100) - 12) + '%';
-            scoreFeedback.style.display = 'block';
-            
-            // 隐藏得分
-            setTimeout(() => {
-                scoreFeedback.style.display = 'none';
-            }, 1000);
+        function loadConfig() {
+            fetch('/api/config').then(r => r.json()).then(d => {
+                zones = d.zones || [];
+                drawZones();
+            });
         }
 
         init();
@@ -1540,7 +1129,7 @@ def video_feed():
             jpeg = processor.get_raw_jpeg()
             if jpeg:
                 yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + jpeg + b'\r\n')
-            time.sleep(0.02)
+            time.sleep(0.03)
     return Response(gen(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 @app.route('/corrected_feed')
@@ -1550,7 +1139,7 @@ def corrected_feed():
             jpeg = processor.get_corrected_jpeg()
             if jpeg:
                 yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + jpeg + b'\r\n')
-            time.sleep(0.02)
+            time.sleep(0.03)
     return Response(gen(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 @app.route('/api/config')
@@ -1558,9 +1147,7 @@ def api_config():
     return jsonify({
         "corners": state["corners"],
         "zones": state["zones"],
-        "zone_id_counter": state["zone_id_counter"],
-        "admin_bg": state["admin_bg"],
-        "projection_bg": state["projection_bg"]
+        "zone_id_counter": state["zone_id_counter"]
     })
 
 @app.route('/api/corners', methods=['POST'])
@@ -1578,15 +1165,6 @@ def api_zones():
         state["zone_id_counter"] = data["zone_id_counter"]
     return jsonify({"ok": True})
 
-@app.route('/api/settings', methods=['POST'])
-def api_settings():
-    data = request.json
-    if "admin_bg" in data:
-        state["admin_bg"] = data["admin_bg"]
-    if "projection_bg" in data:
-        state["projection_bg"] = data["projection_bg"]
-    return jsonify({"ok": True})
-
 @app.route('/api/status')
 def api_status():
     return jsonify({
@@ -1601,7 +1179,7 @@ def api_status():
 # ============================================================================
 if __name__ == '__main__':
     print("=" * 50)
-    print("地面投影交互系统 V8")
+    print("地面投影交互系统 V4")
     print("=" * 50)
     print("Admin:  http://127.0.0.1:5000/admin")
     print("投影:   http://127.0.0.1:5000/projection")
