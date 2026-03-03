@@ -8,7 +8,8 @@
       "program": "camera_calibrate.py",
       "cwd": "${workspaceFolder}/",
       "console": "integratedTerminal"
-    },    {
+    },
+    {
       "name": "后端 (Flask)",
       "type": "debugpy",
       "request": "launch",
@@ -35,5 +36,23 @@
       "name": "一键启动",
       "configurations": ["后端 (Flask)", "前端 (Nuxt)"]
     }
-  ]
+  ],
+  "tasks": {
+    "version": "2.0.0",
+    "tasks": [
+      {
+        "label": "启动Projection (Kiosk)",
+        "type": "shell",
+        "command": "start",
+        "args": [
+          "",
+          "\"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe\"",
+          "--kiosk",
+          "--edge-kiosk-type=fullscreen",
+          "http://127.0.0.1:5000/projection"
+        ],
+        "problemMatcher": []
+      }
+    ]
+  }
 }
