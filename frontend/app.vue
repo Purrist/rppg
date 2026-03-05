@@ -75,7 +75,7 @@ const ball = reactive({
 
 const handleNavRequest = (path) => {
   if (isGameActive.value) {
-    alert("请先点击“退出游戏”")
+    alert('请先点击"退出游戏"')
     return
   }
   // 不再本地直接跳转，而是向后端发送请求
@@ -88,14 +88,17 @@ const handleNavRequest = (path) => {
 }
 
 const handleAdminNav = (path) => {
-  if (isGameActive.value) { alert("请先点击“退出游戏”"); return; }
-  ui.menu = false; 
-  router.push(path); // 后台页不参与全局同步，本地直接跳
+  if (isGameActive.value) { 
+    alert('请先点击"退出游戏"')
+    return
+  }
+  ui.menu = false 
+  router.push(path) // 后台页不参与全局同步，本地直接跳
 }
 
 onMounted(() => {
-  // 初始化 Socket 连接
-  socket = io(`http://${window.location.hostname}:8080`)
+  // 初始化 Socket 连接 - 使用端口 5000
+  socket = io('http://localhost:5000')
 
   // 监听后端强制跳转信号（多网页联动的关键）
   socket.on('navigate_to', (data) => {

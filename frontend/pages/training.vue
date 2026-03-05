@@ -32,6 +32,17 @@
         <div class="chart-box"><h3>情绪状态分布</h3><div class="mock-chart emotion"></div></div>
       </div>
     </div>
+    
+    <!-- 新增：暂停状态显示 -->
+    <div v-else-if="game.status === 'PAUSED'" class="paused-view">
+      <div class="pause-overlay">
+        <h1>游戏已暂停</h1>
+        <div class="pause-buttons">
+          <button @click="togglePause" class="resume-btn">继续游戏</button>
+          <button @click="exitGame" class="exit-btn">退出游戏</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -53,6 +64,11 @@ onMounted(() => {
     if (res.state) health.value = { ...res.state, emotionCn: '平静' }
   })
 })
+
+// 修复：添加缺失的 togglePause 函数
+const togglePause = () => {
+  socket.emit('game_control', { action: 'pause' })
+}
 
 const exitGame = () => {
   socket.emit('game_control', { action: 'stop' })
@@ -83,4 +99,12 @@ const exitGame = () => {
 .stat-card p { font-size: 36px; font-weight: 900; color: #FF7222; }
 .charts-area { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; flex: 1; min-height: 350px; }
 .chart-box { background: #F9F9F9; border-radius: 25px; padding: 20px; }
+
+/* 暂停样式 */
+.paused-view { height: 100%; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.3); }
+.pause-overlay { text-align: center; }
+.pause-overlay h1 { font-size: 60px; color: #333; margin-bottom: 40px; }
+.pause-buttons { display: flex; gap: 30px; justify-content: center; }
+.resume-btn { width: 250px; height: 80px; background: #33B555; color: #FFF; border-radius: 40px; font-size: 28px; font-weight: bold; border: none; }
+.exit-btn { width: 250px; height: 80px; background: #FB4422; color: #FFF; border-radius: 40px; font-size: 28px; font-weight: bold; border: none; }
 </style>

@@ -1,573 +1,672 @@
 <template>
-  <div class="dev-page">
-    <div class="top-nav">
-      <h2>🛠 视觉引擎控制台</h2>
-      <div class="nav-buttons">
-        <button @click="toggleCalibrationMode" :class="{ active: calibrationMode }">
-          {{ calibrationMode ? '🎯 校准模式' : '📷 监控模式' }}
-        </button>
-        <button v-if="calibrationMode" @click="saveCalibration" class="save-btn">💾 保存</button>
-        <button v-if="calibrationMode" @click="resetCalibration" class="reset-btn">🔄 重置</button>
-        <button @click="$router.push('/')">退出后台</button>
-      </div>
-    </div>
-
-    <div class="video-grid">
-      <div class="monitor-card">
-        <h3>平板端摄像头 (生理/情绪)</h3>
-        <img v-if="tabletImg" :src="'data:image/jpeg;base64,' + tabletImg" />
-        <div v-else class="placeholder">等待平板视频流...</div>
-      </div>
-
-      <div class="monitor-card">
-        <h3>外接摄像头 (投影区域识别)</h3>
-        <div class="video-wrapper" ref="videoWrapper">
-          <canvas 
-            v-if="screenImg && calibrationMode" 
-            ref="calibCanvas"
-            @mousedown="handleMouseDown"
-            @mousemove="handleMouseMove"
-            @mouseup="handleMouseUp"
-            @mouseleave="handleMouseUp"
-          ></canvas>
-          <img v-else-if="screenImg" :src="'data:image/jpeg;base64,' + screenImg" />
-          <div v-else class="placeholder">等待投影视频流...</div>
-        </div>
-      </div>
+  <div class="admin-page" :style="{ backgroundColor: config.admin_bg }">
+    <h1>摄像头校准管理</h1>
+    
+    <!-- 连接状态提示 -->
+    <div v-if="!connected" class="connection-error">
+      ⚠️ 无法连接到后端服务，请确保 Flask 后端正在运行（端口 5000）
+      <br><br>
+      <code>cd backend && python app.py</code>
     </div>
     
-    <div v-if="calibrationMode" class="calibration-panel">
-      <div class="panel-section">
-        <h3>📐 投影区域校准 (4个顶点)</h3>
-        <p class="hint">点击画布上的4个角点，或拖拽已有的点</p>
-        <div class="points-list">
-          <div 
-            v-for="(point, idx) in projectionPoints" 
-            :key="'proj-' + idx"
-            class="point-item"
-            :class="{ active: selectedType === 'projection' && selectedIndex === idx }"
-            @click="selectPoint('projection', idx)"
-          >
-            <span class="point-label" :style="{ color: projColors[idx] }">投影点 {{ idx + 1 }}</span>
-            <span class="point-coords">{{ point ? `${point[0]}, ${point[1]}` : '未设置' }}</span>
-          </div>
+    <!-- 原始摄像头画面 -->
+    <div class="video-container">
+      <img id="video" :src="videoUrl" @load="resize" @error="handleVideoError">
+      <canvas ref="rawCanvas" @mousedown="handleRawMouseDown" @mousemove="handleRawMouseMove" 
+              @mouseup="handleRawMouseUp" @mouseleave="handleRawMouseUp"></canvas>
+    </div>
+    
+    <p class="hint">↓ 矫正后的16:9画面 ↓</p>
+    
+    <!-- 校正后画面 -->
+    <div class="corrected-container">
+      <img id="corrected" :src="correctedUrl" @load="resize" @error="handleVideoError">
+      <canvas ref="correctedCanvas" @mousedown="handleCorrectedMouseDown" @mousemove="handleCorrectedMouseMove"
+              @mouseup="handleCorrectedMouseUp" @mouseleave="handleCorrectedMouseUp"></canvas>
+    </div>
+    
+    <!-- 状态栏 -->
+    <div class="status-bar">
+      <span>脚部: <span :class="status.feet_detected ? 'detected' : 'not-detected'">
+        {{ status.feet_detected ? '已检测' : '未检测到' }}
+      </span></span>
+      <span>区域: <span :class="status.active_zones?.length > 0 ? 'detected' : 'not-detected'">
+        {{ status.active_zones?.length > 0 ? status.active_zones.join(' - ') : '未进入' }}
+      </span></span>
+    </div>
+    
+    <!-- 控制面板 -->
+    <div class="control-panel">
+      <!-- 设置 -->
+      <div class="section-title">⚙️ 设置</div>
+      <div class="settings-row">
+        <div class="setting-item">
+          <label>Admin背景:</label>
+          <input type="color" v-model="config.admin_bg" @change="updateSettings">
+        </div>
+        <div class="setting-item">
+          <label>Projection背景:</label>
+          <input type="color" v-model="config.projection_bg" @change="updateSettings">
         </div>
       </div>
       
-      <div class="panel-section holes-section">
-        <h3>🎮 地鼠洞区域</h3>
-        <div class="hole-tabs">
-          <div 
-            v-for="(hole, idx) in holes" 
-            :key="'hole-tab-' + idx"
-            class="hole-tab"
-            :class="{ active: selectedHole === idx }"
-            @click="selectedHole = idx"
-          >
-            洞 {{ idx + 1 }}
-          </div>
-        </div>
-        
-        <div v-if="selectedHole !== null" class="hole-detail">
-          <p class="hint">拖拽画布上的4个顶点调整洞 {{ selectedHole + 1 }}</p>
-          <div class="hole-points">
-            <div 
-              v-for="(point, idx) in holePoints[selectedHole]" 
-              :key="'hole-' + selectedHole + '-' + idx"
-              class="point-item small"
-              :class="{ active: selectedType === 'hole' && selectedIndex === idx }"
-              @click="selectPoint('hole', idx)"
-            >
-              <span class="point-label" :style="{ color: holeColors[selectedHole] }">点 {{ idx + 1 }}</span>
-              <span class="point-coords">{{ point ? `${point[0].toFixed(2)}, ${point[1].toFixed(2)}` : '未设置' }}</span>
+      <!-- 配置保存/加载 -->
+      <div class="section-title">💾 配置保存/加载</div>
+      <div class="save-load-row">
+        <button class="save-btn btn-save-all" @click="saveAllConfig">保存全部</button>
+        <button class="save-btn btn-load-all" @click="loadAllConfig">加载全部</button>
+      </div>
+      
+      <!-- 添加区域 -->
+      <div class="section-title">添加区域 ({{ config.zones.length }}/12)</div>
+      <div class="add-buttons">
+        <button class="add-btn" @click="addZone('rect')">▢ 矩形</button>
+        <button class="add-btn" @click="addZone('triangle')">△ 三角形</button>
+        <button class="add-btn" @click="addZone('circle')">○ 圆形</button>
+        <button class="add-btn" @click="addZone('quad')">◇ 四边形</button>
+      </div>
+      
+      <!-- 区域列表 -->
+      <div class="section-title">区域列表</div>
+      <div class="zone-list">
+        <div v-for="zone in config.zones" :key="zone.id" 
+             class="zone-item" 
+             :class="{ editing: editingZone === zone.id }"
+             draggable="true"
+             @dragstart="handleDragStart($event, zone.id)"
+             @dragover.prevent
+             @drop="handleDrop($event, zone.id)"
+             @dragend="handleDragEnd">
+          <div class="zone-header">
+            <span class="drag-handle">☰</span>
+            <span class="zone-dot" :style="{ backgroundColor: zone.color }"></span>
+            <input class="zone-name-input" :value="zone.name" 
+                   @change="renameZone(zone.id, $event.target.value)"
+                   @click.stop>
+            <span class="zone-type">({{ typeNames[zone.type] }})</span>
+            <div class="zone-actions">
+              <button v-if="editingZone === zone.id" class="zone-btn btn-confirm" 
+                      @click="confirmEdit(zone.id)">确定</button>
+              <button v-else class="zone-btn btn-edit" @click="startEdit(zone.id)">编辑</button>
+              <button class="zone-btn btn-copy" @click="copyZone(zone.id)">复制</button>
+              <button class="zone-btn btn-delete" @click="deleteZone(zone.id)">删除</button>
             </div>
           </div>
         </div>
       </div>
     </div>
+    
+    <!-- Toast提示 -->
+    <div v-if="toast.show" class="toast">{{ toast.msg }}</div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
-import { io } from 'socket.io-client'
+import { ref, reactive, onMounted, onUnmounted } from 'vue'
 
-const tabletImg = ref('')
-const screenImg = ref('')
-const calibrationMode = ref(false)
-const projectionPoints = ref([null, null, null, null])
+const COLORS = ["#33B555", "#FF7222", "#2196F3", "#9C27B0", "#FF5722", "#00BCD4", "#E91E63", "#795548", "#607D8B", "#FFEB3B", "#4CAF50", "#3F51B5"]
+const typeNames = { 'rect': '矩形', 'triangle': '三角形', 'circle': '圆形', 'quad': '四边形' }
 
-const holes = ref([
-  {"id": 0, "points": [[0.08, 0.45], [0.28, 0.45], [0.28, 0.85], [0.08, 0.85]]},
-  {"id": 1, "points": [[0.36, 0.45], [0.64, 0.45], [0.64, 0.85], [0.36, 0.85]]},
-  {"id": 2, "points": [[0.72, 0.45], [0.92, 0.45], [0.92, 0.85], [0.72, 0.85]]}
-])
+// Flask 后端运行在端口 5000
+const FLASK_PORT = 5000
 
-const holePoints = ref([
-  [null, null, null, null],
-  [null, null, null, null],
-  [null, null, null, null]
-])
+// 使用 localhost 而不是 window.location.hostname
+const apiBase = `http://localhost:${FLASK_PORT}`
+const videoUrl = `${apiBase}/video_feed`
+const correctedUrl = `${apiBase}/corrected_feed`
 
-const selectedType = ref(null)
-const selectedIndex = ref(-1)
-const selectedHole = ref(0)
-const isDragging = ref(false)
-const calibCanvas = ref(null)
+const rawCanvas = ref(null)
+const correctedCanvas = ref(null)
+const connected = ref(false)
 
-let socket = null
-const projColors = ['#FF7222', '#33B555', '#2AAADD', '#FB4422']
-const holeColors = ['#FF7222', '#33B555', '#2AAADD']
-
-const toggleCalibrationMode = () => {
-  calibrationMode.value = !calibrationMode.value
-  if (calibrationMode.value) {
-    initHolePoints()
-    nextTick(() => {
-      drawCalibrationCanvas()
-    })
-  }
-}
-
-const initHolePoints = () => {
-  holes.value.forEach((hole, hIdx) => {
-    if (hole.points && hole.points.length === 4) {
-      holePoints.value[hIdx] = hole.points.map(p => [...p])
-    }
-  })
-}
-
-const selectPoint = (type, idx) => {
-  selectedType.value = type
-  selectedIndex.value = idx
-}
-
-const handleMouseDown = (e) => {
-  const rect = calibCanvas.value.getBoundingClientRect()
-  const x = e.clientX - rect.left
-  const y = e.clientY - rect.top
-  
-  const scaleX = calibCanvas.value.width / rect.width
-  const scaleY = calibCanvas.value.height / rect.height
-  const canvasX = Math.round(x * scaleX)
-  const canvasY = Math.round(y * scaleY)
-  
-  // 先检查投影点
-  for (let i = 0; i < 4; i++) {
-    if (projectionPoints.value[i]) {
-      const px = projectionPoints.value[i][0]
-      const py = projectionPoints.value[i][1]
-      const dist = Math.sqrt((canvasX - px) ** 2 + (canvasY - py) ** 2)
-      if (dist < 25) {
-        selectedType.value = 'projection'
-        selectedIndex.value = i
-        isDragging.value = true
-        return
-      }
-    }
-  }
-  
-  // 再检查地鼠洞的点（检查所有洞）
-  for (let hIdx = 0; hIdx < 3; hIdx++) {
-    const w = calibCanvas.value.width
-    const h = calibCanvas.value.height
-    
-    for (let i = 0; i < 4; i++) {
-      if (holePoints.value[hIdx][i]) {
-        const px = holePoints.value[hIdx][i][0] * w
-        const py = holePoints.value[hIdx][i][1] * h
-        const dist = Math.sqrt((canvasX - px) ** 2 + (canvasY - py) ** 2)
-        if (dist < 25) {
-          selectedType.value = 'hole'
-          selectedHole.value = hIdx
-          selectedIndex.value = i
-          isDragging.value = true
-          return
-        }
-      }
-    }
-  }
-  
-  // 如果没有选中任何点，检查是否需要设置投影点
-  if (selectedType.value === 'projection') {
-    const emptyIdx = projectionPoints.value.findIndex(p => p === null)
-    if (emptyIdx !== -1) {
-      projectionPoints.value[emptyIdx] = [canvasX, canvasY]
-      selectedIndex.value = emptyIdx
-      updateProjection()
-    }
-  }
-}
-
-const handleMouseMove = (e) => {
-  if (!isDragging.value || selectedIndex.value === -1) return
-  
-  const rect = calibCanvas.value.getBoundingClientRect()
-  const x = e.clientX - rect.left
-  const y = e.clientY - rect.top
-  
-  const scaleX = calibCanvas.value.width / rect.width
-  const scaleY = calibCanvas.value.height / rect.height
-  const canvasX = Math.round(x * scaleX)
-  const canvasY = Math.round(y * scaleY)
-  
-  if (selectedType.value === 'projection') {
-    projectionPoints.value[selectedIndex.value] = [canvasX, canvasY]
-    updateProjection()
-  } else if (selectedType.value === 'hole' && selectedHole.value !== null) {
-    const w = calibCanvas.value.width
-    const h = calibCanvas.value.height
-    const normX = Math.max(0, Math.min(1, canvasX / w))
-    const normY = Math.max(0, Math.min(1, canvasY / h))
-    holePoints.value[selectedHole.value][selectedIndex.value] = [normX, normY]
-    updateHole(selectedHole.value)
-  }
-  
-  drawCalibrationCanvas()
-}
-
-const handleMouseUp = () => {
-  isDragging.value = false
-  drawCalibrationCanvas()
-}
-
-const updateProjection = () => {
-  const validPoints = projectionPoints.value.filter(p => p !== null)
-  if (validPoints.length === 4) {
-    for (let i = 0; i < 4; i++) {
-      socket.emit('update_calibration_point', { 
-        index: i, 
-        x: projectionPoints.value[i][0], 
-        y: projectionPoints.value[i][1] 
-      })
-    }
-  }
-}
-
-const updateHole = (idx) => {
-  holes.value[idx].points = holePoints.value[idx].map(p => [...p])
-  socket.emit('update_hole', {
-    index: idx,
-    points: holePoints.value[idx]
-  })
-}
-
-const saveCalibration = () => {
-  socket.emit('save_calibration')
-  alert('✅ 校准配置已保存！')
-}
-
-const resetCalibration = () => {
-  if (confirm('确定要重置校准吗？')) {
-    socket.emit('reset_calibration')
-    projectionPoints.value = [null, null, null, null]
-    holes.value = [
-      {"id": 0, "points": [[0.08, 0.45], [0.28, 0.45], [0.28, 0.85], [0.08, 0.85]]},
-      {"id": 1, "points": [[0.36, 0.45], [0.64, 0.45], [0.64, 0.85], [0.36, 0.85]]},
-      {"id": 2, "points": [[0.72, 0.45], [0.92, 0.45], [0.92, 0.85], [0.72, 0.85]]}
-    ]
-    initHolePoints()
-    drawCalibrationCanvas()
-  }
-}
-
-const drawCalibrationCanvas = () => {
-  if (!calibCanvas.value || !screenImg.value) return
-  
-  const canvas = calibCanvas.value
-  const ctx = canvas.getContext('2d')
-  
-  const img = new Image()
-  img.onload = () => {
-    canvas.width = img.width
-    canvas.height = img.height
-    ctx.drawImage(img, 0, 0)
-    
-    for (let i = 0; i < 4; i++) {
-      if (projectionPoints.value[i]) {
-        const [x, y] = projectionPoints.value[i]
-        ctx.beginPath()
-        ctx.arc(x, y, 18, 0, Math.PI * 2)
-        ctx.fillStyle = projColors[i]
-        ctx.fill()
-        ctx.strokeStyle = '#fff'
-        ctx.lineWidth = 3
-        ctx.stroke()
-        
-        ctx.fillStyle = '#fff'
-        ctx.font = 'bold 14px Arial'
-        ctx.textAlign = 'center'
-        ctx.fillText(i + 1, x, y + 5)
-      }
-    }
-    
-    const validProjPoints = projectionPoints.value.filter(p => p !== null)
-    if (validProjPoints.length >= 2) {
-      ctx.beginPath()
-      ctx.strokeStyle = '#FF7222'
-      ctx.lineWidth = 3
-      ctx.setLineDash([10, 5])
-      for (let i = 0; i < validProjPoints.length; i++) {
-        const [x, y] = validProjPoints[i]
-        if (i === 0) ctx.moveTo(x, y)
-        else ctx.lineTo(x, y)
-      }
-      if (validProjPoints.length === 4) ctx.closePath()
-      ctx.stroke()
-      ctx.setLineDash([])
-    }
-    
-    for (let hIdx = 0; hIdx < 3; hIdx++) {
-      const color = holeColors[hIdx]
-      const points = holePoints.value[hIdx]
-      
-      if (points.every(p => p !== null)) {
-        ctx.beginPath()
-        ctx.strokeStyle = color
-        ctx.lineWidth = hIdx === selectedHole.value ? 5 : 3
-        for (let i = 0; i < 4; i++) {
-          const x = points[i][0] * canvas.width
-          const y = points[i][1] * canvas.height
-          if (i === 0) ctx.moveTo(x, y)
-          else ctx.lineTo(x, y)
-        }
-        ctx.closePath()
-        ctx.stroke()
-        
-        for (let i = 0; i < 4; i++) {
-          const x = points[i][0] * canvas.width
-          const y = points[i][1] * canvas.height
-          ctx.beginPath()
-          ctx.arc(x, y, 12, 0, Math.PI * 2)
-          ctx.fillStyle = color
-          ctx.fill()
-          ctx.strokeStyle = '#fff'
-          ctx.lineWidth = 2
-          ctx.stroke()
-          
-          if (hIdx === selectedHole.value) {
-            ctx.fillStyle = '#fff'
-            ctx.font = 'bold 10px Arial'
-            ctx.textAlign = 'center'
-            ctx.fillText(i + 1, x, y + 4)
-          }
-        }
-        
-        const cx = (points[0][0] + points[1][0]) / 2 * canvas.width
-        const cy = (points[0][1] + points[2][1]) / 2 * canvas.height
-        ctx.fillStyle = color
-        ctx.font = 'bold 16px Arial'
-        ctx.textAlign = 'center'
-        ctx.fillText(`Hole ${hIdx + 1}`, cx, cy)
-      }
-    }
-  }
-  img.src = 'data:image/jpeg;base64,' + screenImg.value
-}
-
-onMounted(() => {
-  socket = io(`http://${window.location.hostname}:8080`)
-
-  socket.on('tablet_stream', (data) => {
-    tabletImg.value = data.image
-  })
-
-  socket.on('screen_stream', (data) => {
-    screenImg.value = data.image
-    if (data.calibration) {
-      if (data.calibration.points && data.calibration.points.length === 4) {
-        projectionPoints.value = data.calibration.points
-      }
-      if (data.calibration.holes) {
-        holes.value = data.calibration.holes
-        if (calibrationMode.value) {
-          initHolePoints()
-        }
-      }
-    }
-    if (calibrationMode.value) {
-      nextTick(() => {
-        drawCalibrationCanvas()
-      })
-    }
-  })
+const config = reactive({
+  corners: [[0.15, 0.2], [0.85, 0.2], [0.85, 0.85], [0.15, 0.85]],
+  zones: [],
+  zone_id_counter: 4,
+  admin_bg: '#ffffff',
+  projection_bg: '#000000'
 })
 
-onUnmounted(() => {
-  if (socket) socket.disconnect()
+const status = reactive({
+  feet_detected: false,
+  feet_x: 320,
+  feet_y: 180,
+  active_zones: []
+})
+
+const toast = reactive({ show: false, msg: '' })
+
+const editingZone = ref(null)
+const draggingCorner = ref(-1)
+const mouseDown = ref(false)
+const dragMode = ref(null)
+const dragStartPos = ref(null)
+const dragStartData = ref(null)
+const draggedZoneId = ref(null)
+
+function showToast(msg) {
+  toast.msg = msg
+  toast.show = true
+  setTimeout(() => toast.show = false, 2000)
+}
+
+function handleVideoError(e) {
+  console.error('视频流加载失败', e)
+}
+
+async function checkConnection() {
+  try {
+    const res = await fetch(`${apiBase}/api/config`, { 
+      method: 'GET',
+      signal: AbortSignal.timeout(3000)
+    })
+    connected.value = res.ok
+    return res.ok
+  } catch (e) {
+    connected.value = false
+    console.error('后端连接失败:', e)
+    return false
+  }
+}
+
+async function loadConfig() {
+  try {
+    const res = await fetch(`${apiBase}/api/config`)
+    if (!res.ok) throw new Error('请求失败')
+    const data = await res.json()
+    if (data.corners) config.corners = data.corners
+    if (data.zones) config.zones = data.zones
+    if (data.zone_id_counter) config.zone_id_counter = data.zone_id_counter
+    if (data.admin_bg) config.admin_bg = data.admin_bg
+    if (data.projection_bg) config.projection_bg = data.projection_bg
+    connected.value = true
+  } catch (e) {
+    console.error('加载配置失败', e)
+    connected.value = false
+  }
+}
+
+async function saveCorners() {
+  if (!connected.value) return
+  try {
+    await fetch(`${apiBase}/api/corners`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ corners: config.corners })
+    })
+  } catch (e) {
+    console.error('保存校准点失败', e)
+  }
+}
+
+async function saveZones() {
+  if (!connected.value) return
+  try {
+    await fetch(`${apiBase}/api/zones`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ zones: config.zones, zone_id_counter: config.zone_id_counter })
+    })
+  } catch (e) {
+    console.error('保存区域失败', e)
+  }
+}
+
+async function updateSettings() {
+  if (!connected.value) return
+  try {
+    await fetch(`${apiBase}/api/settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ admin_bg: config.admin_bg, projection_bg: config.projection_bg })
+    })
+  } catch (e) {
+    console.error('保存设置失败', e)
+  }
+}
+
+async function saveAllConfig() {
+  if (!connected.value) {
+    showToast('后端未连接')
+    return
+  }
+  try {
+    const res = await fetch(`${apiBase}/api/save_all`, { method: 'POST' })
+    const data = await res.json()
+    showToast(data.msg || '保存成功')
+  } catch (e) {
+    showToast('保存失败')
+  }
+}
+
+async function loadAllConfig() {
+  if (!connected.value) {
+    showToast('后端未连接')
+    return
+  }
+  try {
+    const res = await fetch(`${apiBase}/api/load_all`, { method: 'POST' })
+    const data = await res.json()
+    if (data.ok) {
+      await loadConfig()
+      showToast('配置已加载')
+    } else {
+      showToast(data.msg || '加载失败')
+    }
+  } catch (e) {
+    showToast('加载失败')
+  }
+}
+
+async function updateStatus() {
+  if (!connected.value) {
+    // 尝试重新连接
+    const ok = await checkConnection()
+    if (!ok) return
+  }
+  try {
+    const res = await fetch(`${apiBase}/api/status`)
+    if (!res.ok) throw new Error('请求失败')
+    const data = await res.json()
+    Object.assign(status, data)
+  } catch (e) {
+    connected.value = false
+  }
+}
+
+function resize() {
+  const video = document.getElementById('video')
+  const corrected = document.getElementById('corrected')
+  if (video && rawCanvas.value) {
+    rawCanvas.value.width = video.offsetWidth
+    rawCanvas.value.height = video.offsetHeight
+  }
+  if (corrected && correctedCanvas.value) {
+    correctedCanvas.value.width = corrected.offsetWidth
+    correctedCanvas.value.height = corrected.offsetHeight
+  }
+}
+
+function draw() {
+  // 绘制原始画面上的校准框
+  if (rawCanvas.value) {
+    const ctx = rawCanvas.value.getContext('2d')
+    const w = rawCanvas.value.width
+    const h = rawCanvas.value.height
+    ctx.clearRect(0, 0, w, h)
+    
+    ctx.strokeStyle = '#0066cc'
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    config.corners.forEach((p, i) => {
+      const x = p[0] * w, y = p[1] * h
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)
+    })
+    ctx.closePath()
+    ctx.stroke()
+    ctx.fillStyle = 'rgba(0, 102, 204, 0.1)'
+    ctx.fill()
+    
+    config.corners.forEach((p, i) => {
+      const x = p[0] * w, y = p[1] * h
+      ctx.beginPath()
+      ctx.arc(x, y, 10, 0, Math.PI * 2)
+      ctx.fillStyle = '#0066cc'
+      ctx.fill()
+      ctx.fillStyle = '#fff'
+      ctx.font = 'bold 10px Arial'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(i + 1, x, y)
+    })
+  }
+  
+  // 绘制校正后画面上的区域
+  if (correctedCanvas.value) {
+    const ctx = correctedCanvas.value.getContext('2d')
+    const scaleX = correctedCanvas.value.width / 640
+    const scaleY = correctedCanvas.value.height / 360
+    ctx.clearRect(0, 0, correctedCanvas.value.width, correctedCanvas.value.height)
+    
+    config.zones.forEach(zone => {
+      drawZone(ctx, zone, scaleX, scaleY, editingZone.value === zone.id)
+    })
+  }
+  
+  requestAnimationFrame(draw)
+}
+
+function drawZone(ctx, zone, scaleX, scaleY, isEditing) {
+  ctx.strokeStyle = zone.color
+  ctx.lineWidth = isEditing ? 3 : 2
+  
+  if (zone.type === 'circle') {
+    const cx = zone.center[0] * scaleX
+    const cy = zone.center[1] * scaleY
+    const r = zone.radius * Math.min(scaleX, scaleY)
+    ctx.beginPath()
+    ctx.arc(cx, cy, r, 0, Math.PI * 2)
+    ctx.stroke()
+    if (isEditing) {
+      ctx.beginPath()
+      ctx.arc(cx, cy, 12, 0, Math.PI * 2)
+      ctx.fillStyle = '#fff'
+      ctx.fill()
+      ctx.strokeStyle = zone.color
+      ctx.lineWidth = 3
+      ctx.stroke()
+      ctx.beginPath()
+      ctx.arc(cx + r, cy, 10, 0, Math.PI * 2)
+      ctx.fillStyle = '#fff'
+      ctx.fill()
+      ctx.stroke()
+    }
+  } else {
+    const points = zone.points.map(p => [p[0] * scaleX, p[1] * scaleY])
+    ctx.beginPath()
+    points.forEach((p, i) => i === 0 ? ctx.moveTo(p[0], p[1]) : ctx.lineTo(p[0], p[1]))
+    ctx.closePath()
+    ctx.stroke()
+    if (isEditing) {
+      ctx.fillStyle = zone.color + '30'
+      ctx.fill()
+      if (zone.type === 'rect') {
+        const centerX = (points[0][0] + points[2][0]) / 2
+        const centerY = (points[0][1] + points[2][1]) / 2
+        ctx.beginPath()
+        ctx.arc(centerX, centerY, 15, 0, Math.PI * 2)
+        ctx.fillStyle = '#fff'
+        ctx.fill()
+        ctx.strokeStyle = zone.color
+        ctx.lineWidth = 3
+        ctx.stroke()
+      }
+      ctx.strokeStyle = zone.color
+      ctx.lineWidth = 2
+      points.forEach(p => {
+        ctx.beginPath()
+        ctx.arc(p[0], p[1], 10, 0, Math.PI * 2)
+        ctx.fillStyle = '#fff'
+        ctx.fill()
+        ctx.stroke()
+      })
+    }
+  }
+}
+
+// 原始画面鼠标事件 - 校准点拖动
+function handleRawMouseDown(e) {
+  const rect = rawCanvas.value.getBoundingClientRect()
+  const pos = { x: (e.clientX - rect.left) / rect.width, y: (e.clientY - rect.top) / rect.height }
+  for (let i = 0; i < config.corners.length; i++) {
+    if (Math.hypot(config.corners[i][0] - pos.x, config.corners[i][1] - pos.y) < 0.05) {
+      draggingCorner.value = i
+      mouseDown.value = true
+      break
+    }
+  }
+}
+
+function handleRawMouseMove(e) {
+  if (!mouseDown.value || draggingCorner.value < 0) return
+  const rect = rawCanvas.value.getBoundingClientRect()
+  const pos = { x: (e.clientX - rect.left) / rect.width, y: (e.clientY - rect.top) / rect.height }
+  config.corners[draggingCorner.value] = [
+    Math.max(0.02, Math.min(0.98, pos.x)),
+    Math.max(0.02, Math.min(0.98, pos.y))
+  ]
+}
+
+function handleRawMouseUp() {
+  if (mouseDown.value && draggingCorner.value >= 0) saveCorners()
+  mouseDown.value = false
+  draggingCorner.value = -1
+}
+
+// 校正后画面鼠标事件 - 区域编辑
+function handleCorrectedMouseDown(e) {
+  if (!editingZone.value) return
+  const rect = correctedCanvas.value.getBoundingClientRect()
+  const pos = { x: (e.clientX - rect.left) / rect.width * 640, y: (e.clientY - rect.top) / rect.height * 360 }
+  const zone = config.zones.find(z => z.id === editingZone.value)
+  if (!zone) return
+  
+  dragStartPos.value = { x: pos.x, y: pos.y }
+  dragStartData.value = JSON.parse(JSON.stringify(zone))
+  mouseDown.value = true
+  
+  if (zone.type === 'circle') {
+    const dCenter = Math.hypot(pos.x - zone.center[0], pos.y - zone.center[1])
+    if (dCenter < 15) dragMode.value = 'move'
+    else if (Math.abs(Math.hypot(pos.x - zone.center[0], pos.y - zone.center[1]) - zone.radius) < 15) dragMode.value = 'resize'
+    else mouseDown.value = false
+  } else if (zone.type === 'rect') {
+    const centerX = (zone.points[0][0] + zone.points[2][0]) / 2
+    const centerY = (zone.points[0][1] + zone.points[2][1]) / 2
+    if (Math.hypot(pos.x - centerX, pos.y - centerY) < 20) dragMode.value = 'move'
+    else {
+      let found = -1
+      for (let i = 0; i < 4; i++) {
+        if (Math.hypot(zone.points[i][0] - pos.x, zone.points[i][1] - pos.y) < 15) {
+          found = i
+          break
+        }
+      }
+      if (found >= 0) dragMode.value = 'vertex-' + found
+      else mouseDown.value = false
+    }
+  } else {
+    let found = -1
+    for (let i = 0; i < zone.points.length; i++) {
+      if (Math.hypot(zone.points[i][0] - pos.x, zone.points[i][1] - pos.y) < 15) {
+        found = i
+        break
+      }
+    }
+    if (found >= 0) dragMode.value = 'point-' + found
+    else mouseDown.value = false
+  }
+}
+
+function handleCorrectedMouseMove(e) {
+  if (!mouseDown.value || !editingZone.value || !dragMode.value) return
+  const rect = correctedCanvas.value.getBoundingClientRect()
+  const pos = { x: (e.clientX - rect.left) / rect.width * 640, y: (e.clientY - rect.top) / rect.height * 360 }
+  const zone = config.zones.find(z => z.id === editingZone.value)
+  if (!zone) return
+  
+  const dx = pos.x - dragStartPos.value.x
+  const dy = pos.y - dragStartPos.value.y
+  
+  if (zone.type === 'circle') {
+    if (dragMode.value === 'move') {
+      zone.center[0] = Math.max(30, Math.min(610, dragStartData.value.center[0] + dx))
+      zone.center[1] = Math.max(30, Math.min(330, dragStartData.value.center[1] + dy))
+    } else if (dragMode.value === 'resize') {
+      zone.radius = Math.max(20, Math.min(150, Math.hypot(pos.x - zone.center[0], pos.y - zone.center[1])))
+    }
+  } else if (zone.type === 'rect') {
+    if (dragMode.value === 'move') {
+      const w = dragStartData.value.points[2][0] - dragStartData.value.points[0][0]
+      const h = dragStartData.value.points[2][1] - dragStartData.value.points[0][1]
+      let newX = Math.max(10, Math.min(630 - w, dragStartData.value.points[0][0] + dx))
+      let newY = Math.max(10, Math.min(350 - h, dragStartData.value.points[0][1] + dy))
+      zone.points = [[newX, newY], [newX + w, newY], [newX + w, newY + h], [newX, newY + h]]
+    } else if (dragMode.value.startsWith('vertex-')) {
+      const idx = parseInt(dragMode.value.split('-')[1])
+      let newX = Math.max(10, Math.min(630, pos.x))
+      let newY = Math.max(10, Math.min(350, pos.y))
+      if (idx === 0) { zone.points[0] = [newX, newY]; zone.points[1][1] = newY; zone.points[3][0] = newX }
+      else if (idx === 1) { zone.points[1] = [newX, newY]; zone.points[0][1] = newY; zone.points[2][0] = newX }
+      else if (idx === 2) { zone.points[2] = [newX, newY]; zone.points[1][0] = newX; zone.points[3][1] = newY }
+      else if (idx === 3) { zone.points[3] = [newX, newY]; zone.points[0][0] = newX; zone.points[2][1] = newY }
+    }
+  } else {
+    if (dragMode.value.startsWith('point-')) {
+      const idx = parseInt(dragMode.value.split('-')[1])
+      zone.points[idx] = [Math.max(10, Math.min(630, pos.x)), Math.max(10, Math.min(350, pos.y))]
+    }
+  }
+}
+
+function handleCorrectedMouseUp() {
+  if (mouseDown.value) saveZones()
+  mouseDown.value = false
+  dragMode.value = null
+}
+
+// 区域操作
+function addZone(type) {
+  if (config.zones.length >= 12) { alert('最多12个区域'); return }
+  const id = config.zone_id_counter++
+  const color = COLORS[(id - 1) % COLORS.length]
+  const baseX = 100 + Math.random() * 400
+  const baseY = 100 + Math.random() * 150
+  let newZone
+  if (type === 'rect') newZone = { id, name: String(id), type: 'rect', points: [[baseX, baseY], [baseX+100, baseY], [baseX+100, baseY+100], [baseX, baseY+100]], color }
+  else if (type === 'triangle') newZone = { id, name: String(id), type: 'triangle', points: [[baseX+50, baseY], [baseX+100, baseY+100], [baseX, baseY+100]], color }
+  else if (type === 'circle') newZone = { id, name: String(id), type: 'circle', center: [baseX+50, baseY+50], radius: 50, color }
+  else newZone = { id, name: String(id), type: 'quad', points: [[baseX, baseY], [baseX+120, baseY+20], [baseX+100, baseY+100], [baseX+20, baseY+80]], color }
+  config.zones.push(newZone)
+  saveZones()
+}
+
+function copyZone(id) {
+  if (config.zones.length >= 12) { alert('最多12个区域'); return }
+  const zone = config.zones.find(z => z.id === id)
+  if (!zone) return
+  const newId = config.zone_id_counter++
+  const newZone = JSON.parse(JSON.stringify(zone))
+  newZone.id = newId
+  newZone.name = String(newId)
+  newZone.color = COLORS[(newId - 1) % COLORS.length]
+  if (newZone.type === 'circle') {
+    newZone.center[0] = Math.min(600, newZone.center[0] + 30)
+    newZone.center[1] = Math.min(320, newZone.center[1] + 30)
+  } else {
+    newZone.points = newZone.points.map(p => [Math.min(620, p[0] + 30), Math.min(340, p[1] + 30)])
+  }
+  config.zones.push(newZone)
+  saveZones()
+}
+
+function deleteZone(id) {
+  if (config.zones.length <= 1) { alert('至少保留1个区域'); return }
+  config.zones = config.zones.filter(z => z.id !== id)
+  if (editingZone.value === id) editingZone.value = null
+  saveZones()
+}
+
+function startEdit(id) { editingZone.value = id }
+function confirmEdit(id) { editingZone.value = null; saveZones() }
+function renameZone(id, name) {
+  const zone = config.zones.find(z => z.id === id)
+  if (zone) { zone.name = name.substring(0, 10); saveZones() }
+}
+
+function handleDragStart(e, id) {
+  draggedZoneId.value = id
+  e.dataTransfer.effectAllowed = 'move'
+}
+
+function handleDrop(e, targetId) {
+  e.preventDefault()
+  if (draggedZoneId.value === null || draggedZoneId.value === targetId) return
+  const draggedIndex = config.zones.findIndex(z => z.id === draggedZoneId.value)
+  const targetIndex = config.zones.findIndex(z => z.id === targetId)
+  if (draggedIndex !== -1 && targetIndex !== -1) {
+    const [removed] = config.zones.splice(draggedIndex, 1)
+    config.zones.splice(targetIndex, 0, removed)
+    saveZones()
+  }
+}
+
+function handleDragEnd() {
+  draggedZoneId.value = null
+}
+
+onMounted(async () => {
+  // 先检查连接
+  await checkConnection()
+  
+  if (connected.value) {
+    await loadConfig()
+  }
+  
+  resize()
+  requestAnimationFrame(draw)
+  setInterval(updateStatus, 500)  // 降低频率
+  window.addEventListener('resize', resize)
 })
 </script>
 
 <style scoped>
-.dev-page { 
-  background: #fff; 
-  height: 100vh; 
-  width: 100vw; 
-  padding: 30px; 
-  color: #000; 
-  overflow-y: auto; 
-}
-.top-nav { 
-  display: flex; 
-  justify-content: space-between; 
-  align-items: center; 
-  margin-bottom: 25px; 
-  flex-wrap: wrap;
-  gap: 15px;
-}
-.nav-buttons {
-  display: flex;
-  gap: 15px;
-  align-items: center;
-}
-.nav-buttons button {
-  padding: 12px 24px;
-  border-radius: 12px;
-  border: none;
-  font-size: 16px;
-  font-weight: bold;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-.nav-buttons button.active {
-  background: #FF7222;
-  color: #fff;
-}
-.save-btn {
-  background: #33B555 !important;
-  color: #fff !important;
-}
-.reset-btn {
-  background: #FB4422 !important;
-  color: #fff !important;
-}
-.video-grid { 
-  display: grid; 
-  grid-template-columns: 1fr 1fr; 
-  gap: 25px; 
-}
-.monitor-card { 
-  background: #f4f4f4; 
-  padding: 20px; 
-  border-radius: 16px; 
-}
-.monitor-card h3 {
+.admin-page { padding: 10px; font-family: sans-serif; min-height: 100vh; }
+h1 { font-size: 16px; margin-bottom: 8px; }
+
+.connection-error {
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: 8px;
+  padding: 20px;
   margin-bottom: 15px;
-  font-size: 20px;
-}
-.monitor-card img, .monitor-card canvas { 
-  width: 100%; 
-  border-radius: 12px; 
-  background: #000; 
-  min-height: 350px; 
-}
-.video-wrapper {
-  position: relative;
-}
-.video-wrapper canvas {
-  position: absolute;
-  top: 0;
-  left: 0;
-  cursor: crosshair;
-}
-.placeholder { 
-  height: 350px; 
-  display: flex; 
-  align-items: center; 
-  justify-content: center; 
-  color: #999; 
-  font-size: 18px;
+  color: #856404;
+  text-align: center;
 }
 
-.calibration-panel {
-  margin-top: 30px;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 25px;
-}
-.panel-section {
-  background: #F8F9FA;
-  padding: 25px;
-  border-radius: 16px;
-}
-.panel-section h3 {
-  margin-bottom: 10px;
-  font-size: 22px;
-  color: #333;
-}
-.hint {
-  color: #888;
-  margin-bottom: 20px;
-  font-size: 15px;
-}
-.points-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.point-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 15px 20px;
-  background: #fff;
-  border-radius: 12px;
-  cursor: pointer;
-  border: 2px solid transparent;
-  transition: all 0.2s;
-}
-.point-item:hover {
-  border-color: #FF7222;
-}
-.point-item.active {
-  border-color: #FF7222;
-  background: #FFF9F6;
-}
-.point-item.small {
-  padding: 10px 15px;
-}
-.point-label {
-  font-weight: bold;
-  font-size: 16px;
-}
-.point-coords {
-  color: #666;
+.connection-error code {
+  background: #f8f9fa;
+  padding: 5px 10px;
+  border-radius: 4px;
   font-family: monospace;
-  font-size: 13px;
 }
 
-.holes-section {
-  display: flex;
-  flex-direction: column;
-}
-.hole-tabs {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 20px;
-}
-.hole-tab {
-  padding: 12px 24px;
-  border-radius: 10px;
-  background: #fff;
-  cursor: pointer;
-  font-weight: bold;
-  border: 2px solid #eee;
-  transition: all 0.2s;
-}
-.hole-tab:hover {
-  border-color: #FF7222;
-}
-.hole-tab.active {
-  background: #FF7222;
-  color: #fff;
-  border-color: #FF7222;
-}
-.hole-detail {
-  flex: 1;
-}
-.hole-points {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
+.video-container { width: 640px; max-width: 100%; position: relative; background: #000; margin-bottom: 10px; }
+.video-container img { display: block; width: 100%; }
+.video-container canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: crosshair; }
+
+.corrected-container { width: 640px; max-width: 100%; position: relative; background: #f5f5f5; border: 2px solid #33B555; margin-bottom: 10px; }
+.corrected-container img { display: block; width: 100%; }
+.corrected-container canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: move; }
+
+.hint { font-size: 11px; color: #666; margin: 5px 0; }
+
+.status-bar { width: 640px; max-width: 100%; background: #f0f0f0; padding: 6px 10px; border-radius: 4px; font-size: 12px; margin-bottom: 10px; display: flex; gap: 15px; }
+.detected { color: #33B555; font-weight: bold; }
+.not-detected { color: #ff6b6b; }
+
+.control-panel { width: 640px; max-width: 100%; background: #fafafa; border: 1px solid #ddd; border-radius: 6px; padding: 10px; }
+.section-title { font-size: 12px; font-weight: bold; margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid #ddd; }
+
+.settings-row { display: flex; gap: 20px; margin-bottom: 10px; padding: 8px; background: #fff; border-radius: 4px; }
+.setting-item { display: flex; align-items: center; gap: 8px; }
+.setting-item label { font-size: 12px; }
+.setting-item input[type="color"] { width: 40px; height: 30px; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; }
+
+.save-load-row { display: flex; gap: 10px; margin-bottom: 10px; }
+.save-btn { flex: 1; padding: 10px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: bold; color: #fff; }
+.btn-save-all { background: #4CAF50; }
+.btn-load-all { background: #2196F3; }
+
+.add-buttons { display: flex; gap: 5px; margin-bottom: 10px; }
+.add-btn { flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 4px; background: #fff; cursor: pointer; font-size: 12px; }
+.add-btn:hover { background: #e8f5e9; }
+
+.zone-list { max-height: 300px; overflow-y: auto; }
+.zone-item { background: #fff; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 5px; }
+.zone-item.editing { border-color: #FF7222; }
+.zone-header { padding: 6px 8px; display: flex; align-items: center; gap: 6px; cursor: grab; }
+.drag-handle { color: #999; cursor: grab; }
+.zone-dot { width: 12px; height: 12px; border-radius: 50%; }
+.zone-name-input { border: none; background: transparent; font-size: 12px; font-weight: bold; width: 50px; }
+.zone-name-input:focus { outline: none; background: #fffde7; }
+.zone-type { font-size: 10px; color: #888; }
+.zone-actions { margin-left: auto; display: flex; gap: 4px; }
+.zone-btn { padding: 3px 8px; border: none; border-radius: 3px; cursor: pointer; font-size: 10px; color: #fff; }
+.btn-edit { background: #FF7222; }
+.btn-confirm { background: #33B555; }
+.btn-delete { background: #f44336; }
+.btn-copy { background: #2196F3; }
+
+.toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #333; color: #fff; padding: 10px 20px; border-radius: 4px; z-index: 1000; }
 </style>

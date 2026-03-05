@@ -1,324 +1,413 @@
+# -*- coding: utf-8 -*-
+"""
+地面投影交互系统 - Screen Processor
+从 camera_calibrate.py 完整迁移
+"""
+
 import cv2
 import mediapipe as mp
+import numpy as np
 import time
 import base64
 import threading
-import numpy as np
 import json
 import os
 
+# ============================================================================
+# 配置文件路径
+# ============================================================================
+CONFIG_FILE = "projection_config.json"
+
+# ============================================================================
+# 平滑滤波器
+# ============================================================================
+class SmoothFilter:
+    """自适应滤波器，快速响应大变化，平滑小抖动"""
+    def __init__(self, alpha=0.5, threshold=30):
+        self.alpha = alpha
+        self.threshold = threshold
+        self.value = None
+    
+    def update(self, new_value):
+        if self.value is None:
+            self.value = new_value
+            return new_value
+        diff = abs(new_value - self.value)
+        alpha = 0.8 if diff > self.threshold else self.alpha
+        self.value = alpha * new_value + (1 - alpha) * self.value
+        return self.value
+
+class PositionSmoother:
+    """位置平滑器，处理X和Y坐标"""
+    def __init__(self):
+        self.x_filter = SmoothFilter(alpha=0.4, threshold=25)
+        self.y_filter = SmoothFilter(alpha=0.4, threshold=25)
+        self.last_x = None
+        self.last_y = None
+        self.last_time = 0
+    
+    def update(self, x, y, detected):
+        if detected:
+            smooth_x = self.x_filter.update(x)
+            smooth_y = self.y_filter.update(y)
+            self.last_x = smooth_x
+            self.last_y = smooth_y
+            self.last_time = time.time()
+            return int(smooth_x), int(smooth_y), True
+        elif self.last_x is not None and time.time() - self.last_time < 0.3:
+            return int(self.last_x), int(self.last_y), True
+        return x, y, False
+
+# ============================================================================
+# 全局状态
+# ============================================================================
+state = {
+    "corners": [[0.15, 0.2], [0.85, 0.2], [0.85, 0.85], [0.15, 0.85]],
+    "zones": [
+        {"id": 1, "name": "1", "type": "rect", "points": [[50, 80], [180, 80], [180, 280], [50, 280]], "color": "#33B555"},
+        {"id": 2, "name": "2", "type": "rect", "points": [[230, 80], [410, 80], [410, 280], [230, 280]], "color": "#FF7222"},
+        {"id": 3, "name": "3", "type": "rect", "points": [[460, 80], [590, 80], [590, 280], [460, 280]], "color": "#2196F3"}
+    ],
+    "feet_x": 320,
+    "feet_y": 180,
+    "feet_detected": False,
+    "active_zones": [],
+    "matrix": None,
+    "zone_id_counter": 4,
+    "admin_bg": "#ffffff",
+    "projection_bg": "#000000"
+}
+
+ZONE_COLORS = ["#33B555", "#FF7222", "#2196F3", "#9C27B0", "#FF5722", 
+               "#00BCD4", "#E91E63", "#795548", "#607D8B", "#FFEB3B",
+               "#4CAF50", "#3F51B5"]
+
+# ============================================================================
+# 配置保存/加载
+# ============================================================================
+def save_config_to_file():
+    config = {
+        "corners": state["corners"],
+        "zones": state["zones"],
+        "zone_id_counter": state["zone_id_counter"],
+        "admin_bg": state["admin_bg"],
+        "projection_bg": state["projection_bg"]
+    }
+    try:
+        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+        return True
+    except:
+        return False
+
+def load_config_from_file():
+    global state
+    if not os.path.exists(CONFIG_FILE):
+        return False
+    try:
+        with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+        if "corners" in config: state["corners"] = config["corners"]
+        if "zones" in config: state["zones"] = config["zones"]
+        if "zone_id_counter" in config: state["zone_id_counter"] = config["zone_id_counter"]
+        if "admin_bg" in config: state["admin_bg"] = config["admin_bg"]
+        if "projection_bg" in config: state["projection_bg"] = config["projection_bg"]
+        return True
+    except:
+        return False
+
+# 启动时加载配置
+load_config_from_file()
+
+# ============================================================================
+# 处理器类
+# ============================================================================
 class ScreenProcessor:
-    def __init__(self, url, socketio=None):
-        self.url = url
-        self.cap = cv2.VideoCapture(url)
-        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    def __init__(self, camera_source=1, socketio=None):
         self.socketio = socketio
         
-        # --- 状态变量 ---
-        self.processed_data = {"image": "", "interact": {"progress": [0,0,0], "hit_index": -1}}
-        self.hover_start = [0, 0, 0]
-        self.progress = [0, 0, 0]
+        # 打开摄像头
+        self.cap = cv2.VideoCapture(camera_source)
+        if not self.cap.isOpened():
+            self.cap = cv2.VideoCapture(0)
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         
-        # --- 校准变量 ---
-        self.config_file = "calibration_config.json"
-        self.calibration_points = []  # 四个角点 [左上, 右上, 右下, 左下]
-        self.calibrated = False
-        self.perspective_matrix = None
-        self.warped_width = 800
-        self.warped_height = 500
+        self.frame_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        self.frame_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         
-        # --- 地鼠洞区域（归一化坐标，4个点的多边形，在 warp 后的空间中）---
-        self.holes = [
-            {"id": 0, "points": [[0.08, 0.45], [0.28, 0.45], [0.28, 0.85], [0.08, 0.85]]},
-            {"id": 1, "points": [[0.36, 0.45], [0.64, 0.45], [0.64, 0.85], [0.36, 0.85]]},
-            {"id": 2, "points": [[0.72, 0.45], [0.92, 0.45], [0.92, 0.85], [0.72, 0.85]]}
-        ]
-        
-        # --- 媒体管道 ---
-        self.mp_pose = mp.solutions.pose.Pose(
-            static_image_mode=False,
+        # MediaPipe Pose
+        self.pose = mp.solutions.pose.Pose(
+            min_detection_confidence=0.6,
+            min_tracking_confidence=0.6,
             model_complexity=1,
-            smooth_landmarks=True,
-            min_detection_confidence=0.4,
-            min_tracking_confidence=0.4
+            smooth_landmarks=True
         )
         
-        # 加载保存的配置
-        self.load_config()
+        self.raw_frame = None
+        self.corrected_frame = None
+        self.running = True
+        self.position_smoother = PositionSmoother()
         
-        threading.Thread(target=self._run, daemon=True).start()
-    
-    def load_config(self):
-        """加载保存的校准配置"""
-        if os.path.exists(self.config_file):
-            try:
-                with open(self.config_file, 'r', encoding='utf-8') as f:
-                    config = json.load(f)
-                    if 'calibration_points' in config:
-                        self.calibration_points = config['calibration_points']
-                        if len(self.calibration_points) == 4:
-                            self.calibrate_perspective(self.calibration_points)
-                    if 'holes' in config:
-                        # 转换旧格式（norm_rect）到新格式（points）
-                        loaded_holes = config['holes']
-                        for i, hole in enumerate(loaded_holes):
-                            if 'norm_rect' in hole and 'points' not in hole:
-                                x1, x2, y1, y2 = hole['norm_rect']
-                                loaded_holes[i] = {
-                                    "id": hole.get("id", i),
-                                    "points": [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
-                                }
-                        self.holes = loaded_holes
-                print("已加载校准配置！")
-            except Exception as e:
-                print(f"加载配置失败: {e}")
-    
-    def save_config(self):
-        """保存校准配置"""
-        config = {
-            'calibration_points': self.calibration_points,
-            'holes': self.holes
-        }
-        try:
-            with open(self.config_file, 'w', encoding='utf-8') as f:
-                json.dump(config, f)
-            print("配置已保存！")
-            if self.socketio:
-                self.socketio.emit('calibration_saved', {'status': 'success'})
-        except Exception as e:
-            print(f"保存配置失败: {e}")
-    
-    def rotate_frame(self, frame):
-        """处理摄像头90度旋转，水平翻转"""
-        rotated = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
-        flipped = cv2.flip(rotated, 1)
-        return flipped
-    
-    def update_calibration_point(self, index, x, y):
-        """更新校准点（从前端调用）"""
-        if 0 <= index < 4:
-            self.calibration_points = self.calibration_points[:index] + [[x, y]] + self.calibration_points[index+1:]
-            if len(self.calibration_points) == 4:
-                self.calibrate_perspective(self.calibration_points)
-            return True
-        return False
-    
-    def update_hole(self, index, points):
-        """更新地鼠洞区域（从前端调用，4个点）"""
-        if 0 <= index < 3 and len(points) == 4:
-            self.holes[index]["points"] = points
-            return True
-        return False
-    
-    def reset_calibration(self):
-        """重置校准"""
-        self.calibration_points = []
-        self.calibrated = False
-        self.perspective_matrix = None
-        # 重置地鼠洞为默认值
-        self.holes = [
-            {"id": 0, "points": [[0.08, 0.45], [0.28, 0.45], [0.28, 0.85], [0.08, 0.85]]},
-            {"id": 1, "points": [[0.36, 0.45], [0.64, 0.45], [0.64, 0.85], [0.36, 0.85]]},
-            {"id": 2, "points": [[0.72, 0.45], [0.92, 0.45], [0.92, 0.85], [0.72, 0.85]]}
-        ]
-        if os.path.exists(self.config_file):
-            os.remove(self.config_file)
-        print("校准已重置！")
-    
-    def calibrate_perspective(self, src_points):
-        """计算透视变换矩阵"""
-        if len(src_points) != 4:
-            return False
+        # 进度跟踪（用于游戏交互）
+        self.progress = [0, 0, 0]
+        self.hover_start = [0, 0, 0]
         
-        src = np.float32(src_points)
-        dst = np.float32([
-            [0, 0],
-            [self.warped_width, 0],
-            [self.warped_width, self.warped_height],
-            [0, self.warped_height]
-        ])
-        
-        self.perspective_matrix = cv2.getPerspectiveTransform(src, dst)
-        self.calibrated = True
-        print("校准完成！透视变换矩阵已计算。")
-        self.save_config()
-        return True
+        # 启动处理线程
+        threading.Thread(target=self._loop, daemon=True).start()
     
-    def warp_perspective(self, frame):
-        """应用透视变换"""
-        if not self.calibrated or self.perspective_matrix is None:
-            return None
-        
-        warped = cv2.warpPerspective(
-            frame, 
-            self.perspective_matrix, 
-            (self.warped_width, self.warped_height)
-        )
-        return warped
-    
-    def detect_foot_from_pose(self, warped_frame):
-        """使用MediaPipe Pose检测脚部/腿部，不要求完整人体"""
-        rgb = cv2.cvtColor(warped_frame, cv2.COLOR_BGR2RGB)
-        results = self.mp_pose.process(rgb)
-        
-        foot_pos = None
-        h, w, _ = warped_frame.shape
-        
-        if results.pose_landmarks:
-            landmarks = results.pose_landmarks.landmark
-            
-            candidates = []
-            
-            # 检测关键点：23(左髋), 24(右髋), 25(左膝), 26(右膝), 27(左踝), 28(右踝), 29(左脚跟), 30(右脚跟), 31(左脚尖), 32(右脚尖)
-            foot_related_indices = [23, 24, 25, 26, 27, 28, 29, 30, 31, 32]
-            
-            for idx in foot_related_indices:
-                if idx < len(landmarks) and landmarks[idx].visibility > 0.4:
-                    candidates.append( (landmarks[idx].x, landmarks[idx].y, landmarks[idx].visibility) )
-            
-            if candidates:
-                candidates.sort(key=lambda p: p[1], reverse=True)
-                fx, fy, _ = candidates[0]
-                foot_pos = (int(fx * w), int(fy * h))
-        
-        return foot_pos, results
-    
-    def point_in_polygon(self, point, polygon):
-        """使用射线法判断点是否在多边形内"""
-        x, y = point
-        n = len(polygon)
-        inside = False
-        
-        p1x, p1y = polygon[0]
-        for i in range(n + 1):
-            p2x, p2y = polygon[i % n]
-            if y > min(p1y, p2y):
-                if y <= max(p1y, p2y):
-                    if x <= max(p1x, p2x):
-                        if p1y != p2y:
-                            xinters = (y - p1y) * (p2x - p1x) / (p2y - p1y) + p1x
-                        if p1x == p2x or x <= xinters:
-                            inside = not inside
-            p1x, p1y = p2x, p2y
-        
-        return inside
-    
-    def check_hole_interaction(self, foot_pos):
-        """检查脚是否在某个地鼠洞内"""
-        if foot_pos is None:
-            return -1
-        
-        fx, fy = foot_pos
-        active_index = -1
-        
-        for i, hole in enumerate(self.holes):
-            # 将归一化坐标转换为实际像素坐标
-            polygon = [
-                (p[0] * self.warped_width, p[1] * self.warped_height)
-                for p in hole["points"]
-            ]
-            
-            if self.point_in_polygon((fx, fy), polygon):
-                active_index = i
-                break
-        
-        return active_index
-    
-    def _run(self):
-        while True:
+    def _loop(self):
+        while self.running:
             ret, frame = self.cap.read()
             if not ret:
                 time.sleep(0.01)
                 continue
             
-            frame = self.rotate_frame(frame)
-            display_frame = frame.copy()
+            # 水平+垂直翻转
+            frame = cv2.flip(frame, 0)
+            frame = cv2.flip(frame, 1)
             
-            warped = None
-            if self.calibrated:
-                warped = self.warp_perspective(frame)
+            h, w = frame.shape[:2]
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = self.pose.process(rgb)
             
-            active_index = -1
-            foot_pos = None
-            pose_results = None
+            raw_feet_detected = False
+            raw_feet_x, raw_feet_y = 320, 180
             
-            if warped is not None:
-                foot_pos, pose_results = self.detect_foot_from_pose(warped)
-                active_index = self.check_hole_interaction(foot_pos)
+            if results.pose_landmarks:
+                mp.solutions.drawing_utils.draw_landmarks(
+                    frame, results.pose_landmarks, mp.solutions.pose.POSE_CONNECTIONS)
                 
-                if pose_results and pose_results.pose_landmarks:
-                    mp.solutions.drawing_utils.draw_landmarks(
-                        warped, 
-                        pose_results.pose_landmarks, 
-                        mp.solutions.pose.POSE_CONNECTIONS
-                    )
+                lm = results.pose_landmarks.landmark
+                left_ankle = lm[27]
+                right_ankle = lm[28]
                 
-                if foot_pos:
-                    cv2.circle(warped, foot_pos, 30, (0, 255, 0), -1)
-                    cv2.putText(warped, "FOOT DETECTED", (foot_pos[0]-80, foot_pos[1]-40),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-                
-                for i, hole in enumerate(self.holes):
-                    # 将归一化坐标转换为实际像素坐标
-                    polygon = np.array([
-                        (int(p[0] * self.warped_width), int(p[1] * self.warped_height))
-                        for p in hole["points"]
-                    ], np.int32)
-                    polygon = polygon.reshape((-1, 1, 2))
+                if left_ankle.visibility > 0.5 and right_ankle.visibility > 0.5:
+                    l_pt = (int(left_ankle.x * w), int(left_ankle.y * h))
+                    r_pt = (int(right_ankle.x * w), int(right_ankle.y * h))
                     
-                    color = (200, 200, 200)
-                    if self.progress[i] > 0:
-                        color = (100, 150, 200)
-                    if self.progress[i] >= 100:
-                        color = (0, 255, 0)
+                    cv2.circle(frame, l_pt, 15, (0, 255, 0), -1)
+                    cv2.circle(frame, r_pt, 15, (0, 255, 0), -1)
+                    cv2.line(frame, l_pt, r_pt, (0, 255, 255), 3)
                     
-                    cv2.polylines(warped, [polygon], True, color, 5)
-                    # 计算中心点用于放置文字
-                    M = cv2.moments(polygon)
-                    if M["m00"] != 0:
-                        cx = int(M["m10"] / M["m00"])
-                        cy = int(M["m01"] / M["m00"])
-                        cv2.putText(warped, f"Hole {i+1}", (cx-40, cy+10),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, color, 3)
+                    center = ((l_pt[0] + r_pt[0]) // 2, (l_pt[1] + r_pt[1]) // 2)
+                    cv2.circle(frame, center, 10, (255, 0, 255), -1)
+                    
+                    if state["matrix"] is not None:
+                        try:
+                            src_pt = np.array([[[center[0], center[1]]]], dtype=np.float32)
+                            dst_pt = cv2.perspectiveTransform(src_pt, state["matrix"])[0][0]
+                            raw_feet_x, raw_feet_y = int(dst_pt[0]), int(dst_pt[1])
+                            raw_feet_detected = True
+                        except:
+                            pass
             
+            # 平滑滤波
+            smooth_x, smooth_y, smooth_detected = self.position_smoother.update(
+                raw_feet_x, raw_feet_y, raw_feet_detected
+            )
+            
+            # 区域碰撞检测
+            active_zones = []
+            active_zone_index = -1
+            if smooth_detected:
+                for i, zone in enumerate(state["zones"]):
+                    if self._point_in_zone(smooth_x, smooth_y, zone):
+                        active_zones.append(zone["id"])
+                        active_zone_index = i
+            
+            # 更新全局状态
+            state["feet_x"] = smooth_x
+            state["feet_y"] = smooth_y
+            state["feet_detected"] = smooth_detected
+            state["active_zones"] = active_zones
+            
+            # 更新进度（用于游戏交互）
             now = time.time()
-            hit_index = -1
-            
             for i in range(3):
-                if i == active_index:
+                if i == active_zone_index:
                     if self.hover_start[i] == 0:
                         self.hover_start[i] = now
                     self.progress[i] = min(100, int((now - self.hover_start[i]) / 2.0 * 100))
-                    if self.progress[i] >= 100:
-                        hit_index = i
-                        self.hover_start[i] = now + 0.5
                 else:
                     if self.hover_start[i] != 0 and now - self.hover_start[i] > 0.5:
                         self.hover_start[i] = 0
                         self.progress[i] = 0
             
-            final_display = display_frame
-            if warped is not None:
-                # 修复数组形状错误：先检查目标区域大小
-                target_h = 300
-                target_w = 480
-                warped_small = cv2.resize(warped, (target_w, target_h))
-                
-                # 确保不会越界
-                disp_h, disp_w = final_display.shape[:2]
-                if disp_h >= 320 and disp_w >= 500:
-                    final_display[20:320, 20:500] = warped_small
+            # 绘制校准框
+            pts = np.array([[int(c[0]*w), int(c[1]*h)] for c in state["corners"]], np.int32)
+            cv2.polylines(frame, [pts], True, (255, 0, 0), 2)
+            for i, c in enumerate(state["corners"]):
+                x, y = int(c[0]*w), int(c[1]*h)
+                cv2.circle(frame, (x, y), 10, (255, 0, 0), -1)
+                cv2.putText(frame, str(i+1), (x-6, y+4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 2)
             
-            _, buffer = cv2.imencode('.jpg', final_display)
-            self.processed_data = {
-                "image": base64.b64encode(buffer).decode('utf-8'),
-                "interact": {"progress": self.progress.copy(), "hit_index": hit_index},
-                "calibration": {
-                    "points": self.calibration_points,
-                    "holes": self.holes,
-                    "calibrated": self.calibrated
-                }
-            }
-
+            # 透视变换
+            corrected = np.ones((360, 640, 3), dtype=np.uint8) * 255
+            if state["matrix"] is not None:
+                try:
+                    corrected = cv2.warpPerspective(frame, state["matrix"], (640, 360))
+                except:
+                    pass
+            
+            # 绘制区域
+            for zone in state["zones"]:
+                self._draw_zone(corrected, zone, zone["id"] in active_zones)
+            
+            # 绘制脚部位置
+            if smooth_detected:
+                cv2.circle(corrected, (smooth_x, smooth_y), 20, (0, 200, 0), -1)
+            
+            self.raw_frame = frame
+            self.corrected_frame = corrected
+            time.sleep(0.005)
+    
+    def _point_in_zone(self, x, y, zone):
+        """判断点是否在区域内"""
+        if zone.get("type") == "circle":
+            cx, cy, r = int(zone["center"][0]), int(zone["center"][1]), int(zone["radius"])
+            return (x - cx) ** 2 + (y - cy) ** 2 <= r ** 2
+        else:
+            pts = np.array(zone["points"], dtype=np.int32)
+            return cv2.pointPolygonTest(pts, (x, y), False) >= 0
+    
+    def _draw_zone(self, img, zone, is_active):
+        """绘制区域"""
+        hex_color = zone["color"].lstrip('#')
+        rgb = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+        bgr = (rgb[2], rgb[1], rgb[0])
+        
+        if zone.get("type") == "circle":
+            cx, cy, r = int(zone["center"][0]), int(zone["center"][1]), int(zone["radius"])
+            cv2.circle(img, (cx, cy), r, bgr, 3)
+            if is_active:
+                overlay = img.copy()
+                cv2.circle(overlay, (cx, cy), r, bgr, -1)
+                cv2.addWeighted(overlay, 0.3, img, 0.7, 0, img)
+            cv2.putText(img, zone.get("name", str(zone["id"])), (cx-10, cy+5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, bgr, 2)
+        else:
+            pts = np.array(zone["points"], dtype=np.int32)
+            cv2.polylines(img, [pts], True, bgr, 3)
+            if is_active:
+                overlay = img.copy()
+                cv2.fillPoly(overlay, [pts], bgr)
+                cv2.addWeighted(overlay, 0.3, img, 0.7, 0, img)
+            cx = int(np.mean([p[0] for p in zone["points"]]))
+            cy = int(np.mean([p[1] for p in zone["points"]]))
+            cv2.putText(img, zone.get("name", str(zone["id"])), (cx-10, cy+5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, bgr, 2)
+    
+    def get_raw_jpeg(self):
+        """获取原始画面的JPEG"""
+        if self.raw_frame is None: return None
+        _, buf = cv2.imencode('.jpg', self.raw_frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+        return buf.tobytes()
+    
+    def get_corrected_jpeg(self):
+        """获取校正后画面的JPEG"""
+        if self.corrected_frame is None: return None
+        _, buf = cv2.imencode('.jpg', self.corrected_frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+        return buf.tobytes()
+    
+    def update_matrix(self):
+        """更新透视变换矩阵"""
+        if self.raw_frame is None: return
+        h, w = self.raw_frame.shape[:2]
+        src = np.array([[c[0]*w, c[1]*h] for c in state["corners"]], dtype=np.float32)
+        dst = np.array([[0, 0], [640, 0], [640, 360], [0, 360]], dtype=np.float32)
+        state["matrix"] = cv2.getPerspectiveTransform(src, dst)
+    
+    def get_state(self):
+        """获取全局状态"""
+        return state
+    
+    def get_config(self):
+        """获取配置"""
+        return {
+            "corners": state["corners"],
+            "zones": state["zones"],
+            "zone_id_counter": state["zone_id_counter"],
+            "admin_bg": state["admin_bg"],
+            "projection_bg": state["projection_bg"]
+        }
+    
+    def update_corners(self, corners):
+        """更新校准点"""
+        state["corners"] = corners
+        self.update_matrix()
+    
+    def update_zones(self, zones, zone_id_counter=None):
+        """更新区域"""
+        state["zones"] = zones
+        if zone_id_counter is not None:
+            state["zone_id_counter"] = zone_id_counter
+    
+    def update_settings(self, admin_bg=None, projection_bg=None):
+        """更新设置"""
+        if admin_bg is not None:
+            state["admin_bg"] = admin_bg
+        if projection_bg is not None:
+            state["projection_bg"] = projection_bg
+    
+    def get_status(self):
+        """获取实时状态"""
+        return {
+            "feet_detected": state["feet_detected"],
+            "feet_x": state["feet_x"],
+            "feet_y": state["feet_y"],
+            "active_zones": state["active_zones"]
+        }
+    
+    def save_config(self):
+        """保存配置到文件"""
+        return save_config_to_file()
+    
+    def load_config(self):
+        """从文件加载配置"""
+        if load_config_from_file():
+            self.update_matrix()
+            return True
+        return False
+    
     def get_latest(self):
-        return self.processed_data
+        """获取最新的处理数据（用于Socket推送）"""
+        # 获取校正后的JPEG并转为base64
+        if self.corrected_frame is not None:
+            _, buf = cv2.imencode('.jpg', self.corrected_frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            image_base64 = base64.b64encode(buf).decode('utf-8')
+        else:
+            image_base64 = ""
+        
+        # 计算命中索引
+        hit_index = -1
+        for i, p in enumerate(self.progress):
+            if p >= 100:
+                hit_index = i
+                break
+        
+        return {
+            "image": image_base64,
+            "interact": {
+                "progress": self.progress.copy(),
+                "hit_index": hit_index
+            },
+            "status": self.get_status(),
+            "calibration": {
+                "points": state["corners"],
+                "holes": state["zones"],
+                "calibrated": state["matrix"] is not None
+            }
+        }
+
+# 创建全局处理器实例
+screen_processor = None
+
+def init_screen_processor(camera_source=1, socketio=None):
+    """初始化屏幕处理器"""
+    global screen_processor
+    screen_processor = ScreenProcessor(camera_source, socketio)
+    return screen_processor
+
+def get_screen_processor():
+    """获取屏幕处理器实例"""
+    return screen_processor
