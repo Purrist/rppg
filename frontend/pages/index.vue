@@ -6,7 +6,7 @@
     </div>
     
     <div class="main-grid">
-      <div class="card health-summary" @click="$router.push('/health')">
+      <div class="card health-summary" @click="handleNavigate('/health')">
         <div class="card-icon">❤️</div>
         <div class="card-info">
           <h3>生理信号监测</h3>
@@ -14,7 +14,7 @@
         </div>
       </div>
       
-      <div class="card training-summary" @click="$router.push('/learning')">
+      <div class="card training-summary" @click="handleNavigate('/learning')">
         <div class="card-icon">🧠</div>
         <div class="card-info">
           <h3>今日训练任务</h3>
@@ -29,6 +29,63 @@
     </div>
   </div>
 </template>
+
+<script setup>
+import { ref, onMounted, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
+import { io } from 'socket.io-client'
+
+const router = useRouter()
+let socket = null
+const backendConnected = ref(false)
+
+// Flask 后端端口
+const FLASK_PORT = 5000
+
+onMounted(() => {
+  try {
+    socket = io(`http://localhost:${FLASK_PORT}`, {
+      transports: ['polling', 'websocket'],
+      reconnection: true,
+      reconnectionAttempts: 3,
+      timeout: 5000
+    })
+    
+    socket.on('connect', () => {
+      backendConnected.value = true
+    })
+    
+    socket.on('disconnect', () => {
+      backendConnected.value = false
+    })
+    
+    socket.on('connect_error', () => {
+      backendConnected.value = false
+    })
+    
+    // 监听导航事件
+    socket.on('navigate_to', (data) => {
+      router.push(data.page)
+    })
+  } catch (e) {
+    console.error('Socket初始化失败', e)
+  }
+})
+
+onUnmounted(() => {
+  if (socket) socket.disconnect()
+})
+
+// 统一导航（带降级处理）
+const handleNavigate = (page) => {
+  if (backendConnected.value && socket) {
+    socket.emit('navigate', { page, source: 'user' })
+  } else {
+    // 后端未连接，降级为本地导航
+    router.push(page)
+  }
+}
+</script>
 
 <style scoped>
 .home-page { padding: 80px 40px 40px; }

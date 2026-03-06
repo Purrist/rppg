@@ -1,16 +1,18 @@
 <template>
   <div class="app-viewport">
+    <!-- 纯页面（无侧边栏） -->
     <template v-if="isPurePage">
       <NuxtPage />
     </template>
 
+    <!-- 常规页面（有侧边栏） -->
     <div v-else class="tablet-frame">
       <aside class="side-nav">
         <div class="nav-links">
-          <div class="nav-item" :class="{ 'active-custom': route.path === '/' }" @click="handleNavRequest('/')">🏠<br>首页</div>
-          <div class="nav-item" :class="{ 'active-custom': route.path === '/health' }" @click="handleNavRequest('/health')">❤️<br>健康</div>
-          <div class="nav-item" :class="{ 'active-custom': route.path === '/entertainment' }" @click="handleNavRequest('/entertainment')">🎵<br>娱乐</div>
-          <div class="nav-item" :class="{ 'active-custom': route.path === '/learning' }" @click="handleNavRequest('/learning')">🧩<br>益智</div> 
+          <div class="nav-item" :class="{ 'active-custom': currentPath === '/' }" @click="handleNavigate('/')">🏠<br>首页</div>
+          <div class="nav-item" :class="{ 'active-custom': currentPath === '/health' }" @click="handleNavigate('/health')">❤️<br>健康</div>
+          <div class="nav-item" :class="{ 'active-custom': currentPath === '/entertainment' }" @click="handleNavigate('/entertainment')">🎵<br>娱乐</div>
+          <div class="nav-item" :class="{ 'active-custom': currentPath === '/learning' }" @click="handleNavigate('/learning')">🧩<br>益智</div> 
         </div>
         <div class="user-zone" @click.stop="ui.menu = !ui.menu">
           <div class="avatar">👴</div>
@@ -27,10 +29,11 @@
         <NuxtPage />
       </main>
 
+      <!-- 阿康悬浮球（首页不显示） -->
       <div 
-        v-if="!ui.akon"
+        v-if="!ui.akon && currentPath !== '/'"
         class="akon-ball"
-        :class="{ 'is-docked': ball.status === 'half', 'is-active': ball.status === 'full' }"
+        :class="{ 'is-docked': ball.status === 'half' }"
         :style="{ 
           left: ball.x + 'px', 
           top: ball.y + 'px',
@@ -42,10 +45,11 @@
         <span class="akon-icon">🤖</span>
       </div>
 
+      <!-- 阿康对话 -->
       <div v-if="ui.akon" class="akon-modal" @click="closeAkon">
         <div class="akon-panel" @click.stop>
           <h2>阿康助手</h2>
-          <p>受众群体，该喝水了，或者我们要开始一组认知干预训练吗？</p>
+          <p>张爷爷，有什么需要帮忙的吗？</p>
           <button class="akon-btn" @click="closeAkon">知道啦</button>
         </div>
       </div>
@@ -54,75 +58,124 @@
 </template>
 
 <script setup>
-import { reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { io } from 'socket.io-client'
 
 const route = useRoute()
 const router = useRouter()
+
+// ==================== 自动检测后端地址 ====================
+// 如果是localhost访问，用localhost连接后端
+// 如果是IP访问，用IP连接后端
+const getBackendHost = () => {
+  if (typeof window === 'undefined') return 'localhost'
+  const host = window.location.hostname
+  return host || 'localhost'
+}
+
+const FLASK_PORT = 5000
+const backendHost = getBackendHost()
+const backendUrl = `http://${backendHost}:${FLASK_PORT}`
+
+console.log('[App] 后端地址:', backendUrl)
+
+// 纯页面
 const isPurePage = computed(() => ['projection', 'developer'].includes(route.name))
-const isGameActive = computed(() => route.path === '/training')
+const currentPath = computed(() => route.path)
+
+// 后端连接状态
+const backendConnected = ref(false)
+const gameActive = ref(false)
+
+// UI状态
 const ui = reactive({ menu: false, akon: false })
-
-let socket = null
-
 const ball = reactive({
   x: 0, y: 0, status: 'half', isDragging: false,
   startX: 0, startY: 0, moveDist: 0
 })
 
-// --- 核心修改：中心化路由同步逻辑 ---
+let socket = null
 
-const handleNavRequest = (path) => {
-  if (isGameActive.value) {
-    alert('请先点击"退出游戏"')
+// ==================== 导航 ====================
+function handleNavigate(page) {
+  if (gameActive.value) {
+    alert('请先退出当前游戏')
     return
   }
-  // 不再本地直接跳转，而是向后端发送请求
-  if (socket) {
-    socket.emit('request_nav', { page: path })
+  
+  if (backendConnected.value && socket) {
+    socket.emit('navigate', { page, source: 'user' })
   } else {
-    // 降级处理：socket未连接时本地跳转
-    router.push(path)
+    router.push(page)
   }
 }
 
-const handleAdminNav = (path) => {
-  if (isGameActive.value) { 
-    alert('请先点击"退出游戏"')
-    return
-  }
-  ui.menu = false 
-  router.push(path) // 后台页不参与全局同步，本地直接跳
+function handleAdminNav(path) {
+  ui.menu = false
+  router.push(path)
 }
 
+// ==================== Socket ====================
 onMounted(() => {
-  // 初始化 Socket 连接 - 使用端口 5000
-  socket = io('http://localhost:5000')
-
-  // 监听后端强制跳转信号（多网页联动的关键）
+  ball.x = window.innerWidth - 45
+  ball.y = window.innerHeight / 2 - 45
+  
+  window.addEventListener('mousemove', handleDragging)
+  window.addEventListener('mouseup', handleDragEnd)
+  window.addEventListener('touchmove', handleDragging, { passive: false })
+  window.addEventListener('touchend', handleDragEnd)
+  
+  // 连接Socket - 使用检测到的地址
+  socket = io(backendUrl, {
+    transports: ['polling', 'websocket'],
+    reconnection: true,
+    reconnectionAttempts: 10,
+    reconnectionDelay: 1000
+  })
+  
+  socket.on('connect', () => {
+    backendConnected.value = true
+    console.log('[App] 后端已连接')
+  })
+  
+  socket.on('disconnect', () => {
+    backendConnected.value = false
+    console.log('[App] 后端断开')
+  })
+  
+  socket.on('connect_error', (err) => {
+    backendConnected.value = false
+    console.log('[App] 连接错误:', err.message)
+  })
+  
+  socket.on('system_state', (data) => {
+    if (data.state && data.state.game) {
+      gameActive.value = data.state.game.active
+    }
+  })
+  
   socket.on('navigate_to', (data) => {
-    // 排除掉不参与同步的独立终端页面
     if (!isPurePage.value && route.path !== data.page) {
       router.push(data.page)
     }
   })
-
-  // 原有 UI 逻辑
-  ball.x = window.innerWidth - 45
-  ball.y = window.innerHeight / 2 - 45
-  window.addEventListener('mousemove', handleDragging); 
-  window.addEventListener('mouseup', handleDragEnd)
-  window.addEventListener('touchmove', handleDragging, { passive: false }); 
-  window.addEventListener('touchend', handleDragEnd)
+  
+  socket.on('navigate_error', (data) => {
+    alert(data.message || '请先退出当前游戏')
+  })
 })
 
 onUnmounted(() => {
   if (socket) socket.disconnect()
+  window.removeEventListener('mousemove', handleDragging)
+  window.removeEventListener('mouseup', handleDragEnd)
+  window.removeEventListener('touchmove', handleDragging)
+  window.removeEventListener('touchend', handleDragEnd)
 })
 
-// --- 原有球体拖拽与吸附逻辑（保持现状） ---
-const updateDockPos = () => {
+// ==================== 球体拖拽 ====================
+function updateDockPos() {
   const winW = window.innerWidth
   if (ball.x < winW / 2) {
     ball.x = ball.status === 'half' ? -45 : 20
@@ -131,13 +184,15 @@ const updateDockPos = () => {
   }
 }
 
-const handleDragStart = (e) => {
-  ball.isDragging = true; ball.moveDist = 0
+function handleDragStart(e) {
+  ball.isDragging = true
+  ball.moveDist = 0
   const event = e.touches ? e.touches[0] : e
-  ball.startX = event.clientX - ball.x; ball.startY = event.clientY - ball.y
+  ball.startX = event.clientX - ball.x
+  ball.startY = event.clientY - ball.y
 }
 
-const handleDragging = (e) => {
+function handleDragging(e) {
   if (!ball.isDragging) return
   const event = e.touches ? e.touches[0] : e
   ball.x = event.clientX - ball.startX
@@ -145,7 +200,7 @@ const handleDragging = (e) => {
   ball.moveDist++
 }
 
-const handleDragEnd = () => {
+function handleDragEnd() {
   if (!ball.isDragging) return
   ball.isDragging = false
   if (ball.moveDist < 5) {
@@ -157,11 +212,14 @@ const handleDragEnd = () => {
   updateDockPos()
 }
 
-const closeAkon = () => { ui.akon = false; ball.status = 'half'; updateDockPos(); }
+function closeAkon() {
+  ui.akon = false
+  ball.status = 'half'
+  updateDockPos()
+}
 </script>
 
 <style>
-/* 核心样式：严格遵循死命令，禁止修改视觉风格 */
 * {
   -webkit-tap-highlight-color: transparent; 
   touch-action: manipulation;
@@ -191,7 +249,6 @@ html, body {
 }
 .nav-links { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 30px; }
 
-/* 模拟原来的 NuxtLink 样式 */
 .nav-item { 
   cursor: pointer; color: #333; font-size: 22px; font-weight: bold; 
   text-align: center; width: 100px; padding: 15px 0; border-radius: 20px;

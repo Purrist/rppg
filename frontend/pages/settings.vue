@@ -13,6 +13,31 @@
   </div>
 </template>
 
+<script setup>
+import { onMounted, onUnmounted } from 'vue'
+import { io } from 'socket.io-client'
+
+let socket = null
+const FLASK_PORT = 5000
+
+onMounted(() => {
+  try {
+    socket = io(`http://localhost:${FLASK_PORT}`, {
+      transports: ['polling', 'websocket'],
+      reconnection: true,
+      reconnectionAttempts: 3,
+      timeout: 5000
+    })
+  } catch (e) {
+    console.error('Socket初始化失败', e)
+  }
+})
+
+onUnmounted(() => {
+  if (socket) socket.disconnect()
+})
+</script>
+
 <style scoped>
 .settings-view { padding-top: 80px; }
 .title { font-size: 40px; margin-bottom: 40px; }

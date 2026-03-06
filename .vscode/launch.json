@@ -2,25 +2,15 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "外接摄像头",
-      "type": "debugpy",
-      "request": "launch",
-      "program": "camera_calibrate.py",
-      "cwd": "${workspaceFolder}/",
-      "console": "integratedTerminal"
-    },
-    {
       "name": "后端 (Flask)",
       "type": "debugpy",
       "request": "launch",
       "program": "app.py",
       "cwd": "${workspaceFolder}/backend",
       "args": [
-        "http://192.168.3.94:8080/video", 
-        "1" 
-      ],
-      "env": { "PYTHONPATH": "${workspaceFolder}/backend" },
-      "console": "integratedTerminal"
+        "http://192.168.3.94:8080/video",
+        "1"
+      ]
     },
     {
       "name": "前端 (Nuxt)",
@@ -29,30 +19,12 @@
       "command": "npm run dev",
       "cwd": "${workspaceFolder}/frontend",
       "console": "integratedTerminal"
-    }
+    },
   ],
   "compounds": [
     {
-      "name": "一键启动",
+      "name": "一键启动 (后端+前端)",
       "configurations": ["后端 (Flask)", "前端 (Nuxt)"]
     }
-  ],
-  "tasks": {
-    "version": "2.0.0",
-    "tasks": [
-      {
-        "label": "启动Projection (Kiosk)",
-        "type": "shell",
-        "command": "start",
-        "args": [
-          "",
-          "\"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe\"",
-          "--kiosk",
-          "--edge-kiosk-type=fullscreen",
-          "http://127.0.0.1:3000/projection"
-        ],
-        "problemMatcher": []
-      }
-    ]
-  }
+  ]
 }
