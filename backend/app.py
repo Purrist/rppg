@@ -2,7 +2,7 @@
 """
 Flask主应用 - 整合状态管理、游戏控制、Socket通信
 """
-import sys, time, threading, socket
+import sys, time, threading, socket, os, json
 from flask import Flask, request, jsonify, Response
 from flask_socketio import SocketIO
 from flask_cors import CORS
@@ -27,6 +27,29 @@ def get_local_ip():
         return "127.0.0.1"
 
 LOCAL_IP = get_local_ip()
+
+# ============================================================================
+# 配置文件
+# ============================================================================
+CONFIG_FILE = "projection_config.json"
+
+def load_config_on_startup():
+    """启动时加载配置"""
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            if "corners" in config:
+                state["corners"] = config["corners"]
+            if "zones" in config:
+                state["zones"] = config["zones"]
+            if "zone_id_counter" in config:
+                state["zone_id_counter"] = config["zone_id_counter"]
+            print(f"✓ 配置已加载: {CONFIG_FILE}")
+            return True
+        except:
+            pass
+    return False
 
 # ============================================================================
 # Flask 应用初始化
@@ -73,6 +96,17 @@ except:
     screen_cam_source = 1
 screen_proc = init_screen_processor(screen_cam_source, socketio)
 
+# 启动时加载配置
+load_config_on_startup()
+
+# 延迟更新矩阵
+def delayed_update_matrix():
+    time.sleep(2)
+    screen_proc.update_matrix()
+    print("✓ 透视矩阵已更新")
+
+threading.Thread(target=delayed_update_matrix, daemon=True).start()
+
 whack_a_mole = WhackAMole(socketio)
 
 # ============================================================================
@@ -96,6 +130,17 @@ def corrected_feed():
             if jpeg:
                 yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + jpeg + b'\r\n')
             time.sleep(0.02)
+    return Response(gen(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/tablet_video_feed')
+def tablet_video_feed():
+    """平板摄像头视频流"""
+    def gen():
+        while True:
+            jpeg = processor.get_jpeg()
+            if jpeg:
+                yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + jpeg + b'\r\n')
+            time.sleep(0.03)
     return Response(gen(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 # ============================================================================
@@ -142,6 +187,7 @@ def api_save_all():
 @app.route('/api/load_all', methods=['POST'])
 def api_load_all():
     if screen_proc.load_config():
+        screen_proc.update_matrix()
         return jsonify({"ok": True})
     return jsonify({"ok": False, "msg": "加载失败"})
 
@@ -160,6 +206,12 @@ def api_system_state():
         "state": system_state,
         "preferences": user_preferences
     })
+
+@app.route('/api/health')
+def api_health():
+    """获取健康数据"""
+    health_data = processor.get_health_data()
+    return jsonify(health_data)
 
 # ============================================================================
 # Socket事件 - 导航控制

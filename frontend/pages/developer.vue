@@ -15,23 +15,44 @@
       <span>时间: <strong>{{ gameState.timer }}s</strong></span>
     </div>
     
-    <!-- 原始摄像头画面 -->
-    <div class="video-section">
-      <h2>原始摄像头画面（拖动四角校准）</h2>
-      <div class="video-container">
-        <img id="video" :src="videoUrl" @load="onVideoLoad" @error="onVideoError">
-        <canvas ref="rawCanvas" @mousedown="handleRawMouseDown" @mousemove="handleRawMouseMove" 
-                @mouseup="handleRawMouseUp" @mouseleave="handleRawMouseUp"></canvas>
+    <!-- 摄像头画面区域 -->
+    <div class="cameras-row">
+      <!-- 投影摄像头 -->
+      <div class="camera-section">
+        <h2>投影摄像头（拖动四角校准）</h2>
+        <div class="video-container">
+          <img id="video" :src="videoUrl" @load="onVideoLoad" @error="onVideoError">
+          <canvas ref="rawCanvas" @mousedown="handleRawMouseDown" @mousemove="handleRawMouseMove" 
+                  @mouseup="handleRawMouseUp" @mouseleave="handleRawMouseUp"></canvas>
+        </div>
+      </div>
+      
+      <!-- 平板摄像头（rPPG） -->
+      <div class="camera-section">
+        <h2>平板摄像头（心率检测）</h2>
+        <div class="video-container tablet-cam">
+          <img id="tablet-video" :src="tabletVideoUrl" @error="onVideoError">
+          <div class="rppg-overlay">
+            <div class="heart-rate">
+              <span class="heart-icon">❤️</span>
+              <span class="bpm-value">{{ health.bpm || '--' }}</span>
+              <span class="bpm-unit">BPM</span>
+            </div>
+            <div class="health-stats">
+              <span>情绪: {{ health.emotion || '--' }}</span>
+              <span>HRV: {{ health.hrv || '--' }}</span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
     
     <!-- 校正后画面 -->
     <div class="video-section">
-      <h2>校正后画面（显示区域配置）</h2>
+      <h2>校正后画面</h2>
       <div class="corrected-container">
         <img id="corrected" :src="correctedUrl" @load="onVideoLoad" @error="onVideoError">
-        <canvas ref="correctedCanvas" @mousedown="handleCorrectedMouseDown" @mousemove="handleCorrectedMouseMove"
-                @mouseup="handleCorrectedMouseUp" @mouseleave="handleCorrectedMouseUp"></canvas>
+        <canvas ref="correctedCanvas"></canvas>
       </div>
     </div>
     
@@ -52,32 +73,7 @@
       <div class="button-row">
         <button class="btn btn-green" @click="saveAllConfig">保存配置</button>
         <button class="btn btn-blue" @click="loadAllConfig">加载配置</button>
-      </div>
-      
-      <!-- 添加区域 -->
-      <div class="section-title">➕ 添加区域 ({{ config.zones.length }}/12)</div>
-      <div class="button-row">
-        <button class="btn" @click="addZone('rect')">▢ 矩形</button>
-        <button class="btn" @click="addZone('circle')">○ 圆形</button>
-        <button class="btn" @click="addZone('triangle')">△ 三角形</button>
-      </div>
-      
-      <!-- 区域列表 -->
-      <div class="section-title">📋 区域列表</div>
-      <div class="zone-list">
-        <div v-for="zone in config.zones" :key="zone.id" 
-             class="zone-item" :class="{ editing: editingZone === zone.id }">
-          <div class="zone-header">
-            <span class="zone-dot" :style="{ backgroundColor: zone.color }"></span>
-            <input class="zone-name" :value="zone.name" @change="renameZone(zone.id, $event.target.value)">
-            <span class="zone-type">({{ typeNames[zone.type] }})</span>
-            <div class="zone-actions">
-              <button v-if="editingZone === zone.id" class="btn-small btn-green" @click="confirmEdit(zone.id)">确定</button>
-              <button v-else class="btn-small btn-orange" @click="startEdit(zone.id)">编辑</button>
-              <button class="btn-small btn-red" @click="deleteZone(zone.id)">删除</button>
-            </div>
-          </div>
-        </div>
+        <button class="btn btn-orange" @click="resetCalibration">重置校准</button>
       </div>
     </div>
     
@@ -101,11 +97,9 @@ const backendHost = getBackendHost()
 const backendUrl = `http://${backendHost}:${FLASK_PORT}`
 const videoUrl = `${backendUrl}/video_feed`
 const correctedUrl = `${backendUrl}/corrected_feed`
+const tabletVideoUrl = `${backendUrl}/tablet_video_feed`
 
 console.log('[Developer] 后端地址:', backendUrl)
-
-const COLORS = ["#33B555", "#FF7222", "#2196F3", "#9C27B0", "#FF5722", "#00BCD4", "#E91E63", "#795548", "#607D8B", "#FFEB3B", "#4CAF50", "#3F51B5"]
-const typeNames = { 'rect': '矩形', 'triangle': '三角形', 'circle': '圆形', 'quad': '四边形' }
 
 // ==================== 状态 ====================
 const connected = ref(false)
@@ -127,6 +121,12 @@ const status = reactive({
   active_zones: []
 })
 
+const health = reactive({
+  bpm: null,
+  hrv: null,
+  emotion: null
+})
+
 const gameState = reactive({
   status: 'IDLE',
   score: 0,
@@ -139,12 +139,8 @@ const gameStateText = computed(() => {
 })
 
 const toast = reactive({ show: false, msg: '' })
-const editingZone = ref(null)
 const draggingCorner = ref(-1)
 const mouseDown = ref(false)
-const dragMode = ref(null)
-const dragStartPos = ref(null)
-const dragStartData = ref(null)
 
 let statusInterval = null
 
@@ -205,17 +201,6 @@ async function saveCorners() {
   } catch (e) {}
 }
 
-async function saveZones() {
-  if (!connected.value) return
-  try {
-    await fetch(`${backendUrl}/api/zones`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ zones: config.zones, zone_id_counter: config.zone_id_counter })
-    })
-  } catch (e) {}
-}
-
 async function saveAllConfig() {
   if (!connected.value) { showToast('后端未连接'); return }
   try {
@@ -243,6 +228,12 @@ async function loadAllConfig() {
   }
 }
 
+async function resetCalibration() {
+  config.corners = [[0.15, 0.2], [0.85, 0.2], [0.85, 0.85], [0.15, 0.85]]
+  await saveCorners()
+  showToast('校准已重置')
+}
+
 // ==================== 状态更新 ====================
 async function updateStatus() {
   if (!connected.value) {
@@ -265,6 +256,13 @@ async function updateStatus() {
         gameState.score = gsData.state.game.score || 0
         gameState.timer = gsData.state.game.timer || 60
       }
+    }
+    
+    // 获取健康数据
+    const healthRes = await fetch(`${backendUrl}/api/health`)
+    if (healthRes.ok) {
+      const healthData = await healthRes.json()
+      Object.assign(health, healthData)
     }
   } catch (e) {
     connected.value = false
@@ -301,7 +299,7 @@ function draw() {
     ctx.clearRect(0, 0, w, h)
     
     ctx.strokeStyle = '#0066cc'
-    ctx.lineWidth = 2
+    ctx.lineWidth = 3
     ctx.beginPath()
     config.corners.forEach((p, i) => {
       const x = p[0] * w, y = p[1] * h
@@ -315,11 +313,11 @@ function draw() {
     config.corners.forEach((p, i) => {
       const x = p[0] * w, y = p[1] * h
       ctx.beginPath()
-      ctx.arc(x, y, 12, 0, Math.PI * 2)
+      ctx.arc(x, y, 15, 0, Math.PI * 2)
       ctx.fillStyle = '#0066cc'
       ctx.fill()
       ctx.fillStyle = '#fff'
-      ctx.font = 'bold 12px Arial'
+      ctx.font = 'bold 14px Arial'
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
       ctx.fillText(i + 1, x, y)
@@ -331,10 +329,6 @@ function draw() {
     const scaleX = correctedCanvas.value.width / 640
     const scaleY = correctedCanvas.value.height / 360
     ctx.clearRect(0, 0, correctedCanvas.value.width, correctedCanvas.value.height)
-    
-    config.zones.forEach(zone => {
-      drawZone(ctx, zone, scaleX, scaleY, editingZone.value === zone.id)
-    })
     
     if (status.feet_detected) {
       const fx = status.feet_x * scaleX
@@ -350,60 +344,6 @@ function draw() {
   }
   
   requestAnimationFrame(draw)
-}
-
-function drawZone(ctx, zone, scaleX, scaleY, isEditing) {
-  ctx.strokeStyle = zone.color
-  ctx.lineWidth = isEditing ? 3 : 2
-  
-  if (zone.type === 'circle') {
-    const cx = zone.center[0] * scaleX
-    const cy = zone.center[1] * scaleY
-    const r = zone.radius * Math.min(scaleX, scaleY)
-    ctx.beginPath()
-    ctx.arc(cx, cy, r, 0, Math.PI * 2)
-    ctx.stroke()
-    if (isEditing) {
-      ctx.beginPath()
-      ctx.arc(cx, cy, 12, 0, Math.PI * 2)
-      ctx.fillStyle = '#fff'
-      ctx.fill()
-      ctx.strokeStyle = zone.color
-      ctx.lineWidth = 3
-      ctx.stroke()
-    }
-    ctx.fillStyle = zone.color
-    ctx.font = 'bold 16px Arial'
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    ctx.fillText(zone.name, cx, cy)
-  } else {
-    const points = zone.points.map(p => [p[0] * scaleX, p[1] * scaleY])
-    ctx.beginPath()
-    points.forEach((p, i) => i === 0 ? ctx.moveTo(p[0], p[1]) : ctx.lineTo(p[0], p[1]))
-    ctx.closePath()
-    ctx.stroke()
-    if (isEditing) {
-      ctx.fillStyle = zone.color + '30'
-      ctx.fill()
-      ctx.strokeStyle = zone.color
-      ctx.lineWidth = 2
-      points.forEach(p => {
-        ctx.beginPath()
-        ctx.arc(p[0], p[1], 8, 0, Math.PI * 2)
-        ctx.fillStyle = '#fff'
-        ctx.fill()
-        ctx.stroke()
-      })
-    }
-    const cx = points.reduce((s, p) => s + p[0], 0) / points.length
-    const cy = points.reduce((s, p) => s + p[1], 0) / points.length
-    ctx.fillStyle = zone.color
-    ctx.font = 'bold 16px Arial'
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    ctx.fillText(zone.name, cx, cy)
-  }
 }
 
 // ==================== 鼠标事件 ====================
@@ -435,93 +375,13 @@ function handleRawMouseUp() {
   draggingCorner.value = -1
 }
 
-function handleCorrectedMouseDown(e) {
-  if (!editingZone.value) return
-  const rect = correctedCanvas.value.getBoundingClientRect()
-  const pos = { x: (e.clientX - rect.left) / rect.width * 640, y: (e.clientY - rect.top) / rect.height * 360 }
-  const zone = config.zones.find(z => z.id === editingZone.value)
-  if (!zone) return
-  
-  dragStartPos.value = { x: pos.x, y: pos.y }
-  dragStartData.value = JSON.parse(JSON.stringify(zone))
-  mouseDown.value = true
-  
-  if (zone.type === 'circle') {
-    const dCenter = Math.hypot(pos.x - zone.center[0], pos.y - zone.center[1])
-    if (dCenter < 20) dragMode.value = 'move'
-    else mouseDown.value = false
-  } else {
-    const centerX = zone.points.reduce((s, p) => s + p[0], 0) / zone.points.length
-    const centerY = zone.points.reduce((s, p) => s + p[1], 0) / zone.points.length
-    if (Math.hypot(pos.x - centerX, pos.y - centerY) < 30) dragMode.value = 'move'
-    else mouseDown.value = false
-  }
-}
-
-function handleCorrectedMouseMove(e) {
-  if (!mouseDown.value || !editingZone.value || !dragMode.value) return
-  const rect = correctedCanvas.value.getBoundingClientRect()
-  const pos = { x: (e.clientX - rect.left) / rect.width * 640, y: (e.clientY - rect.top) / rect.height * 360 }
-  const zone = config.zones.find(z => z.id === editingZone.value)
-  if (!zone) return
-  
-  const dx = pos.x - dragStartPos.value.x
-  const dy = pos.y - dragStartPos.value.y
-  
-  if (zone.type === 'circle') {
-    if (dragMode.value === 'move') {
-      zone.center[0] = Math.max(50, Math.min(590, dragStartData.value.center[0] + dx))
-      zone.center[1] = Math.max(50, Math.min(310, dragStartData.value.center[1] + dy))
-    }
-  } else {
-    if (dragMode.value === 'move') {
-      zone.points = dragStartData.value.points.map(p => [
-        Math.max(10, Math.min(630, p[0] + dx)),
-        Math.max(10, Math.min(350, p[1] + dy))
-      ])
-    }
-  }
-}
-
-function handleCorrectedMouseUp() {
-  if (mouseDown.value) saveZones()
-  mouseDown.value = false
-  dragMode.value = null
-}
-
-// ==================== 区域操作 ====================
-function addZone(type) {
-  if (config.zones.length >= 12) { alert('最多12个区域'); return }
-  const id = config.zone_id_counter++
-  const color = COLORS[(id - 1) % COLORS.length]
-  const baseX = 100 + Math.random() * 400
-  const baseY = 100 + Math.random() * 150
-  let newZone
-  if (type === 'rect') newZone = { id, name: String(id), type: 'rect', points: [[baseX, baseY], [baseX+100, baseY], [baseX+100, baseY+100], [baseX, baseY+100]], color }
-  else if (type === 'triangle') newZone = { id, name: String(id), type: 'triangle', points: [[baseX+50, baseY], [baseX+100, baseY+100], [baseX, baseY+100]], color }
-  else newZone = { id, name: String(id), type: 'circle', center: [baseX+50, baseY+50], radius: 50, color }
-  config.zones.push(newZone)
-  saveZones()
-}
-
-function deleteZone(id) {
-  if (config.zones.length <= 1) { alert('至少保留1个区域'); return }
-  config.zones = config.zones.filter(z => z.id !== id)
-  if (editingZone.value === id) editingZone.value = null
-  saveZones()
-}
-
-function startEdit(id) { editingZone.value = id }
-function confirmEdit(id) { editingZone.value = null; saveZones() }
-function renameZone(id, name) {
-  const zone = config.zones.find(z => z.id === id)
-  if (zone) { zone.name = name.substring(0, 10); saveZones() }
-}
-
 // ==================== 生命周期 ====================
 onMounted(async () => {
+  // 先尝试加载保存的配置
   const ok = await checkConnection()
   if (ok) {
+    // 先尝试加载保存的配置
+    await fetch(`${backendUrl}/api/load_all`, { method: 'POST' })
     await loadConfig()
   }
   
@@ -543,6 +403,10 @@ onUnmounted(() => {
   font-family: sans-serif;
   min-height: 100vh;
   background: #f5f5f5;
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+  box-sizing: border-box;
 }
 
 h1 {
@@ -595,43 +459,115 @@ h2 {
 .status-PLAYING { color: #33B555; }
 .status-PAUSED { color: #FFD111; }
 
-.video-section {
+.cameras-row {
+  display: flex;
+  gap: 20px;
   margin-bottom: 15px;
 }
 
-.video-container, .corrected-container {
-  width: 640px;
-  max-width: 100%;
+.camera-section {
+  flex: 1;
+}
+
+.video-container {
+  width: 100%;
   position: relative;
   background: #000;
   border-radius: 8px;
   overflow: hidden;
 }
 
-.video-container img, .corrected-container img {
+.video-container img {
   display: block;
   width: 100%;
 }
 
-.video-container canvas, .corrected-container canvas {
+.video-container canvas {
   position: absolute;
   top: 0;
   left: 0;
   width: 100%;
   height: 100%;
-}
-
-.video-container canvas {
   cursor: crosshair;
 }
 
-.corrected-container canvas {
-  cursor: move;
+.tablet-cam {
+  background: #1a1a2e;
+}
+
+.rppg-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.heart-rate {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.heart-icon {
+  font-size: 40px;
+  animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.2); }
+}
+
+.bpm-value {
+  font-size: 48px;
+  font-weight: bold;
+  color: #ff6b6b;
+}
+
+.bpm-unit {
+  font-size: 20px;
+  color: #aaa;
+}
+
+.health-stats {
+  margin-top: 15px;
+  display: flex;
+  gap: 20px;
+  font-size: 16px;
+  color: #aaa;
+}
+
+.video-section {
+  margin-bottom: 15px;
 }
 
 .corrected-container {
+  width: 100%;
+  max-width: 640px;
+  position: relative;
   background: #f0f0f0;
   border: 2px solid #33B555;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.corrected-container img {
+  display: block;
+  width: 100%;
+}
+
+.corrected-container canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
 }
 
 .status-bar {
@@ -656,13 +592,9 @@ h2 {
 .section-title {
   font-size: 14px;
   font-weight: bold;
-  margin: 15px 0 10px;
+  margin-bottom: 10px;
   padding-bottom: 5px;
   border-bottom: 1px solid #eee;
-}
-
-.section-title:first-child {
-  margin-top: 0;
 }
 
 .button-row {
@@ -673,87 +605,18 @@ h2 {
 
 .btn {
   flex: 1;
-  padding: 10px;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  background: #fff;
-  cursor: pointer;
-  font-size: 14px;
-}
-
-.btn:hover {
-  background: #f5f5f5;
-}
-
-.btn-green { background: #33B555; color: #fff; border-color: #33B555; }
-.btn-blue { background: #2196F3; color: #fff; border-color: #2196F3; }
-.btn-orange { background: #FF7222; color: #fff; border-color: #FF7222; }
-.btn-red { background: #f44336; color: #fff; border-color: #f44336; }
-
-.zone-list {
-  max-height: 200px;
-  overflow-y: auto;
-}
-
-.zone-item {
-  background: #f9f9f9;
-  border: 1px solid #eee;
-  border-radius: 6px;
-  margin-bottom: 5px;
-}
-
-.zone-item.editing {
-  border-color: #FF7222;
-  background: #fff5f0;
-}
-
-.zone-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-}
-
-.zone-dot {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-}
-
-.zone-name {
+  padding: 12px;
   border: none;
-  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
   font-size: 14px;
   font-weight: bold;
-  width: 40px;
-}
-
-.zone-name:focus {
-  outline: none;
-  background: #fff;
-  border-radius: 4px;
-  padding: 2px 5px;
-}
-
-.zone-type {
-  font-size: 12px;
-  color: #888;
-}
-
-.zone-actions {
-  margin-left: auto;
-  display: flex;
-  gap: 5px;
-}
-
-.btn-small {
-  padding: 4px 10px;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 12px;
   color: #fff;
 }
+
+.btn-green { background: #33B555; }
+.btn-blue { background: #2196F3; }
+.btn-orange { background: #FF7222; }
 
 .toast {
   position: fixed;

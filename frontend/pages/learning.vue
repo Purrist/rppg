@@ -57,8 +57,23 @@ onMounted(() => {
     reconnection: true
   })
   
+  socket.on('connect', () => {
+    console.log('[益智] 后端已连接')
+  })
+  
   socket.on('navigate_to', (data) => {
     router.push(data.page)
+  })
+  
+  // 监听游戏状态变化
+  socket.on('system_state', (data) => {
+    // 如果游戏状态变为IDLE，返回游戏列表
+    if (data.state && data.state.game && data.state.game.status === 'IDLE') {
+      if (data.state.game.active === false) {
+        // 游戏已停止，返回游戏列表
+        router.push('/learning')
+      }
+    }
   })
 })
 
@@ -69,11 +84,15 @@ onUnmounted(() => {
 const startGame = (gameName) => {
   console.log('[益智] 开始游戏:', gameName)
   
-  if (socket) {
+  if (socket && socket.connected) {
     socket.emit('game_control', { action: 'ready', game: gameName })
+    // 等待一小段时间确保后端处理完成
+    setTimeout(() => {
+      router.push('/training')
+    }, 100)
+  } else {
+    alert('后端未连接，请稍后重试')
   }
-  
-  router.push('/training')
 }
 
 const handleTodo = () => {

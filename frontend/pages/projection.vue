@@ -44,26 +44,25 @@ const positionHistory = []
 // ==================== 等待状态 ====================
 const readyProgress = ref(0)
 const readyStartTime = ref(0)
-const readyEnterTime = ref(0)  // 进入READY状态的时间
+const readyEnterTime = ref(0)
 const READY_DURATION = 3000    // 3秒
-const READY_TIMEOUT = 60000    // 60秒超时
+const READY_TIMEOUT = 300000   // 5分钟超时
 
 // ==================== 地鼠洞配置（三按钮模板）====================
-// 1920x1080 -> 640x360 转换
 const holes = [
-  { x: 130, y: 240, radius: 80 },   // 左
-  { x: 320, y: 240, radius: 80 },   // 中
-  { x: 510, y: 240, radius: 80 }    // 右
+  { x: 130, y: 240, radius: 80 },
+  { x: 320, y: 240, radius: 80 },
+  { x: 510, y: 240, radius: 80 }
 ]
 
 // 洞的进度
 const holeProgress = ref([0, 0, 0])
 const holeStartTime = ref([0, 0, 0])
-const HOLE_DURATION = 1000  // 1秒踩中判定
+const HOLE_DURATION = 1000
 
 // ==================== 粒子系统 ====================
 let particles = []
-const MAX_PARTICLES = 100  // 限制粒子数量
+const MAX_PARTICLES = 80
 
 // ==================== Socket ====================
 let socket = null
@@ -72,26 +71,37 @@ let statusInterval = null
 // ==================== 画布尺寸 ====================
 let canvasWidth = 640
 let canvasHeight = 360
+let scaleX = 1
+let scaleY = 1
 
 // ==================== 初始化Canvas ====================
 function initCanvas() {
   if (!mainCanvas.value || !pageRef.value) return
   
-  mainCanvas.value.width = pageRef.value.clientWidth
-  mainCanvas.value.height = pageRef.value.clientHeight
-  canvasWidth = 640
-  canvasHeight = 360
+  const container = pageRef.value
+  const containerWidth = container.clientWidth
+  const containerHeight = container.clientHeight
+  
+  // 设置canvas尺寸为容器尺寸
+  mainCanvas.value.width = containerWidth
+  mainCanvas.value.height = containerHeight
+  
+  // 计算缩放比例（保持16:9）
+  scaleX = containerWidth / canvasWidth
+  scaleY = containerHeight / canvasHeight
   
   ctx = mainCanvas.value.getContext('2d')
   
   // 初始化粒子
   initParticles()
+  
+  console.log('[Projection] Canvas初始化:', containerWidth, 'x', containerHeight)
 }
 
 // ==================== 粒子系统 ====================
 function initParticles() {
   particles = []
-  const count = gameState.value === 'IDLE' ? 60 : 40
+  const count = gameState.value === 'IDLE' ? 50 : 30
   
   for (let i = 0; i < count; i++) {
     particles.push(createParticle())
@@ -99,16 +109,14 @@ function initParticles() {
 }
 
 function createParticle(fromCircle = false, circleX = 0, circleY = 0, circleRadius = 0) {
-  // 蓝紫色范围
-  const hue = 220 + Math.random() * 60  // 220-280 蓝到紫
+  const hue = 220 + Math.random() * 60
   const saturation = 60 + Math.random() * 40
   const lightness = 40 + Math.random() * 30
   
   let x, y
   if (fromCircle) {
-    // 从圆边缘发散
     const angle = Math.random() * Math.PI * 2
-    const dist = circleRadius + Math.random() * 20
+    const dist = circleRadius + 10 + Math.random() * 30
     x = circleX + Math.cos(angle) * dist
     y = circleY + Math.sin(angle) * dist
   } else {
@@ -119,10 +127,10 @@ function createParticle(fromCircle = false, circleX = 0, circleY = 0, circleRadi
   return {
     x,
     y,
-    vx: (Math.random() - 0.5) * 0.5,
-    vy: (Math.random() - 0.5) * 0.5,
-    radius: 3 + Math.random() * 6,
-    alpha: 0.2 + Math.random() * 0.5,
+    vx: (Math.random() - 0.5) * 0.4,
+    vy: (Math.random() - 0.5) * 0.4,
+    radius: 4 + Math.random() * 8,
+    alpha: 0.3 + Math.random() * 0.5,
     hue,
     saturation,
     lightness,
@@ -132,10 +140,15 @@ function createParticle(fromCircle = false, circleX = 0, circleY = 0, circleRadi
 }
 
 function updateParticles() {
+  // 游戏进行中不显示粒子
+  if (gameState.value === 'PLAYING') {
+    particles = []
+    return
+  }
+  
   const footX = smoothPosition.detected ? smoothPosition.x : -1000
   const footY = smoothPosition.detected ? smoothPosition.y : -1000
   
-  // 根据状态决定是否从圆边缘发散
   const emitFromCircle = gameState.value === 'READY'
   const circleX = 320
   const circleY = 180
@@ -144,7 +157,6 @@ function updateParticles() {
   for (let i = particles.length - 1; i >= 0; i--) {
     const p = particles[i]
     
-    // 移动
     p.x += p.vx
     p.y += p.vy
     
@@ -153,32 +165,29 @@ function updateParticles() {
       const dx = p.x - footX
       const dy = p.y - footY
       const dist = Math.sqrt(dx * dx + dy * dy)
-      if (dist < 80) {
-        const force = (80 - dist) / 80 * 0.5
+      if (dist < 100) {
+        const force = (100 - dist) / 100 * 0.6
         p.vx += (dx / dist) * force
         p.vy += (dy / dist) * force
-        p.life -= 0.02
+        p.life -= 0.015
       }
     }
     
     // 边缘消散
-    const margin = 50
+    const margin = 30
     if (p.x < margin || p.x > canvasWidth - margin || 
         p.y < margin || p.y > canvasHeight - margin) {
-      p.life -= 0.03
+      p.life -= 0.02
     }
     
-    // 生命衰减
     p.life -= p.decay
     
-    // 移除死亡粒子
     if (p.life <= 0 || p.alpha <= 0) {
       particles.splice(i, 1)
     }
   }
   
-  // 补充粒子
-  const targetCount = gameState.value === 'IDLE' ? 60 : 40
+  const targetCount = gameState.value === 'IDLE' ? 50 : 30
   while (particles.length < targetCount) {
     if (emitFromCircle) {
       particles.push(createParticle(true, circleX, circleY, circleRadius))
@@ -189,7 +198,10 @@ function updateParticles() {
 }
 
 function drawParticles() {
-  if (!ctx) return
+  if (!ctx || gameState.value === 'PLAYING') return
+  
+  ctx.save()
+  ctx.scale(scaleX, scaleY)
   
   particles.forEach(p => {
     const alpha = p.alpha * p.life
@@ -200,14 +212,15 @@ function drawParticles() {
     ctx.fillStyle = `hsla(${p.hue}, ${p.saturation}%, ${p.lightness}%, ${alpha})`
     ctx.fill()
     
-    // 发光效果
-    if (p.radius > 4) {
+    if (p.radius > 5) {
       ctx.beginPath()
       ctx.arc(p.x, p.y, p.radius * 2, 0, Math.PI * 2)
-      ctx.fillStyle = `hsla(${p.hue}, ${p.saturation}%, ${p.lightness}%, ${alpha * 0.2})`
+      ctx.fillStyle = `hsla(${p.hue}, ${p.saturation}%, ${p.lightness}%, ${alpha * 0.15})`
       ctx.fill()
     }
   })
+  
+  ctx.restore()
 }
 
 // ==================== 绘制背景 ====================
@@ -216,52 +229,62 @@ function drawBackground() {
   
   // 黑色背景
   ctx.fillStyle = '#000000'
-  ctx.fillRect(0, 0, canvasWidth, canvasHeight)
+  ctx.fillRect(0, 0, mainCanvas.value.width, mainCanvas.value.height)
+  
+  // 游戏进行中纯黑底
+  if (gameState.value === 'PLAYING') return
   
   // 中心渐变光晕
-  const gradient = ctx.createRadialGradient(
-    canvasWidth / 2, canvasHeight / 2, 0,
-    canvasWidth / 2, canvasHeight / 2, canvasWidth / 2
-  )
-  gradient.addColorStop(0, 'rgba(60, 20, 100, 0.3)')
-  gradient.addColorStop(0.5, 'rgba(30, 10, 60, 0.2)')
+  const centerX = mainCanvas.value.width / 2
+  const centerY = mainCanvas.value.height / 2
+  const gradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, centerX)
+  gradient.addColorStop(0, 'rgba(60, 20, 100, 0.25)')
+  gradient.addColorStop(0.5, 'rgba(30, 10, 60, 0.15)')
   gradient.addColorStop(1, 'rgba(0, 0, 0, 0)')
   ctx.fillStyle = gradient
-  ctx.fillRect(0, 0, canvasWidth, canvasHeight)
+  ctx.fillRect(0, 0, mainCanvas.value.width, mainCanvas.value.height)
 }
 
 // ==================== 绘制绿点 ====================
 function drawFootPoint() {
   if (!ctx || !smoothPosition.detected) return
   
+  ctx.save()
+  ctx.scale(scaleX, scaleY)
+  
   const x = smoothPosition.x
   const y = smoothPosition.y
   
   // 外发光
   ctx.beginPath()
-  ctx.arc(x, y, 30, 0, Math.PI * 2)
-  ctx.fillStyle = 'rgba(51, 181, 85, 0.3)'
+  ctx.arc(x, y, 35, 0, Math.PI * 2)
+  ctx.fillStyle = 'rgba(51, 181, 85, 0.25)'
   ctx.fill()
   
   // 主圆
   ctx.beginPath()
-  ctx.arc(x, y, 20, 0, Math.PI * 2)
-  const gradient = ctx.createRadialGradient(x, y, 0, x, y, 20)
-  gradient.addColorStop(0, '#44dd66')
+  ctx.arc(x, y, 22, 0, Math.PI * 2)
+  const gradient = ctx.createRadialGradient(x, y, 0, x, y, 22)
+  gradient.addColorStop(0, '#55ee77')
   gradient.addColorStop(1, '#228B22')
   ctx.fillStyle = gradient
   ctx.fill()
   
   // 中心白点
   ctx.beginPath()
-  ctx.arc(x, y, 6, 0, Math.PI * 2)
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.8)'
+  ctx.arc(x, y, 7, 0, Math.PI * 2)
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.85)'
   ctx.fill()
+  
+  ctx.restore()
 }
 
 // ==================== 绘制等待圈 ====================
 function drawReadyCircle() {
   if (!ctx) return
+  
+  ctx.save()
+  ctx.scale(scaleX, scaleY)
   
   const cx = 320
   const cy = 180
@@ -270,31 +293,36 @@ function drawReadyCircle() {
   // 灰色底圈
   ctx.beginPath()
   ctx.arc(cx, cy, radius, 0, Math.PI * 2)
-  ctx.strokeStyle = 'rgba(100, 100, 100, 0.8)'
-  ctx.lineWidth = 10
+  ctx.strokeStyle = 'rgba(120, 120, 120, 0.9)'
+  ctx.lineWidth = 12
   ctx.stroke()
   
-  // 进度圈（只有有进度时才显示）
+  // 进度圈
   if (readyProgress.value > 0) {
     ctx.beginPath()
     ctx.arc(cx, cy, radius, -Math.PI / 2, -Math.PI / 2 + (Math.PI * 2 * readyProgress.value / 100))
     ctx.strokeStyle = '#FF7222'
-    ctx.lineWidth = 10
+    ctx.lineWidth = 12
     ctx.lineCap = 'round'
     ctx.stroke()
   }
   
-  // 提示文字
-  ctx.font = 'bold 24px Arial'
+  ctx.restore()
+  
+  // 提示文字（放在下面）
+  ctx.font = 'bold 28px Arial'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
   ctx.fillStyle = '#ffffff'
-  ctx.fillText('请进入圆圈内', cx, cy)
+  ctx.fillText('请进入圆圈内', mainCanvas.value.width / 2, mainCanvas.value.height / 2 + 150)
 }
 
 // ==================== 绘制地鼠洞 ====================
 function drawMoleHoles() {
   if (!ctx) return
+  
+  ctx.save()
+  ctx.scale(scaleX, scaleY)
   
   holes.forEach((hole, index) => {
     const hasMole = game.value.current_mole === index
@@ -315,55 +343,50 @@ function drawMoleHoles() {
     
     // 地鼠
     if (hasMole) {
-      ctx.font = '50px Arial'
+      ctx.font = '55px Arial'
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
       ctx.fillText('🐹', hole.x, hole.y)
     }
     
-    // 进度圈（白色）
+    // 进度圈（和洞重合，粗圈）
     if (progress > 0) {
       ctx.beginPath()
-      ctx.arc(hole.x, hole.y, hole.radius + 10, -Math.PI / 2, -Math.PI / 2 + (Math.PI * 2 * progress / 100))
+      ctx.arc(hole.x, hole.y, hole.radius, -Math.PI / 2, -Math.PI / 2 + (Math.PI * 2 * progress / 100))
       ctx.strokeStyle = '#ffffff'
-      ctx.lineWidth = 6
+      ctx.lineWidth = 12
       ctx.lineCap = 'round'
       ctx.stroke()
     }
   })
+  
+  ctx.restore()
 }
 
 // ==================== 绘制游戏信息 ====================
 function drawGameInfo() {
   if (!ctx || gameState.value !== 'PLAYING') return
   
-  // 时间
-  ctx.font = 'bold 32px Arial'
+  ctx.font = 'bold 36px Arial'
   ctx.textAlign = 'center'
   ctx.fillStyle = '#ffffff'
-  ctx.fillText(`${game.value.timer}s`, canvasWidth / 2, 40)
+  ctx.fillText(`${game.value.timer}s`, mainCanvas.value.width / 2, 50)
   
-  // 分数
-  ctx.font = 'bold 28px Arial'
+  ctx.font = 'bold 32px Arial'
   ctx.fillStyle = '#FFD700'
-  ctx.fillText(`得分: ${game.value.score}`, canvasWidth / 2, 80)
+  ctx.fillText(`得分: ${game.value.score}`, mainCanvas.value.width / 2, 100)
 }
 
 // ==================== 主绘制循环 ====================
 function draw() {
   if (!ctx) return
   
-  // 清空
-  ctx.clearRect(0, 0, canvasWidth, canvasHeight)
+  ctx.clearRect(0, 0, mainCanvas.value.width, mainCanvas.value.height)
   
-  // 绘制背景
   drawBackground()
-  
-  // 更新和绘制粒子
   updateParticles()
   drawParticles()
   
-  // 根据状态绘制
   if (gameState.value === 'READY') {
     drawReadyCircle()
   } else if (gameState.value === 'PLAYING') {
@@ -371,7 +394,6 @@ function draw() {
     drawGameInfo()
   }
   
-  // 始终绘制绿点
   drawFootPoint()
   
   animationId = requestAnimationFrame(draw)
@@ -386,13 +408,11 @@ function updateSmoothPosition() {
   
   smoothPosition.detected = true
   
-  // 使用历史记录进行平滑
   positionHistory.push({ x: rawPosition.x, y: rawPosition.y, time: Date.now() })
   if (positionHistory.length > 5) {
     positionHistory.shift()
   }
   
-  // 加权平均
   let totalWeight = 0
   let sumX = 0
   let sumY = 0
@@ -405,12 +425,10 @@ function updateSmoothPosition() {
   })
   
   if (totalWeight > 0) {
-    // 平滑过渡
     const targetX = sumX / totalWeight
     const targetY = sumY / totalWeight
-    
-    smoothPosition.x += (targetX - smoothPosition.x) * 0.3
-    smoothPosition.y += (targetY - smoothPosition.y) * 0.3
+    smoothPosition.x += (targetX - smoothPosition.x) * 0.4
+    smoothPosition.y += (targetY - smoothPosition.y) * 0.4
   }
 }
 
@@ -426,31 +444,32 @@ function updateReadyState() {
   if (inZone) {
     if (readyStartTime.value === 0) {
       readyStartTime.value = Date.now()
-      console.log('[投影] 用户进入等待圈')
     }
     readyProgress.value = Math.min(100, ((Date.now() - readyStartTime.value) / READY_DURATION) * 100)
     
     if (readyProgress.value >= 100) {
-      console.log('[投影] 3秒完成，开始游戏')
       if (socket) {
         socket.emit('game_control', { action: 'start' })
       }
     }
   } else {
-    if (readyStartTime.value !== 0) {
-      console.log('[投影] 用户离开等待圈')
-    }
     readyStartTime.value = 0
     readyProgress.value = 0
   }
   
-  // 超时检查
-  if (Date.now() - readyEnterTime.value > READY_TIMEOUT) {
-    console.log('[投影] 超时，返回待机')
+  // 超时检查 - 5分钟
+  if (readyEnterTime.value > 0 && Date.now() - readyEnterTime.value > READY_TIMEOUT) {
+    console.log('[投影] 超时5分钟，返回待机')
     gameState.value = 'IDLE'
     game.value.status = 'IDLE'
     readyEnterTime.value = 0
+    readyProgress.value = 0
+    readyStartTime.value = 0
     initParticles()
+    // 通知后端
+    if (socket) {
+      socket.emit('game_control', { action: 'stop' })
+    }
   }
 }
 
@@ -510,6 +529,8 @@ watch(() => game.value.status, (newStatus) => {
   if (newStatus === 'IDLE') {
     gameState.value = 'IDLE'
     readyEnterTime.value = 0
+    readyProgress.value = 0
+    readyStartTime.value = 0
     initParticles()
   } else if (newStatus === 'READY') {
     gameState.value = 'READY'
@@ -521,12 +542,12 @@ watch(() => game.value.status, (newStatus) => {
     gameState.value = 'PLAYING'
     holeProgress.value = [0, 0, 0]
     holeStartTime.value = [0, 0, 0]
+    particles = []
   }
 })
 
 // ==================== 生命周期 ====================
 onMounted(() => {
-  // 连接Socket
   socket = io(backendUrl, {
     transports: ['polling', 'websocket'],
     reconnection: true
@@ -540,19 +561,17 @@ onMounted(() => {
     game.value = data
   })
   
-  // 初始化Canvas
   setTimeout(() => {
     initCanvas()
     draw()
   }, 100)
   
-  // 定时更新
   statusInterval = setInterval(() => {
     updateStatus()
     updateSmoothPosition()
     if (gameState.value === 'READY') updateReadyState()
     else if (gameState.value === 'PLAYING') updatePlayingState()
-  }, 30)  // 30ms更新一次，更流畅
+  }, 30)
   
   window.addEventListener('resize', initCanvas)
 })
@@ -579,8 +598,8 @@ onUnmounted(() => {
 }
 
 .projection-page canvas {
-  width: 100%;
-  height: 100%;
-  display: block;
+  width: 100% !important;
+  height: 100% !important;
+  display: block !important;
 }
 </style>

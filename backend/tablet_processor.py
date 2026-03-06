@@ -11,12 +11,15 @@ class TabletProcessor:
         self.running = False
         self.raw_frame = None
         self.mesh = mp.solutions.face_mesh.FaceMesh(refine_landmarks=True)
-        self.state = {"emotion": "neutral", "bpm": "--"}
+        self.state = {"emotion": "neutral", "bpm": "--", "hrv": "--"}
         
         # rPPG 核心缓冲区
         self.buffer_size = 150
         self.data_buffer = []
         self.times = []
+        
+        # HRV计算
+        self.bpm_history = []
 
     def start(self):
         self.running = True
@@ -38,7 +41,6 @@ class TabletProcessor:
         while self.running:
             if self.raw_frame is not None:
                 try:
-                    # 关键：enforce_detection=False 避免没对准时报错死循环
                     res = DeepFace.analyze(self.raw_frame, actions=['emotion'], 
                                          enforce_detection=False, detector_backend='opencv', silent=True)
                     if res:
@@ -46,6 +48,22 @@ class TabletProcessor:
                 except:
                     pass
             time.sleep(0.3)
+
+    def get_jpeg(self):
+        """获取JPEG格式的视频帧"""
+        if self.raw_frame is None:
+            return None
+        frame = self.raw_frame.copy()
+        _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+        return buffer.tobytes()
+
+    def get_health_data(self):
+        """获取健康数据"""
+        return {
+            "bpm": self.state.get("bpm", "--"),
+            "emotion": self.state.get("emotion", "neutral"),
+            "hrv": self.state.get("hrv", "--")
+        }
 
     def get_ui_data(self):
         if self.raw_frame is None: return None
@@ -82,7 +100,15 @@ class TabletProcessor:
                     # 过滤 45-150 BPM 范围
                     valid = (freqs >= 0.75) & (freqs <= 2.5)
                     if np.any(valid):
-                        self.state["bpm"] = int(freqs[valid][np.argmax(fft[valid])] * 60)
+                        bpm = int(freqs[valid][np.argmax(fft[valid])] * 60)
+                        self.state["bpm"] = bpm
+                        
+                        # 计算HRV
+                        self.bpm_history.append(bpm)
+                        if len(self.bpm_history) > 30:
+                            self.bpm_history.pop(0)
+                        if len(self.bpm_history) >= 10:
+                            self.state["hrv"] = int(np.std(self.bpm_history))
 
         _, buffer = cv2.imencode('.jpg', frame)
         return {
