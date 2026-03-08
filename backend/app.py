@@ -14,6 +14,8 @@ from datetime import datetime
 from flask import Flask, render_template, Response, request, jsonify, send_from_directory
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
+import cv2
+import numpy as np
 
 # ============================================================================
 # 配置
@@ -26,6 +28,24 @@ try:
     s.close()
 except:
     pass
+
+# ============================================================================
+# 解析命令行参数
+# ============================================================================
+# args[0]: 平板视频地址 (如 http://192.168.3.94:8080/video)
+# args[1]: 投影摄像头源 (如 1)
+TABLET_VIDEO_URL = "http://192.168.3.94:8080/video"  # 默认值
+PROJECTION_CAMERA_SOURCE = 1  # 默认值
+
+if len(sys.argv) >= 2:
+    TABLET_VIDEO_URL = sys.argv[1]
+    print(f"[配置] 平板视频地址: {TABLET_VIDEO_URL}")
+if len(sys.argv) >= 3:
+    try:
+        PROJECTION_CAMERA_SOURCE = int(sys.argv[2])
+    except:
+        pass
+    print(f"[配置] 投影摄像头源: {PROJECTION_CAMERA_SOURCE}")
 
 app = Flask(__name__, static_folder='../frontend/.output/public', static_url_path='')
 CORS(app)
@@ -53,12 +73,82 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from screen_processor import init_screen_processor, get_screen_processor, state
 from games import WhackAMole
+from akon_agent import ask_akon
+from rppg_processor import RPPGProcessor
 
 # ============================================================================
 # 初始化
 # ============================================================================
-screen_proc = init_screen_processor(camera_source=1, socketio=socketio)
+screen_proc = init_screen_processor(camera_source=PROJECTION_CAMERA_SOURCE, socketio=socketio)
 whack_a_mole = WhackAMole(socketio)
+rppg_processor = RPPGProcessor(fps=30)
+
+# rPPG 状态
+rppg_status = {
+    "bpm": None,
+    "emotion": None,
+    "confidence": 0
+}
+
+# rPPG处理线程
+rppg_frame = None
+rppg_frame_lock = threading.Lock()
+
+def rppg_worker():
+    """rPPG处理线程：独立处理心率检测"""
+    import urllib.request
+    
+    global rppg_frame, rppg_status
+    tablet_url = TABLET_VIDEO_URL
+    
+    print(f"[rPPG线程] 启动，连接: {tablet_url}")
+    
+    while True:
+        try:
+            stream = urllib.request.urlopen(tablet_url, timeout=5)
+            bytes_data = bytes()
+            
+            while True:
+                bytes_data += stream.read(1024)
+                a = bytes_data.find(b'\xff\xd8')
+                b = bytes_data.find(b'\xff\xd9')
+                
+                if a != -1 and b != -1:
+                    jpg = bytes_data[a:b+2]
+                    bytes_data = bytes_data[b+2:]
+                    
+                    frame = cv2.imdecode(np.frombuffer(jpg, dtype=np.uint8), cv2.IMREAD_COLOR)
+                    
+                    if frame is not None:
+                        # 处理rPPG
+                        bpm, conf, face, roi = rppg_processor.process_frame(frame)
+                        
+                        # 更新状态
+                        if bpm and conf > 2.0:
+                            rppg_status["bpm"] = round(bpm, 1)
+                            rppg_status["confidence"] = round(conf, 2)
+                        
+                        # 绘制结果
+                        if face:
+                            x, y, w, h = face
+                            cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+                        
+                        if roi:
+                            rx, ry, rw, rh = roi
+                            cv2.rectangle(frame, (rx, ry), (rx+rw, ry+rh), (255, 0, 0), 2)
+                        
+                        if rppg_status["bpm"]:
+                            cv2.putText(frame, f"BPM: {rppg_status['bpm']}", (10, 30),
+                                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                        
+                        # 更新共享帧
+                        with rppg_frame_lock:
+                            _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                            rppg_frame = jpeg.tobytes()
+                        
+        except Exception as e:
+            print(f"[rPPG线程] 错误: {e}")
+            time.sleep(1)
 
 # ============================================================================
 # 静态文件
@@ -95,7 +185,25 @@ def corrected_feed():
 
 @app.route('/tablet_video_feed')
 def tablet_video_feed():
-    return Response(b'', mimetype='multipart/x-mixed-replace; boundary=frame')
+    """平板摄像头视频流（从共享帧读取，流畅不卡顿）"""
+    def gen_tablet_video():
+        global rppg_frame
+        
+        while True:
+            with rppg_frame_lock:
+                frame = rppg_frame
+            
+            if frame:
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+            else:
+                # 等待帧
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + b'' + b'\r\n')
+            
+            time.sleep(0.03)  # ~30fps
+    
+    return Response(gen_tablet_video(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 # ============================================================================
 # API
@@ -135,7 +243,44 @@ def api_system_state():
 
 @app.route('/api/health')
 def api_health():
-    return jsonify({"bpm": None, "emotion": None})
+    return jsonify(rppg_status)
+
+# ============================================================================
+# 阿康对话 API
+# ============================================================================
+@app.route('/api/akon/chat', methods=['POST'])
+def api_akon_chat():
+    """阿康对话接口"""
+    data = request.json
+    user_input = data.get('message', '')
+    
+    if not user_input:
+        return jsonify({"error": "请输入内容"}), 400
+    
+    # 构建系统状态
+    akon_state = {
+        "current_page": system_state.get("current_page", "/"),
+        "game_active": system_state["game"]["active"],
+        "game_name": system_state["game"]["name"],
+        "game_score": system_state["game"]["score"]
+    }
+    
+    # 调用阿康
+    response, action = ask_akon(user_input, akon_state)
+    
+    result = {
+        "response": response,
+        "action": action
+    }
+    
+    # 如果有导航动作，执行导航
+    if action and action.get("action") == "navigate":
+        page = action.get("page", "/")
+        if not system_state["game"]["active"]:
+            system_state["current_page"] = page
+            socketio.emit('navigate_to', {"page": page})
+    
+    return jsonify(result)
 
 # ============================================================================
 # Socket事件 - 游戏控制
@@ -245,7 +390,11 @@ def main_worker():
 # 启动
 # ============================================================================
 if __name__ == '__main__':
+    # 启动后台任务
     threading.Thread(target=main_worker, daemon=True).start()
+    
+    # 启动rPPG处理线程
+    threading.Thread(target=rppg_worker, daemon=True).start()
     
     print("=" * 60)
     print("AI具身智能认知训练系统")
@@ -253,6 +402,9 @@ if __name__ == '__main__':
     print()
     print(f"本机IP:     http://{LOCAL_IP}:5000")
     print(f"Flask API:  http://127.0.0.1:5000")
+    print()
+    print(f"平板视频:   {TABLET_VIDEO_URL}")
+    print(f"投影摄像头: {PROJECTION_CAMERA_SOURCE}")
     print()
     print(f"平板访问:   http://{LOCAL_IP}:3000")
     print(f"投影页面:   http://{LOCAL_IP}:3000/projection")

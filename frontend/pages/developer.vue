@@ -103,6 +103,7 @@ const PORT = 5000
 const baseUrl = `http://${getHost()}:${PORT}`
 const videoUrl = `${baseUrl}/video_feed`
 const correctedUrl = `${baseUrl}/corrected_feed`
+// 平板摄像头使用后端处理过的视频流（带rPPG心率检测）
 const tabletVideoUrl = `${baseUrl}/tablet_video_feed`
 
 // ==================== 状态 ====================
