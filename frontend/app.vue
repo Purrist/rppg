@@ -1,5 +1,5 @@
 <template>
-  <div class="app-viewport">
+  <div class="app-viewport" :class="{ 'is-dev-page': isDevPage }">
     <!-- 纯页面（无侧边栏） -->
     <template v-if="isPurePage">
       <NuxtPage />
@@ -29,16 +29,12 @@
         <NuxtPage />
       </main>
 
-      <!-- 阿康悬浮球（首页不显示） -->
+      <!-- 阿康悬浮球 -->
       <div 
         v-if="!ui.akon && currentPath !== '/'"
         class="akon-ball"
         :class="{ 'is-docked': ball.status === 'half' }"
-        :style="{ 
-          left: ball.x + 'px', 
-          top: ball.y + 'px',
-          opacity: ball.isDragging ? 1 : (ball.status === 'half' ? 0.5 : 1)
-        }"
+        :style="{ left: ball.x + 'px', top: ball.y + 'px', opacity: ball.isDragging ? 1 : (ball.status === 'half' ? 0.5 : 1) }"
         @mousedown="handleDragStart"
         @touchstart.passive="handleDragStart"
       >
@@ -58,7 +54,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { io } from 'socket.io-client'
 
@@ -66,8 +62,6 @@ const route = useRoute()
 const router = useRouter()
 
 // ==================== 自动检测后端地址 ====================
-// 如果是localhost访问，用localhost连接后端
-// 如果是IP访问，用IP连接后端
 const getBackendHost = () => {
   if (typeof window === 'undefined') return 'localhost'
   const host = window.location.hostname
@@ -82,6 +76,7 @@ console.log('[App] 后端地址:', backendUrl)
 
 // 纯页面
 const isPurePage = computed(() => ['projection', 'developer'].includes(route.name))
+const isDevPage = computed(() => route.name === 'developer')
 const currentPath = computed(() => route.path)
 
 // 后端连接状态
@@ -97,13 +92,25 @@ const ball = reactive({
 
 let socket = null
 
+// 动态控制body滚动
+watch(isDevPage, (dev) => {
+  if (typeof document !== 'undefined') {
+    if (dev) {
+      document.body.style.overflow = 'auto'
+      document.documentElement.style.overflow = 'auto'
+    } else {
+      document.body.style.overflow = 'hidden'
+      document.documentElement.style.overflow = 'hidden'
+    }
+  }
+}, { immediate: true })
+
 // ==================== 导航 ====================
 function handleNavigate(page) {
   if (gameActive.value) {
     alert('请先退出当前游戏')
     return
   }
-  
   if (backendConnected.value && socket) {
     socket.emit('navigate', { page, source: 'user' })
   } else {
@@ -126,7 +133,6 @@ onMounted(() => {
   window.addEventListener('touchmove', handleDragging, { passive: false })
   window.addEventListener('touchend', handleDragEnd)
   
-  // 连接Socket - 使用检测到的地址
   socket = io(backendUrl, {
     transports: ['polling', 'websocket'],
     reconnection: true,
@@ -137,6 +143,9 @@ onMounted(() => {
   socket.on('connect', () => {
     backendConnected.value = true
     console.log('[App] 后端已连接')
+    
+    // ⭐ 连接时获取当前状态
+    socket.emit('get_state')
   })
   
   socket.on('disconnect', () => {
@@ -149,9 +158,18 @@ onMounted(() => {
     console.log('[App] 连接错误:', err.message)
   })
   
+  // ⭐ 收到系统状态时，检查是否需要导航到首页
   socket.on('system_state', (data) => {
     if (data.state && data.state.game) {
       gameActive.value = data.state.game.active
+      
+      // ⭐ 如果游戏状态是IDLE且不活跃，确保在首页
+      if (data.state.game.status === 'IDLE' && data.state.game.active === false) {
+        // 如果当前在训练页面，返回首页
+        if (route.path === '/training') {
+          router.push('/learning')
+        }
+      }
     }
   })
   
@@ -227,14 +245,24 @@ function closeAkon() {
 }
 
 html, body { 
-  width: 100vw; height: 100vh; overflow: hidden; 
-  background: #000; font-family: 'PingFang SC', sans-serif;
+  width: 100vw; 
+  height: 100vh; 
+  background: #000; 
+  font-family: 'PingFang SC', sans-serif;
 }
 
 .app-viewport { 
-  width: 100vw; height: 100vh; 
-  display: flex; justify-content: center; align-items: center; 
-  overflow: hidden; 
+  width: 100vw; 
+  height: 100vh; 
+  display: flex; 
+  justify-content: center; 
+  align-items: center; 
+}
+
+.app-viewport.is-dev-page {
+  height: auto;
+  min-height: 100vh;
+  align-items: flex-start;
 }
 
 .tablet-frame {

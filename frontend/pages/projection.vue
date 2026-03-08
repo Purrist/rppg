@@ -1,6 +1,5 @@
 <template>
   <div class="projection-page" ref="pageRef">
-    <!-- 主Canvas - 绘制所有内容 -->
     <canvas ref="mainCanvas"></canvas>
   </div>
 </template>
@@ -19,8 +18,6 @@ const FLASK_PORT = 5000
 const backendUrl = `http://${getBackendHost()}:${FLASK_PORT}`
 const apiUrl = backendUrl
 
-console.log('[Projection] 后端地址:', backendUrl)
-
 // ==================== Canvas ====================
 const mainCanvas = ref(null)
 const pageRef = ref(null)
@@ -28,7 +25,7 @@ let ctx = null
 let animationId = null
 
 // ==================== 游戏状态 ====================
-const gameState = ref('IDLE')  // IDLE, READY, PLAYING
+const gameState = ref('IDLE')
 const game = ref({
   status: 'IDLE',
   score: 0,
@@ -36,33 +33,32 @@ const game = ref({
   current_mole: -1
 })
 
-// ==================== 用户位置（平滑处理）====================
-const rawPosition = reactive({ x: 320, y: 180, detected: false })
-const smoothPosition = reactive({ x: 320, y: 180, detected: false })
-const positionHistory = []
+// ==================== 用户位置 ====================
+const footPosition = reactive({ x: 320, y: 180, detected: false })
 
 // ==================== 等待状态 ====================
 const readyProgress = ref(0)
 const readyStartTime = ref(0)
 const readyEnterTime = ref(0)
-const READY_DURATION = 3000    // 3秒
-const READY_TIMEOUT = 300000   // 5分钟超时
+const READY_DURATION = 3000
+const READY_TIMEOUT = 300000
 
-// ==================== 地鼠洞配置（三按钮模板）====================
+// ==================== 地鼠洞配置 ====================
 const holes = [
   { x: 130, y: 240, radius: 80 },
   { x: 320, y: 240, radius: 80 },
   { x: 510, y: 240, radius: 80 }
 ]
 
-// 洞的进度
 const holeProgress = ref([0, 0, 0])
 const holeStartTime = ref([0, 0, 0])
-const HOLE_DURATION = 1000
+const holeFeedback = ref([null, null, null])
+const holeFeedbackTime = ref([0, 0, 0])
+const HOLE_DURATION = 2000
+const FEEDBACK_DURATION = 1000
 
 // ==================== 粒子系统 ====================
 let particles = []
-const MAX_PARTICLES = 80
 
 // ==================== Socket ====================
 let socket = null
@@ -79,121 +75,86 @@ function initCanvas() {
   if (!mainCanvas.value || !pageRef.value) return
   
   const container = pageRef.value
-  const containerWidth = container.clientWidth
-  const containerHeight = container.clientHeight
+  mainCanvas.value.width = container.clientWidth
+  mainCanvas.value.height = container.clientHeight
   
-  // 设置canvas尺寸为容器尺寸
-  mainCanvas.value.width = containerWidth
-  mainCanvas.value.height = containerHeight
-  
-  // 计算缩放比例（保持16:9）
-  scaleX = containerWidth / canvasWidth
-  scaleY = containerHeight / canvasHeight
+  scaleX = container.clientWidth / canvasWidth
+  scaleY = container.clientHeight / canvasHeight
   
   ctx = mainCanvas.value.getContext('2d')
   
-  // 初始化粒子
-  initParticles()
-  
-  console.log('[Projection] Canvas初始化:', containerWidth, 'x', containerHeight)
+  // ⭐ 只在粒子为空时初始化
+  if (particles.length === 0) {
+    initParticles()
+  }
 }
 
 // ==================== 粒子系统 ====================
 function initParticles() {
-  particles = []
-  const count = gameState.value === 'IDLE' ? 50 : 30
+  // ⭐ 只有粒子为空时才初始化
+  if (particles.length > 0) return
   
-  for (let i = 0; i < count; i++) {
+  for (let i = 0; i < 40; i++) {
     particles.push(createParticle())
   }
 }
 
-function createParticle(fromCircle = false, circleX = 0, circleY = 0, circleRadius = 0) {
-  const hue = 220 + Math.random() * 60
-  const saturation = 60 + Math.random() * 40
-  const lightness = 40 + Math.random() * 30
-  
-  let x, y
-  if (fromCircle) {
-    const angle = Math.random() * Math.PI * 2
-    const dist = circleRadius + 10 + Math.random() * 30
-    x = circleX + Math.cos(angle) * dist
-    y = circleY + Math.sin(angle) * dist
-  } else {
-    x = Math.random() * canvasWidth
-    y = Math.random() * canvasHeight
-  }
-  
+function createParticle() {
   return {
-    x,
-    y,
-    vx: (Math.random() - 0.5) * 0.4,
-    vy: (Math.random() - 0.5) * 0.4,
+    x: Math.random() * canvasWidth,
+    y: Math.random() * canvasHeight,
+    vx: (Math.random() - 0.5) * 0.3,
+    vy: (Math.random() - 0.5) * 0.3,
     radius: 4 + Math.random() * 8,
-    alpha: 0.3 + Math.random() * 0.5,
-    hue,
-    saturation,
-    lightness,
+    alpha: 0.4 + Math.random() * 0.5,
+    hue: 220 + Math.random() * 60,
+    sat: 60 + Math.random() * 40,
+    light: 50 + Math.random() * 30,
     life: 1,
     decay: 0.001 + Math.random() * 0.002
   }
 }
 
 function updateParticles() {
-  // 游戏进行中不显示粒子
+  // ⭐ 只有PLAYING状态才清除粒子
   if (gameState.value === 'PLAYING') {
     particles = []
     return
   }
   
-  const footX = smoothPosition.detected ? smoothPosition.x : -1000
-  const footY = smoothPosition.detected ? smoothPosition.y : -1000
-  
-  const emitFromCircle = gameState.value === 'READY'
-  const circleX = 320
-  const circleY = 180
-  const circleRadius = 80
+  // ⭐ IDLE和READY状态都有粒子效果，保持延续性
+  const footX = footPosition.x
+  const footY = footPosition.y
+  const hasFoot = footPosition.detected
   
   for (let i = particles.length - 1; i >= 0; i--) {
     const p = particles[i]
-    
     p.x += p.vx
     p.y += p.vy
     
-    // 脚踩驱散
-    if (smoothPosition.detected) {
+    if (hasFoot) {
       const dx = p.x - footX
       const dy = p.y - footY
       const dist = Math.sqrt(dx * dx + dy * dy)
-      if (dist < 100) {
-        const force = (100 - dist) / 100 * 0.6
+      if (dist < 120) {
+        const force = (120 - dist) / 120 * 0.5
         p.vx += (dx / dist) * force
         p.vy += (dy / dist) * force
-        p.life -= 0.015
+        p.life -= 0.01
       }
     }
     
-    // 边缘消散
     const margin = 30
-    if (p.x < margin || p.x > canvasWidth - margin || 
-        p.y < margin || p.y > canvasHeight - margin) {
-      p.life -= 0.02
+    if (p.x < margin || p.x > canvasWidth - margin || p.y < margin || p.y > canvasHeight - margin) {
+      p.life -= 0.03
     }
-    
     p.life -= p.decay
-    
-    if (p.life <= 0 || p.alpha <= 0) {
-      particles.splice(i, 1)
-    }
+    if (p.life <= 0) particles.splice(i, 1)
   }
   
-  const targetCount = gameState.value === 'IDLE' ? 50 : 30
-  while (particles.length < targetCount) {
-    if (emitFromCircle) {
-      particles.push(createParticle(true, circleX, circleY, circleRadius))
-    } else {
-      particles.push(createParticle())
-    }
+  // 补充粒子
+  while (particles.length < 40) {
+    particles.push(createParticle())
   }
 }
 
@@ -206,16 +167,14 @@ function drawParticles() {
   particles.forEach(p => {
     const alpha = p.alpha * p.life
     if (alpha <= 0) return
-    
     ctx.beginPath()
     ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2)
-    ctx.fillStyle = `hsla(${p.hue}, ${p.saturation}%, ${p.lightness}%, ${alpha})`
+    ctx.fillStyle = `hsla(${p.hue}, ${p.sat}%, ${p.light}%, ${alpha})`
     ctx.fill()
-    
     if (p.radius > 5) {
       ctx.beginPath()
       ctx.arc(p.x, p.y, p.radius * 2, 0, Math.PI * 2)
-      ctx.fillStyle = `hsla(${p.hue}, ${p.saturation}%, ${p.lightness}%, ${alpha * 0.15})`
+      ctx.fillStyle = `hsla(${p.hue}, ${p.sat}%, ${p.light}%, ${alpha * 0.15})`
       ctx.fill()
     }
   })
@@ -227,19 +186,17 @@ function drawParticles() {
 function drawBackground() {
   if (!ctx) return
   
-  // 黑色背景
   ctx.fillStyle = '#000000'
   ctx.fillRect(0, 0, mainCanvas.value.width, mainCanvas.value.height)
   
-  // 游戏进行中纯黑底
   if (gameState.value === 'PLAYING') return
   
-  // 中心渐变光晕
+  // ⭐ IDLE和READY状态都有渐变背景
   const centerX = mainCanvas.value.width / 2
   const centerY = mainCanvas.value.height / 2
   const gradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, centerX)
-  gradient.addColorStop(0, 'rgba(60, 20, 100, 0.25)')
-  gradient.addColorStop(0.5, 'rgba(30, 10, 60, 0.15)')
+  gradient.addColorStop(0, 'rgba(60, 20, 100, 0.2)')
+  gradient.addColorStop(0.5, 'rgba(30, 10, 60, 0.1)')
   gradient.addColorStop(1, 'rgba(0, 0, 0, 0)')
   ctx.fillStyle = gradient
   ctx.fillRect(0, 0, mainCanvas.value.width, mainCanvas.value.height)
@@ -247,24 +204,29 @@ function drawBackground() {
 
 // ==================== 绘制绿点 ====================
 function drawFootPoint() {
-  if (!ctx || !smoothPosition.detected) return
+  if (!ctx || !footPosition.detected) return
+  
+  // ⭐ 严格边界检查，防止绿点破裂
+  let x = Math.max(50, Math.min(590, footPosition.x))
+  let y = Math.max(50, Math.min(310, footPosition.y))
+  
+  // 确保坐标是有效数字
+  if (!Number.isFinite(x)) x = 320
+  if (!Number.isFinite(y)) y = 180
   
   ctx.save()
   ctx.scale(scaleX, scaleY)
   
-  const x = smoothPosition.x
-  const y = smoothPosition.y
-  
   // 外发光
   ctx.beginPath()
-  ctx.arc(x, y, 35, 0, Math.PI * 2)
+  ctx.arc(x, y, 40, 0, Math.PI * 2)
   ctx.fillStyle = 'rgba(51, 181, 85, 0.25)'
   ctx.fill()
   
   // 主圆
   ctx.beginPath()
-  ctx.arc(x, y, 22, 0, Math.PI * 2)
-  const gradient = ctx.createRadialGradient(x, y, 0, x, y, 22)
+  ctx.arc(x, y, 25, 0, Math.PI * 2)
+  const gradient = ctx.createRadialGradient(x, y, 0, x, y, 25)
   gradient.addColorStop(0, '#55ee77')
   gradient.addColorStop(1, '#228B22')
   ctx.fillStyle = gradient
@@ -272,8 +234,8 @@ function drawFootPoint() {
   
   // 中心白点
   ctx.beginPath()
-  ctx.arc(x, y, 7, 0, Math.PI * 2)
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.85)'
+  ctx.arc(x, y, 9, 0, Math.PI * 2)
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.95)'
   ctx.fill()
   
   ctx.restore()
@@ -286,35 +248,35 @@ function drawReadyCircle() {
   ctx.save()
   ctx.scale(scaleX, scaleY)
   
-  const cx = 320
-  const cy = 180
-  const radius = 80
+  const cx = 320, cy = 180, radius = 80
   
-  // 灰色底圈
   ctx.beginPath()
   ctx.arc(cx, cy, radius, 0, Math.PI * 2)
   ctx.strokeStyle = 'rgba(120, 120, 120, 0.9)'
-  ctx.lineWidth = 12
+  ctx.lineWidth = 14
   ctx.stroke()
   
-  // 进度圈
   if (readyProgress.value > 0) {
     ctx.beginPath()
     ctx.arc(cx, cy, radius, -Math.PI / 2, -Math.PI / 2 + (Math.PI * 2 * readyProgress.value / 100))
     ctx.strokeStyle = '#FF7222'
-    ctx.lineWidth = 12
+    ctx.lineWidth = 14
     ctx.lineCap = 'round'
     ctx.stroke()
   }
   
   ctx.restore()
   
-  // 提示文字（放在下面）
-  ctx.font = 'bold 28px Arial'
+  // ⭐ 文字位置控制
+  // 改这个数值可以调整文字上下位置
+  // 数值越小（更负），文字越往上
+  const textYOffset = -250
+  
+  ctx.font = 'bold 48px Arial'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
   ctx.fillStyle = '#ffffff'
-  ctx.fillText('请进入圆圈内', mainCanvas.value.width / 2, mainCanvas.value.height / 2 + 150)
+  ctx.fillText('请进入圆圈内', mainCanvas.value.width / 2, mainCanvas.value.height / 2 + textYOffset)
 }
 
 // ==================== 绘制地鼠洞 ====================
@@ -327,34 +289,48 @@ function drawMoleHoles() {
   holes.forEach((hole, index) => {
     const hasMole = game.value.current_mole === index
     const progress = holeProgress.value[index]
+    const feedback = holeFeedback.value[index]
     
-    // 洞的背景
+    let holeColor = '#444'
+    let glowColor = null
+    if (feedback === 'correct') {
+      holeColor = '#33B555'
+      glowColor = 'rgba(51, 181, 85, 0.5)'
+    } else if (feedback === 'wrong') {
+      holeColor = '#ff4444'
+      glowColor = 'rgba(255, 68, 68, 0.5)'
+    }
+    
+    if (glowColor) {
+      ctx.beginPath()
+      ctx.arc(hole.x, hole.y, hole.radius + 25, 0, Math.PI * 2)
+      ctx.fillStyle = glowColor
+      ctx.fill()
+    }
+    
     ctx.beginPath()
     ctx.arc(hole.x, hole.y, hole.radius, 0, Math.PI * 2)
     ctx.fillStyle = '#1a1a1a'
     ctx.fill()
     
-    // 洞的边框
     ctx.beginPath()
     ctx.arc(hole.x, hole.y, hole.radius, 0, Math.PI * 2)
-    ctx.strokeStyle = hasMole ? '#8B4513' : '#444'
-    ctx.lineWidth = 4
+    ctx.strokeStyle = hasMole ? '#8B4513' : holeColor
+    ctx.lineWidth = 5
     ctx.stroke()
     
-    // 地鼠
-    if (hasMole) {
-      ctx.font = '55px Arial'
+    if (hasMole && !feedback) {
+      ctx.font = '60px Arial'
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
       ctx.fillText('🐹', hole.x, hole.y)
     }
     
-    // 进度圈（和洞重合，粗圈）
-    if (progress > 0) {
+    if (progress > 0 && !feedback) {
       ctx.beginPath()
       ctx.arc(hole.x, hole.y, hole.radius, -Math.PI / 2, -Math.PI / 2 + (Math.PI * 2 * progress / 100))
       ctx.strokeStyle = '#ffffff'
-      ctx.lineWidth = 12
+      ctx.lineWidth = 14
       ctx.lineCap = 'round'
       ctx.stroke()
     }
@@ -367,14 +343,14 @@ function drawMoleHoles() {
 function drawGameInfo() {
   if (!ctx || gameState.value !== 'PLAYING') return
   
-  ctx.font = 'bold 36px Arial'
+  ctx.font = 'bold 40px Arial'
   ctx.textAlign = 'center'
   ctx.fillStyle = '#ffffff'
-  ctx.fillText(`${game.value.timer}s`, mainCanvas.value.width / 2, 50)
+  ctx.fillText(`${game.value.timer}s`, mainCanvas.value.width / 2, 55)
   
-  ctx.font = 'bold 32px Arial'
+  ctx.font = 'bold 36px Arial'
   ctx.fillStyle = '#FFD700'
-  ctx.fillText(`得分: ${game.value.score}`, mainCanvas.value.width / 2, 100)
+  ctx.fillText(`得分: ${game.value.score}`, mainCanvas.value.width / 2, 110)
 }
 
 // ==================== 主绘制循环 ====================
@@ -387,6 +363,8 @@ function draw() {
   updateParticles()
   drawParticles()
   
+  // ⭐ IDLE状态：只有粒子
+  // ⭐ READY状态：粒子 + 等待圈
   if (gameState.value === 'READY') {
     drawReadyCircle()
   } else if (gameState.value === 'PLAYING') {
@@ -399,47 +377,14 @@ function draw() {
   animationId = requestAnimationFrame(draw)
 }
 
-// ==================== 位置平滑处理 ====================
-function updateSmoothPosition() {
-  if (!rawPosition.detected) {
-    smoothPosition.detected = false
-    return
-  }
-  
-  smoothPosition.detected = true
-  
-  positionHistory.push({ x: rawPosition.x, y: rawPosition.y, time: Date.now() })
-  if (positionHistory.length > 5) {
-    positionHistory.shift()
-  }
-  
-  let totalWeight = 0
-  let sumX = 0
-  let sumY = 0
-  
-  positionHistory.forEach((pos, i) => {
-    const weight = i + 1
-    sumX += pos.x * weight
-    sumY += pos.y * weight
-    totalWeight += weight
-  })
-  
-  if (totalWeight > 0) {
-    const targetX = sumX / totalWeight
-    const targetY = sumY / totalWeight
-    smoothPosition.x += (targetX - smoothPosition.x) * 0.4
-    smoothPosition.y += (targetY - smoothPosition.y) * 0.4
-  }
-}
-
 // ==================== READY状态逻辑 ====================
 function updateReadyState() {
   if (gameState.value !== 'READY') return
   
   const centerX = 320, centerY = 180, radius = 80
-  const dx = smoothPosition.x - centerX
-  const dy = smoothPosition.y - centerY
-  const inZone = smoothPosition.detected && (dx * dx + dy * dy <= radius * radius)
+  const dx = footPosition.x - centerX
+  const dy = footPosition.y - centerY
+  const inZone = footPosition.detected && (dx * dx + dy * dy <= radius * radius)
   
   if (inZone) {
     if (readyStartTime.value === 0) {
@@ -457,16 +402,13 @@ function updateReadyState() {
     readyProgress.value = 0
   }
   
-  // 超时检查 - 5分钟
   if (readyEnterTime.value > 0 && Date.now() - readyEnterTime.value > READY_TIMEOUT) {
-    console.log('[投影] 超时5分钟，返回待机')
     gameState.value = 'IDLE'
     game.value.status = 'IDLE'
     readyEnterTime.value = 0
     readyProgress.value = 0
     readyStartTime.value = 0
-    initParticles()
-    // 通知后端
+    // ⭐ 不重新初始化粒子，保持延续性
     if (socket) {
       socket.emit('game_control', { action: 'stop' })
     }
@@ -480,9 +422,21 @@ function updatePlayingState() {
   const now = Date.now()
   
   holes.forEach((hole, index) => {
-    const dx = smoothPosition.x - hole.x
-    const dy = smoothPosition.y - hole.y
-    const inHole = smoothPosition.detected && (dx * dx + dy * dy <= hole.radius * hole.radius)
+    const feedback = holeFeedback.value[index]
+    const feedbackTime = holeFeedbackTime.value[index]
+    
+    if (feedback) {
+      if (now - feedbackTime > FEEDBACK_DURATION) {
+        holeFeedback.value[index] = null
+        holeProgress.value[index] = 0
+        holeStartTime.value[index] = 0
+      }
+      return
+    }
+    
+    const dx = footPosition.x - hole.x
+    const dy = footPosition.y - hole.y
+    const inHole = footPosition.detected && (dx * dx + dy * dy <= hole.radius * hole.radius)
     
     if (inHole) {
       if (holeStartTime.value[index] === 0) {
@@ -494,13 +448,12 @@ function updatePlayingState() {
       
       if (holeProgress.value[index] >= 100) {
         const hit = game.value.current_mole === index
+        holeFeedback.value[index] = hit ? 'correct' : 'wrong'
+        holeFeedbackTime.value[index] = now
         
         if (socket) {
           socket.emit('game_hit', { hole: index, hit })
         }
-        
-        holeProgress.value[index] = 0
-        holeStartTime.value[index] = 0
       }
     } else {
       holeProgress.value[index] = 0
@@ -515,33 +468,41 @@ async function updateStatus() {
     const res = await fetch(`${apiUrl}/api/status`)
     if (res.ok) {
       const data = await res.json()
-      rawPosition.x = data.feet_x
-      rawPosition.y = data.feet_y
-      rawPosition.detected = data.feet_detected
+      // ⭐ 边界检查
+      let x = data.feet_x
+      let y = data.feet_y
+      if (Number.isFinite(x) && Number.isFinite(y)) {
+        footPosition.x = Math.max(50, Math.min(590, x))
+        footPosition.y = Math.max(50, Math.min(310, y))
+      }
+      footPosition.detected = data.feet_detected
     }
   } catch (e) {}
 }
 
 // ==================== 监听游戏状态变化 ====================
-watch(() => game.value.status, (newStatus) => {
-  console.log('[投影] 游戏状态变化:', newStatus)
-  
+watch(() => game.value.status, (newStatus, oldStatus) => {
   if (newStatus === 'IDLE') {
     gameState.value = 'IDLE'
     readyEnterTime.value = 0
     readyProgress.value = 0
     readyStartTime.value = 0
-    initParticles()
+    holeProgress.value = [0, 0, 0]
+    holeStartTime.value = [0, 0, 0]
+    holeFeedback.value = [null, null, null]
+    // ⭐ 不重新初始化粒子，保持延续性
   } else if (newStatus === 'READY') {
     gameState.value = 'READY'
     readyProgress.value = 0
     readyStartTime.value = 0
     readyEnterTime.value = Date.now()
-    initParticles()
+    // ⭐ READY状态保持粒子效果，不重新初始化
   } else if (newStatus === 'PLAYING') {
     gameState.value = 'PLAYING'
     holeProgress.value = [0, 0, 0]
     holeStartTime.value = [0, 0, 0]
+    holeFeedback.value = [null, null, null]
+    // ⭐ 只有PLAYING状态才清除粒子
     particles = []
   }
 })
@@ -555,10 +516,20 @@ onMounted(() => {
   
   socket.on('connect', () => {
     console.log('[投影] 后端已连接')
+    // ⭐ 连接时获取当前状态
+    socket.emit('get_state')
   })
   
   socket.on('game_update', (data) => {
     game.value = data
+  })
+  
+  socket.on('system_state', (data) => {
+    if (data.state && data.state.game) {
+      game.value.status = data.state.game.status || 'IDLE'
+      game.value.score = data.state.game.score || 0
+      game.value.timer = data.state.game.timer || 60
+    }
   })
   
   setTimeout(() => {
@@ -568,10 +539,9 @@ onMounted(() => {
   
   statusInterval = setInterval(() => {
     updateStatus()
-    updateSmoothPosition()
     if (gameState.value === 'READY') updateReadyState()
     else if (gameState.value === 'PLAYING') updatePlayingState()
-  }, 30)
+  }, 16)
   
   window.addEventListener('resize', initCanvas)
 })

@@ -12,22 +12,23 @@ class WhackAMole:
         self.socketio = socketio
         
         # 游戏状态
-        self.status = "IDLE"  # IDLE, READY, PLAYING, PAUSED
+        self.status = "IDLE"
         
         # 游戏数据
         self.score = 0
         self.timer = 60
-        self.current_mole = -1  # -1表示没有地鼠，0/1/2表示地鼠在哪个洞
+        self.current_mole = -1
         
         # 时间控制
         self.start_time = 0
         self.last_mole_time = 0
+        self.mole_appear_time = 0  # 地鼠出现时间
         self.paused_time = 0
         self.total_paused = 0
         
         # 游戏参数（调整后）
-        self.mole_stay = 4.0      # 地鼠停留时间 4秒（原来3秒）
-        self.mole_interval = 1.5  # 地鼠出现间隔 1.5秒
+        self.mole_stay = 5.0       # 地鼠停留时间 4秒
+        self.mole_interval = 1.5   # 地鼠出现间隔 1.5秒
         
         # 统计
         self.total_hits = 0
@@ -51,6 +52,7 @@ class WhackAMole:
         self.start_time = time.time()
         self.timer = 60
         self.last_mole_time = time.time()
+        self.mole_appear_time = 0
         self.current_mole = -1
         self._emit_state()
         print("[打地鼠] 游戏开始！")
@@ -86,7 +88,7 @@ class WhackAMole:
             self.score += 10
             self.success_hits += 1
             self.current_mole = -1
-            self.last_mole_time = time.time()
+            self.last_mole_time = time.time()  # 立即开始计时下一只
             print(f"[打地鼠] 击中！+10分，总分：{self.score}")
         else:
             # 击中错误
@@ -107,7 +109,7 @@ class WhackAMole:
             # 时间结束
             if self.timer <= 0:
                 print(f"[打地鼠] 时间到！最终得分：{self.score}")
-                self.status = "READY"  # 回到准备状态，等待下一局
+                self.status = "READY"
                 self.current_mole = -1
                 self._emit_state()
                 return
@@ -117,14 +119,15 @@ class WhackAMole:
                 # 没有地鼠，等待后出现
                 if now - self.last_mole_time > self.mole_interval:
                     self.current_mole = random.randint(0, 2)
+                    self.mole_appear_time = now
                     self.last_mole_time = now
                     print(f"[打地鼠] 地鼠出现在洞 {self.current_mole}")
             else:
                 # 有地鼠，检查是否超时
-                if now - self.last_mole_time > self.mole_stay:
+                if now - self.mole_appear_time > self.mole_stay:
                     self.current_mole = -1
                     self.last_mole_time = now
-                    print("[打地鼠] 地鼠消失")
+                    print("[打地鼠] 地鼠消失（超时）")
             
             self._emit_state()
     

@@ -5,7 +5,9 @@
       <div class="center-hint">请在投影区域开始游戏</div>
       <div class="hint-sub">站在投影区域的圆圈内即可开始</div>
       <div class="bottom-bar">
-        <button @click="exitGame" class="big-exit-btn">退出游戏</button>
+        <button @click="exitGame" class="big-exit-btn" :disabled="isExiting">
+          {{ isExiting ? '退出中...' : '退出游戏' }}
+        </button>
       </div>
     </div>
 
@@ -34,21 +36,20 @@
         💡 请在投影区域踩踏地鼠所在的洞
       </div>
 
-      <!-- 游戏控制按钮 -->
       <div class="game-controls">
-        <button @click="pauseGame" class="ctrl-btn pause">暂停游戏</button>
-        <button @click="restartGame" class="ctrl-btn restart">重新开始</button>
-        <button @click="exitGame" class="ctrl-btn exit">结束游戏</button>
+        <button @click="pauseGame" class="ctrl-btn pause">⏸ 暂停</button>
+        <button @click="restartGame" class="ctrl-btn restart">🔄 重新开始</button>
+        <button @click="exitGame" class="ctrl-btn exit">✖ 结束游戏</button>
       </div>
     </div>
     
     <!-- 暂停状态 -->
     <div v-else-if="game.status === 'PAUSED'" class="paused-view">
-      <h1>游戏已暂停</h1>
+      <h1>⏸ 游戏已暂停</h1>
       <div class="pause-buttons">
-        <button @click="resumeGame" class="resume-btn">继续游戏</button>
-        <button @click="restartGame" class="restart-btn">重新开始</button>
-        <button @click="exitGame" class="exit-btn">结束游戏</button>
+        <button @click="resumeGame" class="resume-btn">▶ 继续游戏</button>
+        <button @click="restartGame" class="restart-btn">🔄 重新开始</button>
+        <button @click="exitGame" class="exit-btn">✖ 结束游戏</button>
       </div>
     </div>
     
@@ -56,7 +57,9 @@
     <div v-else class="default-view">
       <div class="center-hint">等待游戏...</div>
       <div class="bottom-bar">
-        <button @click="exitGame" class="big-exit-btn">返回</button>
+        <button @click="goBack" class="big-exit-btn" :disabled="isExiting">
+          {{ isExiting ? '返回中...' : '返回' }}
+        </button>
       </div>
     </div>
   </div>
@@ -69,9 +72,9 @@ import { useRouter } from 'vue-router'
 
 const router = useRouter()
 const game = ref({ status: 'IDLE', score: 0, timer: 60, accuracy: 0, current_mole: -1 })
+const isExiting = ref(false)
 let socket = null
 
-// 自动检测后端地址
 const getBackendHost = () => {
   if (typeof window === 'undefined') return 'localhost'
   return window.location.hostname || 'localhost'
@@ -88,11 +91,28 @@ onMounted(() => {
   
   socket.on('connect', () => {
     console.log('[训练页] 后端已连接')
+    // ⭐ 连接时获取当前状态
+    socket.emit('get_state')
   })
   
   socket.on('game_update', (data) => {
     game.value = data
-    console.log('[训练页] 游戏状态更新:', data.status)
+    console.log('[训练页] 游戏状态:', data.status)
+  })
+  
+  socket.on('system_state', (data) => {
+    if (data.state && data.state.game) {
+      game.value.status = data.state.game.status || 'IDLE'
+      game.value.score = data.state.game.score || 0
+      game.value.timer = data.state.game.timer || 60
+      
+      // 如果游戏状态变为IDLE且不活跃，返回游戏列表
+      if (data.state.game.status === 'IDLE' && data.state.game.active === false) {
+        console.log('[训练页] 游戏已停止，返回游戏列表')
+        isExiting.value = false
+        router.push('/learning')
+      }
+    }
   })
   
   socket.on('navigate_to', (data) => {
@@ -106,31 +126,57 @@ onUnmounted(() => {
 
 // ==================== 游戏控制 ====================
 const pauseGame = () => {
-  if (socket) {
+  if (socket && socket.connected) {
     socket.emit('game_control', { action: 'pause' })
   }
 }
 
 const resumeGame = () => {
-  if (socket) {
-    socket.emit('game_control', { action: 'pause' })  // 再次暂停就是继续
+  if (socket && socket.connected) {
+    socket.emit('game_control', { action: 'pause' })
   }
 }
 
 const restartGame = () => {
-  if (socket) {
+  if (socket && socket.connected) {
     socket.emit('game_control', { action: 'stop' })
     setTimeout(() => {
       socket.emit('game_control', { action: 'ready', game: 'whack_a_mole' })
-    }, 500)
+    }, 300)
   }
 }
 
 const exitGame = () => {
-  if (socket) {
+  if (isExiting.value) return
+  
+  console.log('[训练页] 结束游戏')
+  isExiting.value = true
+  
+  if (socket && socket.connected) {
     socket.emit('game_control', { action: 'stop' })
   }
-  router.push('/learning')
+  
+  // 延迟返回，等待状态同步
+  setTimeout(() => {
+    isExiting.value = false
+    router.push('/learning')
+  }, 200)
+}
+
+const goBack = () => {
+  if (isExiting.value) return
+  
+  console.log('[训练页] 返回')
+  isExiting.value = true
+  
+  if (socket && socket.connected) {
+    socket.emit('game_control', { action: 'stop' })
+  }
+  
+  setTimeout(() => {
+    isExiting.value = false
+    router.push('/learning')
+  }, 200)
 }
 </script>
 
@@ -170,7 +216,6 @@ const exitGame = () => {
   padding: 30px;
   display: flex; 
   justify-content: center;
-  gap: 30px;
 }
 
 .big-exit-btn { 
@@ -181,6 +226,11 @@ const exitGame = () => {
   font-size: 28px; 
   border: none;
   cursor: pointer;
+}
+
+.big-exit-btn:disabled {
+  background: #999;
+  cursor: not-allowed;
 }
 
 .playing-view { 
@@ -266,10 +316,10 @@ const exitGame = () => {
 }
 
 .ctrl-btn {
-  padding: 18px 40px;
+  padding: 18px 35px;
   border-radius: 30px;
   border: none;
-  font-size: 22px;
+  font-size: 20px;
   font-weight: bold;
   cursor: pointer;
 }

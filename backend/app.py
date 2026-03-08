@@ -1,13 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-Flask主应用 - 整合状态管理、游戏控制、Socket通信
+Flask主应用 - 稳定版
 """
 import sys, time, threading, socket, os, json
 from flask import Flask, request, jsonify, Response
 from flask_socketio import SocketIO
 from flask_cors import CORS
 
-# 本地模块
 from tablet_processor import TabletProcessor
 from screen_processor import init_screen_processor, get_screen_processor, state
 from games import WhackAMole
@@ -34,7 +33,6 @@ LOCAL_IP = get_local_ip()
 CONFIG_FILE = "projection_config.json"
 
 def load_config_on_startup():
-    """启动时加载配置"""
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
@@ -96,10 +94,8 @@ except:
     screen_cam_source = 1
 screen_proc = init_screen_processor(screen_cam_source, socketio)
 
-# 启动时加载配置
 load_config_on_startup()
 
-# 延迟更新矩阵
 def delayed_update_matrix():
     time.sleep(2)
     screen_proc.update_matrix()
@@ -134,7 +130,6 @@ def corrected_feed():
 
 @app.route('/tablet_video_feed')
 def tablet_video_feed():
-    """平板摄像头视频流"""
     def gen():
         while True:
             jpeg = processor.get_jpeg()
@@ -209,9 +204,7 @@ def api_system_state():
 
 @app.route('/api/health')
 def api_health():
-    """获取健康数据"""
-    health_data = processor.get_health_data()
-    return jsonify(health_data)
+    return jsonify(processor.get_health_data())
 
 # ============================================================================
 # Socket事件 - 导航控制
@@ -284,7 +277,7 @@ def handle_game_hit(data):
 def handle_user_interaction(data):
     interaction_type = data.get('type')
     interaction_data = data.get('data', {})
-    print(f"[用户交互] type={interaction_type}, data={interaction_data}")
+    print(f"[用户交互] type={interaction_type}")
 
 # ============================================================================
 # Socket事件 - 校准
@@ -306,6 +299,14 @@ def handle_save_calibration():
 def handle_reset_calibration():
     state["corners"] = [[0.15, 0.2], [0.85, 0.2], [0.85, 0.85], [0.15, 0.85]]
     screen_proc.update_matrix()
+
+# ============================================================================
+# Socket事件 - 获取状态
+# ============================================================================
+@socketio.on('get_state')
+def handle_get_state():
+    """客户端请求获取当前状态"""
+    socketio.emit('system_state', {"state": system_state})
 
 # ============================================================================
 # API - 阿康对话
@@ -350,17 +351,8 @@ def main_worker():
             system_state["game"]["timer"] = whack_a_mole.timer
         
         if now - last_emit_time > 0.05:
-            raw_jpeg = screen_proc.get_raw_jpeg()
-            if raw_jpeg:
-                socketio.emit('screen_stream', {
-                    'image': raw_jpeg.hex(),
-                    'status': screen_proc.get_status(),
-                    'config': screen_proc.get_config()
-                })
-            
             if t_data:
                 socketio.emit('tablet_stream', {'image': t_data['image'], 'state': t_data['state']})
-            
             last_emit_time = now
         
         socketio.sleep(0.01)

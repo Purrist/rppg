@@ -1,81 +1,89 @@
 <template>
-  <div class="admin-page" :style="{ backgroundColor: config.admin_bg }">
-    <h1>🛠 开发者后台</h1>
+  <div class="dev-page">
+    <!-- 头部 -->
+    <header class="dev-header">
+      <h1>🛠 开发者后台</h1>
+      <div class="conn-badge" :class="connected ? 'ok' : 'err'">
+        {{ connected ? '✅ 已连接' : '❌ 未连接' }}
+      </div>
+    </header>
     
-    <!-- 连接状态 -->
-    <div class="connection-status" :class="connected ? 'connected' : 'disconnected'">
-      {{ connected ? '✅ 后端已连接' : '❌ 后端未连接' }}
-      <span class="backend-url">({{ backendUrl }})</span>
-    </div>
+    <!-- 状态卡片 -->
+    <section class="status-row">
+      <div class="stat-card">
+        <span class="label">游戏</span>
+        <span class="val" :class="'s-' + gameState.status">{{ gameStateText }}</span>
+      </div>
+      <div class="stat-card">
+        <span class="label">得分</span>
+        <span class="val">{{ gameState.score }}</span>
+      </div>
+      <div class="stat-card">
+        <span class="label">时间</span>
+        <span class="val">{{ gameState.timer }}s</span>
+      </div>
+      <div class="stat-card">
+        <span class="label">脚部</span>
+        <span class="val" :class="status.feet_detected ? 'ok' : 'err'">
+          {{ status.feet_detected ? '✓' : '✗' }}
+        </span>
+      </div>
+    </section>
     
-    <!-- 游戏状态 -->
-    <div class="game-status-bar">
-      <span>游戏状态: <strong :class="'status-' + gameState.status">{{ gameStateText }}</strong></span>
-      <span>得分: <strong>{{ gameState.score }}</strong></span>
-      <span>时间: <strong>{{ gameState.timer }}s</strong></span>
-    </div>
-    
-    <!-- 摄像头画面区域 -->
-    <div class="cameras-row">
+    <!-- 摄像头 -->
+    <section class="cam-row">
       <!-- 投影摄像头 -->
-      <div class="camera-section">
-        <h2>投影摄像头（拖动四角校准）</h2>
-        <div class="video-container">
-          <img id="video" :src="videoUrl" @load="onVideoLoad" @error="onVideoError">
-          <canvas ref="rawCanvas" @mousedown="handleRawMouseDown" @mousemove="handleRawMouseMove" 
-                  @mouseup="handleRawMouseUp" @mouseleave="handleRawMouseUp"></canvas>
+      <div class="cam-box">
+        <div class="cam-head">
+          <span>投影摄像头</span>
+          <span class="hint">拖动四角校准</span>
+        </div>
+        <div class="cam-view">
+          <img :src="videoUrl" @load="resize" @error="() => {}">
+          <canvas ref="rawCanvas" 
+                  @mousedown="onMouseDown" 
+                  @mousemove="onMouseMove" 
+                  @mouseup="onMouseUp" 
+                  @mouseleave="onMouseUp"></canvas>
         </div>
       </div>
       
-      <!-- 平板摄像头（rPPG） -->
-      <div class="camera-section">
-        <h2>平板摄像头（心率检测）</h2>
-        <div class="video-container tablet-cam">
-          <img id="tablet-video" :src="tabletVideoUrl" @error="onVideoError">
-          <div class="rppg-overlay">
-            <div class="heart-rate">
-              <span class="heart-icon">❤️</span>
-              <span class="bpm-value">{{ health.bpm || '--' }}</span>
-              <span class="bpm-unit">BPM</span>
+      <!-- 平板摄像头 -->
+      <div class="cam-box">
+        <div class="cam-head">
+          <span>平板摄像头</span>
+          <span class="hint">心率检测</span>
+        </div>
+        <div class="cam-view tablet">
+          <img :src="tabletVideoUrl" @error="() => {}">
+          <div class="rppg-info">
+            <div class="heart">❤️</div>
+            <div class="bpm">
+              <span class="num">{{ health.bpm || '--' }}</span>
+              <span class="unit">BPM</span>
             </div>
-            <div class="health-stats">
-              <span>情绪: {{ health.emotion || '--' }}</span>
-              <span>HRV: {{ health.hrv || '--' }}</span>
-            </div>
+            <div class="emo">{{ health.emotion || '--' }}</div>
           </div>
         </div>
       </div>
-    </div>
+    </section>
     
     <!-- 校正后画面 -->
-    <div class="video-section">
-      <h2>校正后画面</h2>
-      <div class="corrected-container">
-        <img id="corrected" :src="correctedUrl" @load="onVideoLoad" @error="onVideoError">
+    <section class="corr-section">
+      <h3>校正后画面</h3>
+      <div class="corr-view">
+        <img :src="correctedUrl" @load="resize" @error="() => {}">
         <canvas ref="correctedCanvas"></canvas>
       </div>
-    </div>
+    </section>
     
-    <!-- 状态栏 -->
-    <div class="status-bar">
-      <span>脚部: <span :class="status.feet_detected ? 'detected' : 'not-detected'">
-        {{ status.feet_detected ? `已检测 (${status.feet_x}, ${status.feet_y})` : '未检测到' }}
-      </span></span>
-      <span>区域: <span :class="status.active_zones?.length > 0 ? 'detected' : 'not-detected'">
-        {{ status.active_zones?.length > 0 ? status.active_zones.join(' - ') : '未进入' }}
-      </span></span>
-    </div>
-    
-    <!-- 控制面板 -->
-    <div class="control-panel">
-      <!-- 配置保存/加载 -->
-      <div class="section-title">💾 配置</div>
-      <div class="button-row">
-        <button class="btn btn-green" @click="saveAllConfig">保存配置</button>
-        <button class="btn btn-blue" @click="loadAllConfig">加载配置</button>
-        <button class="btn btn-orange" @click="resetCalibration">重置校准</button>
-      </div>
-    </div>
+    <!-- 按钮 -->
+    <section class="btn-row">
+      <button v-if="!isEditing" class="btn edit" @click="startEdit">✏️ 编辑校准区域</button>
+      <button v-else class="btn save" @click="saveAndExitEdit">💾 保存校准区域</button>
+      <button class="btn load" @click="loadConfig">📂 加载配置</button>
+      <button class="btn reset" @click="resetCorners">🔄 重置校准</button>
+    </section>
     
     <!-- Toast -->
     <div v-if="toast.show" class="toast">{{ toast.msg }}</div>
@@ -85,45 +93,37 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 
-// ==================== 自动检测后端地址 ====================
-const getBackendHost = () => {
+// ==================== 配置 ====================
+const getHost = () => {
   if (typeof window === 'undefined') return 'localhost'
-  const host = window.location.hostname
-  return host || 'localhost'
+  return window.location.hostname || 'localhost'
 }
 
-const FLASK_PORT = 5000
-const backendHost = getBackendHost()
-const backendUrl = `http://${backendHost}:${FLASK_PORT}`
-const videoUrl = `${backendUrl}/video_feed`
-const correctedUrl = `${backendUrl}/corrected_feed`
-const tabletVideoUrl = `${backendUrl}/tablet_video_feed`
-
-console.log('[Developer] 后端地址:', backendUrl)
+const PORT = 5000
+const baseUrl = `http://${getHost()}:${PORT}`
+const videoUrl = `${baseUrl}/video_feed`
+const correctedUrl = `${baseUrl}/corrected_feed`
+const tabletVideoUrl = `${baseUrl}/tablet_video_feed`
 
 // ==================== 状态 ====================
 const connected = ref(false)
 const rawCanvas = ref(null)
 const correctedCanvas = ref(null)
 
-const config = reactive({
-  corners: [[0.15, 0.2], [0.85, 0.2], [0.85, 0.85], [0.15, 0.85]],
-  zones: [],
-  zone_id_counter: 4,
-  admin_bg: '#ffffff',
-  projection_bg: '#000000'
-})
+// 编辑状态
+const isEditing = ref(false)
+const savedCorners = ref(null)
+
+const corners = ref([[0.15, 0.2], [0.85, 0.2], [0.85, 0.85], [0.15, 0.85]])
 
 const status = reactive({
   feet_detected: false,
   feet_x: 320,
-  feet_y: 180,
-  active_zones: []
+  feet_y: 180
 })
 
 const health = reactive({
   bpm: null,
-  hrv: null,
   emotion: null
 })
 
@@ -134,57 +134,62 @@ const gameState = reactive({
 })
 
 const gameStateText = computed(() => {
-  const texts = { 'IDLE': '待机中', 'READY': '等待开始', 'PLAYING': '游戏进行中', 'PAUSED': '已暂停' }
-  return texts[gameState.status] || '未知'
+  const t = { 'IDLE': '待机', 'READY': '等待', 'PLAYING': '进行中', 'PAUSED': '暂停' }
+  return t[gameState.status] || '未知'
 })
 
 const toast = reactive({ show: false, msg: '' })
-const draggingCorner = ref(-1)
+const dragging = ref(-1)
 const mouseDown = ref(false)
 
-let statusInterval = null
+let interval = null
 
-// ==================== 工具函数 ====================
+// ==================== 工具 ====================
 function showToast(msg) {
   toast.msg = msg
   toast.show = true
   setTimeout(() => toast.show = false, 2000)
 }
 
-// ==================== 连接检查 ====================
-async function checkConnection() {
+// ==================== 编辑模式 ====================
+function startEdit() {
+  isEditing.value = true
+  savedCorners.value = JSON.parse(JSON.stringify(corners.value))
+  showToast('开始编辑校准区域')
+}
+
+async function saveAndExitEdit() {
+  await saveCorners()
+  await saveConfig()
+  isEditing.value = false
+  savedCorners.value = null
+  showToast('校准区域已保存')
+}
+
+// ==================== API ====================
+async function checkConn() {
   try {
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 3000)
-    
-    const res = await fetch(`${backendUrl}/api/config`, {
-      method: 'GET',
-      signal: controller.signal
-    })
-    
-    clearTimeout(timeoutId)
-    connected.value = res.ok
-    return res.ok
-  } catch (e) {
+    const c = new AbortController()
+    const t = setTimeout(() => c.abort(), 3000)
+    const r = await fetch(`${baseUrl}/api/config`, { signal: c.signal })
+    clearTimeout(t)
+    connected.value = r.ok
+    return r.ok
+  } catch {
     connected.value = false
     return false
   }
 }
 
-// ==================== 配置加载/保存 ====================
-async function loadConfig() {
+async function loadCorners() {
   try {
-    const res = await fetch(`${backendUrl}/api/config`)
-    if (!res.ok) throw new Error('请求失败')
-    const data = await res.json()
-    if (data.corners) config.corners = data.corners
-    if (data.zones) config.zones = data.zones
-    if (data.zone_id_counter) config.zone_id_counter = data.zone_id_counter
-    if (data.admin_bg) config.admin_bg = data.admin_bg
-    if (data.projection_bg) config.projection_bg = data.projection_bg
+    const r = await fetch(`${baseUrl}/api/config`)
+    if (!r.ok) throw new Error()
+    const d = await r.json()
+    if (d.corners) corners.value = d.corners
     connected.value = true
     return true
-  } catch (e) {
+  } catch {
     connected.value = false
     return false
   }
@@ -193,128 +198,133 @@ async function loadConfig() {
 async function saveCorners() {
   if (!connected.value) return
   try {
-    await fetch(`${backendUrl}/api/corners`, {
+    await fetch(`${baseUrl}/api/corners`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ corners: config.corners })
+      body: JSON.stringify({ corners: corners.value })
     })
-  } catch (e) {}
+  } catch {}
 }
 
-async function saveAllConfig() {
-  if (!connected.value) { showToast('后端未连接'); return }
+async function saveConfig() {
+  if (!connected.value) { showToast('未连接'); return }
   try {
-    const res = await fetch(`${backendUrl}/api/save_all`, { method: 'POST' })
-    const data = await res.json()
-    showToast(data.msg || '保存成功')
-  } catch (e) {
+    const r = await fetch(`${baseUrl}/api/save_all`, { method: 'POST' })
+    const d = await r.json()
+    showToast(d.msg || '已保存')
+  } catch {
     showToast('保存失败')
   }
 }
 
-async function loadAllConfig() {
-  if (!connected.value) { showToast('后端未连接'); return }
+async function loadConfig() {
+  if (!connected.value) { showToast('未连接'); return }
   try {
-    const res = await fetch(`${backendUrl}/api/load_all`, { method: 'POST' })
-    const data = await res.json()
-    if (data.ok) {
-      await loadConfig()
-      showToast('配置已加载')
-    } else {
-      showToast(data.msg || '加载失败')
+    const r = await fetch(`${baseUrl}/api/load_all`, { method: 'POST' })
+    const d = await r.json()
+    if (d.ok) {
+      await loadCorners()
+      showToast('已加载')
     }
-  } catch (e) {
+  } catch {
     showToast('加载失败')
   }
 }
 
-async function resetCalibration() {
-  config.corners = [[0.15, 0.2], [0.85, 0.2], [0.85, 0.85], [0.15, 0.85]]
+async function resetCorners() {
+  corners.value = [[0.15, 0.2], [0.85, 0.2], [0.85, 0.85], [0.15, 0.85]]
   await saveCorners()
-  showToast('校准已重置')
+  showToast('已重置')
 }
 
 // ==================== 状态更新 ====================
 async function updateStatus() {
   if (!connected.value) {
-    await checkConnection()
+    await checkConn()
     if (!connected.value) return
   }
   
   try {
-    const res = await fetch(`${backendUrl}/api/status`)
-    if (res.ok) {
-      const data = await res.json()
-      Object.assign(status, data)
+    const r = await fetch(`${baseUrl}/api/status`)
+    if (r.ok) {
+      const d = await r.json()
+      // ⭐ 边界检查
+      if (Number.isFinite(d.feet_x) && Number.isFinite(d.feet_y)) {
+        status.feet_x = Math.max(0, Math.min(640, d.feet_x))
+        status.feet_y = Math.max(0, Math.min(360, d.feet_y))
+      }
+      status.feet_detected = d.feet_detected
     }
     
-    const gsRes = await fetch(`${backendUrl}/api/system/state`)
-    if (gsRes.ok) {
-      const gsData = await gsRes.json()
-      if (gsData.state && gsData.state.game) {
-        gameState.status = gsData.state.game.status || 'IDLE'
-        gameState.score = gsData.state.game.score || 0
-        gameState.timer = gsData.state.game.timer || 60
+    const gr = await fetch(`${baseUrl}/api/system/state`)
+    if (gr.ok) {
+      const gd = await gr.json()
+      if (gd.state?.game) {
+        gameState.status = gd.state.game.status || 'IDLE'
+        gameState.score = gd.state.game.score || 0
+        gameState.timer = gd.state.game.timer || 60
       }
     }
     
-    // 获取健康数据
-    const healthRes = await fetch(`${backendUrl}/api/health`)
-    if (healthRes.ok) {
-      const healthData = await healthRes.json()
-      Object.assign(health, healthData)
+    const hr = await fetch(`${baseUrl}/api/health`)
+    if (hr.ok) {
+      const hd = await hr.json()
+      Object.assign(health, hd)
     }
-  } catch (e) {
+  } catch {
     connected.value = false
   }
 }
 
-// ==================== 视频处理 ====================
-function onVideoLoad() {
-  resize()
-}
-
-function onVideoError(e) {
-  console.log('视频流加载中...')
-}
-
+// ==================== Canvas ====================
 function resize() {
-  const video = document.getElementById('video')
-  const corrected = document.getElementById('corrected')
-  if (video && rawCanvas.value) {
-    rawCanvas.value.width = video.offsetWidth
-    rawCanvas.value.height = video.offsetHeight
+  const raw = rawCanvas.value
+  const cor = correctedCanvas.value
+  const rawImg = raw?.parentElement?.querySelector('img')
+  const corImg = cor?.parentElement?.querySelector('img')
+  
+  if (raw && rawImg) {
+    raw.width = rawImg.offsetWidth
+    raw.height = rawImg.offsetHeight
   }
-  if (corrected && correctedCanvas.value) {
-    correctedCanvas.value.width = corrected.offsetWidth
-    correctedCanvas.value.height = corrected.offsetHeight
+  if (cor && corImg) {
+    cor.width = corImg.offsetWidth
+    cor.height = corImg.offsetHeight
   }
 }
 
 function draw() {
+  // 原始画面 - 绘制四角
   if (rawCanvas.value) {
     const ctx = rawCanvas.value.getContext('2d')
     const w = rawCanvas.value.width
     const h = rawCanvas.value.height
+    
+    // ⭐ 边界检查
+    if (w <= 0 || h <= 0) {
+      requestAnimationFrame(draw)
+      return
+    }
+    
     ctx.clearRect(0, 0, w, h)
     
-    ctx.strokeStyle = '#0066cc'
-    ctx.lineWidth = 3
+    ctx.strokeStyle = isEditing.value ? '#FF7222' : '#0066cc'
+    ctx.lineWidth = isEditing.value ? 4 : 3
     ctx.beginPath()
-    config.corners.forEach((p, i) => {
+    corners.value.forEach((p, i) => {
       const x = p[0] * w, y = p[1] * h
       i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)
     })
     ctx.closePath()
     ctx.stroke()
-    ctx.fillStyle = 'rgba(0, 102, 204, 0.1)'
+    ctx.fillStyle = isEditing.value ? 'rgba(255, 114, 34, 0.1)' : 'rgba(0, 102, 204, 0.1)'
     ctx.fill()
     
-    config.corners.forEach((p, i) => {
+    corners.value.forEach((p, i) => {
       const x = p[0] * w, y = p[1] * h
       ctx.beginPath()
-      ctx.arc(x, y, 15, 0, Math.PI * 2)
-      ctx.fillStyle = '#0066cc'
+      ctx.arc(x, y, isEditing.value ? 18 : 15, 0, Math.PI * 2)
+      ctx.fillStyle = isEditing.value ? '#FF7222' : '#0066cc'
       ctx.fill()
       ctx.fillStyle = '#fff'
       ctx.font = 'bold 14px Arial'
@@ -324,22 +334,37 @@ function draw() {
     })
   }
   
+  // 校正后画面 - 只绘制绿点
   if (correctedCanvas.value) {
     const ctx = correctedCanvas.value.getContext('2d')
-    const scaleX = correctedCanvas.value.width / 640
-    const scaleY = correctedCanvas.value.height / 360
+    const sx = correctedCanvas.value.width / 640
+    const sy = correctedCanvas.value.height / 360
+    
+    // ⭐ 边界检查
+    if (correctedCanvas.value.width <= 0 || correctedCanvas.value.height <= 0) {
+      requestAnimationFrame(draw)
+      return
+    }
+    
     ctx.clearRect(0, 0, correctedCanvas.value.width, correctedCanvas.value.height)
     
     if (status.feet_detected) {
-      const fx = status.feet_x * scaleX
-      const fy = status.feet_y * scaleY
-      ctx.beginPath()
-      ctx.arc(fx, fy, 15, 0, Math.PI * 2)
-      ctx.fillStyle = '#33B555'
-      ctx.fill()
-      ctx.strokeStyle = '#fff'
-      ctx.lineWidth = 3
-      ctx.stroke()
+      // ⭐ 边界检查
+      let fx = status.feet_x * sx
+      let fy = status.feet_y * sy
+      
+      if (Number.isFinite(fx) && Number.isFinite(fy)) {
+        fx = Math.max(0, Math.min(correctedCanvas.value.width, fx))
+        fy = Math.max(0, Math.min(correctedCanvas.value.height, fy))
+        
+        ctx.beginPath()
+        ctx.arc(fx, fy, 15, 0, Math.PI * 2)
+        ctx.fillStyle = '#33B555'
+        ctx.fill()
+        ctx.strokeStyle = '#fff'
+        ctx.lineWidth = 3
+        ctx.stroke()
+      }
     }
   }
   
@@ -347,142 +372,166 @@ function draw() {
 }
 
 // ==================== 鼠标事件 ====================
-function handleRawMouseDown(e) {
+function onMouseDown(e) {
+  if (!isEditing.value) return
+  
   const rect = rawCanvas.value.getBoundingClientRect()
   const pos = { x: (e.clientX - rect.left) / rect.width, y: (e.clientY - rect.top) / rect.height }
-  for (let i = 0; i < config.corners.length; i++) {
-    if (Math.hypot(config.corners[i][0] - pos.x, config.corners[i][1] - pos.y) < 0.05) {
-      draggingCorner.value = i
+  for (let i = 0; i < corners.value.length; i++) {
+    if (Math.hypot(corners.value[i][0] - pos.x, corners.value[i][1] - pos.y) < 0.05) {
+      dragging.value = i
       mouseDown.value = true
       break
     }
   }
 }
 
-function handleRawMouseMove(e) {
-  if (!mouseDown.value || draggingCorner.value < 0) return
+function onMouseMove(e) {
+  if (!mouseDown.value || dragging.value < 0) return
   const rect = rawCanvas.value.getBoundingClientRect()
   const pos = { x: (e.clientX - rect.left) / rect.width, y: (e.clientY - rect.top) / rect.height }
-  config.corners[draggingCorner.value] = [
+  corners.value[dragging.value] = [
     Math.max(0.02, Math.min(0.98, pos.x)),
     Math.max(0.02, Math.min(0.98, pos.y))
   ]
 }
 
-function handleRawMouseUp() {
-  if (mouseDown.value && draggingCorner.value >= 0) saveCorners()
+function onMouseUp() {
   mouseDown.value = false
-  draggingCorner.value = -1
+  dragging.value = -1
 }
 
 // ==================== 生命周期 ====================
 onMounted(async () => {
-  // 先尝试加载保存的配置
-  const ok = await checkConnection()
+  const ok = await checkConn()
   if (ok) {
-    // 先尝试加载保存的配置
-    await fetch(`${backendUrl}/api/load_all`, { method: 'POST' })
-    await loadConfig()
+    await fetch(`${baseUrl}/api/load_all`, { method: 'POST' })
+    await loadCorners()
   }
   
   resize()
   requestAnimationFrame(draw)
-  statusInterval = setInterval(updateStatus, 500)
+  interval = setInterval(updateStatus, 500)
   window.addEventListener('resize', resize)
 })
 
 onUnmounted(() => {
-  if (statusInterval) clearInterval(statusInterval)
+  if (interval) clearInterval(interval)
   window.removeEventListener('resize', resize)
 })
 </script>
 
 <style scoped>
-.admin-page {
-  padding: 15px;
-  font-family: sans-serif;
+.dev-page {
   min-height: 100vh;
-  background: #f5f5f5;
   width: 100%;
-  max-width: 1400px;
-  margin: 0 auto;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  color: #fff;
+  padding: 20px;
+  padding-bottom: 60px;
   box-sizing: border-box;
 }
 
-h1 {
-  font-size: 20px;
-  margin-bottom: 10px;
-  color: #333;
-}
-
-h2 {
-  font-size: 14px;
-  margin-bottom: 8px;
-  color: #666;
-}
-
-.connection-status {
-  padding: 10px 15px;
-  border-radius: 8px;
-  margin-bottom: 15px;
-  font-weight: bold;
-}
-
-.connection-status.connected {
-  background: #d4edda;
-  color: #155724;
-}
-
-.connection-status.disconnected {
-  background: #f8d7da;
-  color: #721c24;
-}
-
-.backend-url {
-  font-weight: normal;
-  font-size: 12px;
-  opacity: 0.7;
-}
-
-.game-status-bar {
+.dev-header {
   display: flex;
-  gap: 20px;
-  padding: 10px 15px;
-  background: #fff;
-  border-radius: 8px;
-  margin-bottom: 15px;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  padding-bottom: 15px;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+
+.dev-header h1 {
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.conn-badge {
+  padding: 8px 16px;
+  border-radius: 20px;
   font-size: 14px;
 }
 
-.status-IDLE { color: #666; }
-.status-READY { color: #FF7222; }
-.status-PLAYING { color: #33B555; }
-.status-PAUSED { color: #FFD111; }
+.conn-badge.ok { background: rgba(51, 181, 85, 0.2); color: #33B555; }
+.conn-badge.err { background: rgba(255, 68, 68, 0.2); color: #ff6b6b; }
 
-.cameras-row {
+.status-row {
   display: flex;
-  gap: 20px;
-  margin-bottom: 15px;
+  gap: 15px;
+  margin-bottom: 25px;
+  flex-wrap: wrap;
 }
 
-.camera-section {
+.stat-card {
+  background: rgba(255,255,255,0.05);
+  padding: 15px 20px;
+  border-radius: 12px;
+  min-width: 100px;
   flex: 1;
 }
 
-.video-container {
-  width: 100%;
-  position: relative;
-  background: #000;
-  border-radius: 8px;
+.stat-card .label {
+  display: block;
+  font-size: 12px;
+  color: #888;
+  margin-bottom: 5px;
+}
+
+.stat-card .val {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.s-IDLE { color: #888; }
+.s-READY { color: #FF7222; }
+.s-PLAYING { color: #33B555; }
+.s-PAUSED { color: #FFD111; }
+.ok { color: #33B555; }
+.err { color: #ff6b6b; }
+
+.cam-row {
+  display: flex;
+  gap: 20px;
+  margin-bottom: 25px;
+  flex-wrap: wrap;
+}
+
+.cam-box {
+  flex: 1;
+  min-width: 300px;
+  background: rgba(255,255,255,0.05);
+  border-radius: 16px;
   overflow: hidden;
 }
 
-.video-container img {
-  display: block;
-  width: 100%;
+.cam-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: rgba(0,0,0,0.2);
+  font-size: 14px;
 }
 
-.video-container canvas {
+.cam-head .hint {
+  font-size: 12px;
+  color: #666;
+}
+
+.cam-view {
+  position: relative;
+  background: #000;
+  width: 100%;
+  aspect-ratio: 4/3;
+}
+
+.cam-view img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.cam-view canvas {
   position: absolute;
   top: 0;
   left: 0;
@@ -491,11 +540,7 @@ h2 {
   cursor: crosshair;
 }
 
-.tablet-cam {
-  background: #1a1a2e;
-}
-
-.rppg-overlay {
+.rppg-info {
   position: absolute;
   top: 0;
   left: 0;
@@ -508,61 +553,69 @@ h2 {
   pointer-events: none;
 }
 
-.heart-rate {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.heart-icon {
-  font-size: 40px;
+.heart {
+  font-size: 36px;
   animation: pulse 1s infinite;
 }
 
 @keyframes pulse {
   0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.2); }
+  50% { transform: scale(1.15); }
 }
 
-.bpm-value {
-  font-size: 48px;
-  font-weight: bold;
+.bpm {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  margin-top: 5px;
+}
+
+.bpm .num {
+  font-size: 42px;
+  font-weight: 700;
   color: #ff6b6b;
 }
 
-.bpm-unit {
-  font-size: 20px;
-  color: #aaa;
-}
-
-.health-stats {
-  margin-top: 15px;
-  display: flex;
-  gap: 20px;
+.bpm .unit {
   font-size: 16px;
-  color: #aaa;
+  color: #888;
 }
 
-.video-section {
-  margin-bottom: 15px;
+.emo {
+  margin-top: 10px;
+  padding: 5px 15px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 15px;
+  font-size: 14px;
 }
 
-.corrected-container {
+.corr-section {
+  margin-bottom: 25px;
+}
+
+.corr-section h3 {
+  font-size: 14px;
+  color: #888;
+  margin-bottom: 12px;
+}
+
+.corr-view {
+  position: relative;
+  background: #000;
+  border-radius: 12px;
+  overflow: hidden;
   width: 100%;
   max-width: 640px;
-  position: relative;
-  background: #f0f0f0;
-  border: 2px solid #33B555;
-  border-radius: 8px;
-  overflow: hidden;
+  aspect-ratio: 16/9;
 }
 
-.corrected-container img {
-  display: block;
+.corr-view img {
   width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
-.corrected-container canvas {
+.corr-view canvas {
   position: absolute;
   top: 0;
   left: 0;
@@ -570,63 +623,37 @@ h2 {
   height: 100%;
 }
 
-.status-bar {
+.btn-row {
   display: flex;
-  gap: 20px;
-  padding: 10px 15px;
-  background: #fff;
-  border-radius: 8px;
-  margin-bottom: 15px;
-  font-size: 14px;
-}
-
-.detected { color: #33B555; font-weight: bold; }
-.not-detected { color: #ff6b6b; }
-
-.control-panel {
-  background: #fff;
-  border-radius: 8px;
-  padding: 15px;
-}
-
-.section-title {
-  font-size: 14px;
-  font-weight: bold;
-  margin-bottom: 10px;
-  padding-bottom: 5px;
-  border-bottom: 1px solid #eee;
-}
-
-.button-row {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 10px;
+  gap: 15px;
+  flex-wrap: wrap;
 }
 
 .btn {
-  flex: 1;
-  padding: 12px;
+  padding: 12px 24px;
   border: none;
-  border-radius: 6px;
-  cursor: pointer;
+  border-radius: 10px;
   font-size: 14px;
-  font-weight: bold;
-  color: #fff;
+  font-weight: 500;
+  cursor: pointer;
+  transition: transform 0.2s;
 }
 
-.btn-green { background: #33B555; }
-.btn-blue { background: #2196F3; }
-.btn-orange { background: #FF7222; }
+.btn:hover { transform: translateY(-2px); }
+.btn.edit { background: #FF7222; color: #fff; }
+.btn.save { background: #33B555; color: #fff; }
+.btn.load { background: #2196F3; color: #fff; }
+.btn.reset { background: rgba(255,255,255,0.1); color: #fff; }
 
 .toast {
   position: fixed;
-  bottom: 20px;
+  bottom: 30px;
   left: 50%;
   transform: translateX(-50%);
-  background: #333;
+  background: rgba(0,0,0,0.8);
   color: #fff;
   padding: 12px 24px;
-  border-radius: 8px;
+  border-radius: 10px;
   z-index: 1000;
 }
 </style>
