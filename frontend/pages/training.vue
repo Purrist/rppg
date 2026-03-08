@@ -1,7 +1,20 @@
 <template>
   <div class="training-container">
+    <!-- 结算状态 -->
+    <div v-if="game.status === 'SETTLING'" class="settling-view">
+      <h1 class="settling-title">游戏结束</h1>
+      <div class="settling-score">
+        <span class="label">最终得分</span>
+        <span class="value">{{ game.score }}</span>
+      </div>
+      <div class="settling-accuracy">
+        <span class="label">准确率</span>
+        <span class="value">{{ game.accuracy }}%</span>
+      </div>
+    </div>
+
     <!-- 准备状态 -->
-    <div v-if="game.status === 'READY'" class="ready-view">
+    <div v-else-if="game.status === 'READY'" class="ready-view">
       <div class="center-hint">请在投影区域开始游戏</div>
       <div class="hint-sub">站在投影区域的圆圈内即可开始</div>
       <div class="bottom-bar">
@@ -39,7 +52,7 @@
       <div class="game-controls">
         <button @click="pauseGame" class="ctrl-btn pause">⏸ 暂停</button>
         <button @click="restartGame" class="ctrl-btn restart">🔄 重新开始</button>
-        <button @click="exitGame" class="ctrl-btn exit">✖ 结束游戏</button>
+        <button @click="endGame" class="ctrl-btn exit">✖ 结束游戏</button>
       </div>
     </div>
     
@@ -49,30 +62,26 @@
       <div class="pause-buttons">
         <button @click="resumeGame" class="resume-btn">▶ 继续游戏</button>
         <button @click="restartGame" class="restart-btn">🔄 重新开始</button>
-        <button @click="exitGame" class="exit-btn">✖ 结束游戏</button>
+        <button @click="endGame" class="exit-btn">✖ 结束游戏</button>
       </div>
     </div>
     
-    <!-- 默认状态 -->
-    <div v-else class="default-view">
-      <div class="center-hint">等待游戏...</div>
-      <div class="bottom-bar">
-        <button @click="goBack" class="big-exit-btn" :disabled="isExiting">
-          {{ isExiting ? '返回中...' : '返回' }}
-        </button>
-      </div>
+    <!-- 加载中 -->
+    <div v-else class="loading-view">
+      <div class="loading-text">加载中...</div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { io } from 'socket.io-client'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
-const game = ref({ status: 'IDLE', score: 0, timer: 60, accuracy: 0, current_mole: -1 })
+const game = ref({ status: 'LOADING', score: 0, timer: 60, accuracy: 0, current_mole: -1 })
 const isExiting = ref(false)
+const isRestarting = ref(false)
 let socket = null
 
 const getBackendHost = () => {
@@ -83,6 +92,26 @@ const getBackendHost = () => {
 const FLASK_PORT = 5000
 const backendUrl = `http://${getBackendHost()}:${FLASK_PORT}`
 
+// ⭐ 监听游戏状态
+watch(() => game.value.status, (newStatus) => {
+  // ⭐ 如果正在重新开始，忽略IDLE状态
+  if (newStatus === 'IDLE' && !isRestarting.value) {
+    console.log('[训练页] 游戏已停止，返回游戏列表')
+    router.push('/learning')
+  }
+  
+  // ⭐ 收到READY状态，重置重新开始标记
+  if (newStatus === 'READY') {
+    console.log('[训练页] 进入准备状态')
+    isRestarting.value = false
+  }
+  
+  // ⭐ 结算状态不返回游戏列表
+  if (newStatus === 'SETTLING') {
+    console.log('[训练页] 进入结算状态')
+  }
+})
+
 onMounted(() => {
   socket = io(backendUrl, {
     transports: ['polling', 'websocket'],
@@ -91,27 +120,30 @@ onMounted(() => {
   
   socket.on('connect', () => {
     console.log('[训练页] 后端已连接')
-    // ⭐ 连接时获取当前状态
-    socket.emit('get_state')
+    socket.emit('get_state', { client: 'training' })
   })
   
   socket.on('game_update', (data) => {
+    // ⭐ 如果正在重新开始，忽略IDLE状态
+    if (data.status === 'IDLE' && isRestarting.value) {
+      console.log('[训练页] 忽略重新开始过程中的IDLE状态')
+      return
+    }
     game.value = data
     console.log('[训练页] 游戏状态:', data.status)
   })
   
   socket.on('system_state', (data) => {
     if (data.state && data.state.game) {
+      // ⭐ 如果正在重新开始，忽略IDLE状态
+      if (data.state.game.status === 'IDLE' && isRestarting.value) {
+        console.log('[训练页] 忽略system_state中的IDLE状态')
+        return
+      }
       game.value.status = data.state.game.status || 'IDLE'
       game.value.score = data.state.game.score || 0
       game.value.timer = data.state.game.timer || 60
-      
-      // 如果游戏状态变为IDLE且不活跃，返回游戏列表
-      if (data.state.game.status === 'IDLE' && data.state.game.active === false) {
-        console.log('[训练页] 游戏已停止，返回游戏列表')
-        isExiting.value = false
-        router.push('/learning')
-      }
+      game.value.accuracy = data.state.game.accuracy || 0
     }
   })
   
@@ -139,44 +171,32 @@ const resumeGame = () => {
 
 const restartGame = () => {
   if (socket && socket.connected) {
-    socket.emit('game_control', { action: 'stop' })
-    setTimeout(() => {
-      socket.emit('game_control', { action: 'ready', game: 'whack_a_mole' })
-    }, 300)
+    console.log('[训练页] 重新开始游戏')
+    isRestarting.value = true
+    socket.emit('game_control', { action: 'restart', game: 'whack_a_mole' })
   }
 }
 
+// ⭐ 结束游戏：进入结算状态
+const endGame = () => {
+  if (socket && socket.connected) {
+    console.log('[训练页] 结束游戏')
+    socket.emit('game_control', { action: 'stop' })
+  }
+}
+
+// ⭐ 退出游戏：从准备状态退出
 const exitGame = () => {
   if (isExiting.value) return
   
-  console.log('[训练页] 结束游戏')
+  console.log('[训练页] 退出游戏')
   isExiting.value = true
   
   if (socket && socket.connected) {
     socket.emit('game_control', { action: 'stop' })
   }
   
-  // 延迟返回，等待状态同步
-  setTimeout(() => {
-    isExiting.value = false
-    router.push('/learning')
-  }, 200)
-}
-
-const goBack = () => {
-  if (isExiting.value) return
-  
-  console.log('[训练页] 返回')
-  isExiting.value = true
-  
-  if (socket && socket.connected) {
-    socket.emit('game_control', { action: 'stop' })
-  }
-  
-  setTimeout(() => {
-    isExiting.value = false
-    router.push('/learning')
-  }, 200)
+  router.push('/learning')
 }
 </script>
 
@@ -190,7 +210,62 @@ const goBack = () => {
   flex-direction: column;
 }
 
-.ready-view, .default-view { 
+/* ⭐ 结算状态样式 */
+.settling-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  color: #fff;
+}
+
+.settling-title {
+  font-size: 72px;
+  font-weight: 900;
+  color: #FFD700;
+  margin-bottom: 40px;
+}
+
+.settling-score {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 30px;
+}
+
+.settling-score .label {
+  font-size: 24px;
+  color: #888;
+  margin-bottom: 10px;
+}
+
+.settling-score .value {
+  font-size: 96px;
+  font-weight: 900;
+  color: #FFD700;
+}
+
+.settling-accuracy {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.settling-accuracy .label {
+  font-size: 20px;
+  color: #888;
+  margin-bottom: 5px;
+}
+
+.settling-accuracy .value {
+  font-size: 48px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.ready-view { 
   flex: 1;
   display: flex; 
   flex-direction: column; 
@@ -390,5 +465,17 @@ const goBack = () => {
   font-weight: bold; 
   border: none;
   cursor: pointer;
+}
+
+.loading-view {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.loading-text {
+  font-size: 32px;
+  color: #888;
 }
 </style>

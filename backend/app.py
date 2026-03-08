@@ -1,177 +1,122 @@
 # -*- coding: utf-8 -*-
 """
-Flask主应用 - 稳定版
+AI具身智能认知训练系统 - 主程序
 """
-import sys, time, threading, socket, os, json
-from flask import Flask, request, jsonify, Response
-from flask_socketio import SocketIO
+
+import os
+import sys
+import time
+import json
+import threading
+import socket
+from datetime import datetime
+
+from flask import Flask, render_template, Response, request, jsonify, send_from_directory
 from flask_cors import CORS
-
-from tablet_processor import TabletProcessor
-from screen_processor import init_screen_processor, get_screen_processor, state
-from games import WhackAMole
-from akon_agent import ask_akon
+from flask_socketio import SocketIO, emit
 
 # ============================================================================
-# 获取本机IP
+# 配置
 # ============================================================================
-def get_local_ip():
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
-    except:
-        return "127.0.0.1"
+LOCAL_IP = "192.168.3.91"
+try:
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.connect(("8.8.8.8", 80))
+    LOCAL_IP = s.getsockname()[0]
+    s.close()
+except:
+    pass
 
-LOCAL_IP = get_local_ip()
-
-# ============================================================================
-# 配置文件
-# ============================================================================
-CONFIG_FILE = "projection_config.json"
-
-def load_config_on_startup():
-    if os.path.exists(CONFIG_FILE):
-        try:
-            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-            if "corners" in config:
-                state["corners"] = config["corners"]
-            if "zones" in config:
-                state["zones"] = config["zones"]
-            if "zone_id_counter" in config:
-                state["zone_id_counter"] = config["zone_id_counter"]
-            print(f"✓ 配置已加载: {CONFIG_FILE}")
-            return True
-        except:
-            pass
-    return False
-
-# ============================================================================
-# Flask 应用初始化
-# ============================================================================
-app = Flask(__name__)
+app = Flask(__name__, static_folder='../frontend/.output/public', static_url_path='')
 CORS(app)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading', max_http_buffer_size=10**6)
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 # ============================================================================
-# 系统状态管理
+# 系统状态
 # ============================================================================
 system_state = {
-    "current_page": "/",
     "mode": "normal",
+    "current_page": "/",
     "game": {
         "active": False,
         "name": None,
         "status": "IDLE",
         "score": 0,
         "timer": 60
-    },
-    "user": {
-        "detected": False,
-        "x": 320,
-        "y": 180
     }
 }
 
-user_preferences = {
-    "pages": {},
-    "games": {},
-    "music": {}
-}
+# ============================================================================
+# 导入模块
+# ============================================================================
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from screen_processor import init_screen_processor, get_screen_processor, state
+from games import WhackAMole
 
 # ============================================================================
-# 摄像头处理器初始化
+# 初始化
 # ============================================================================
-tablet_cam_url = sys.argv[1] if len(sys.argv) > 1 else "http://192.168.3.94:8080/video"
-processor = TabletProcessor(tablet_cam_url)
-
-try:
-    screen_cam_source = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2].isdigit() else 1
-except:
-    screen_cam_source = 1
-screen_proc = init_screen_processor(screen_cam_source, socketio)
-
-load_config_on_startup()
-
-def delayed_update_matrix():
-    time.sleep(2)
-    screen_proc.update_matrix()
-    print("✓ 透视矩阵已更新")
-
-threading.Thread(target=delayed_update_matrix, daemon=True).start()
-
+screen_proc = init_screen_processor(camera_source=1, socketio=socketio)
 whack_a_mole = WhackAMole(socketio)
 
 # ============================================================================
-# API路由 - 视频流
+# 静态文件
 # ============================================================================
+@app.route('/')
+def index():
+    return send_from_directory(app.static_folder, 'index.html')
+
+@app.route('/<path:path>')
+def serve_static(path):
+    try:
+        return send_from_directory(app.static_folder, path)
+    except:
+        return send_from_directory(app.static_folder, 'index.html')
+
+# ============================================================================
+# 视频流
+# ============================================================================
+def gen_video(processor, is_corrected=False):
+    while True:
+        frame = processor.get_corrected_jpeg() if is_corrected else processor.get_raw_jpeg()
+        if frame:
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+        time.sleep(0.03)
+
 @app.route('/video_feed')
 def video_feed():
-    def gen():
-        while True:
-            jpeg = screen_proc.get_raw_jpeg()
-            if jpeg:
-                yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + jpeg + b'\r\n')
-            time.sleep(0.02)
-    return Response(gen(), mimetype='multipart/x-mixed-replace; boundary=frame')
+    return Response(gen_video(screen_proc), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 @app.route('/corrected_feed')
 def corrected_feed():
-    def gen():
-        while True:
-            jpeg = screen_proc.get_corrected_jpeg()
-            if jpeg:
-                yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + jpeg + b'\r\n')
-            time.sleep(0.02)
-    return Response(gen(), mimetype='multipart/x-mixed-replace; boundary=frame')
+    return Response(gen_video(screen_proc, True), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 @app.route('/tablet_video_feed')
 def tablet_video_feed():
-    def gen():
-        while True:
-            jpeg = processor.get_jpeg()
-            if jpeg:
-                yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + jpeg + b'\r\n')
-            time.sleep(0.03)
-    return Response(gen(), mimetype='multipart/x-mixed-replace; boundary=frame')
+    return Response(b'', mimetype='multipart/x-mixed-replace; boundary=frame')
 
 # ============================================================================
-# API路由 - 配置管理
+# API
 # ============================================================================
-@app.route('/api/config')
+@app.route('/api/status')
+def api_status():
+    return jsonify(screen_proc.get_status())
+
+@app.route('/api/config', methods=['GET', 'POST'])
 def api_config():
-    return jsonify({
-        "corners": state["corners"],
-        "zones": state["zones"],
-        "zone_id_counter": state["zone_id_counter"],
-        "admin_bg": state["admin_bg"],
-        "projection_bg": state["projection_bg"]
-    })
+    if request.method == 'POST':
+        data = request.json
+        if 'corners' in data:
+            screen_proc.update_corners(data['corners'])
+        return jsonify({"ok": True})
+    return jsonify(screen_proc.get_config())
 
 @app.route('/api/corners', methods=['POST'])
 def api_corners():
-    state["corners"] = request.json.get("corners", state["corners"])
-    screen_proc.update_matrix()
-    return jsonify({"ok": True})
-
-@app.route('/api/zones', methods=['POST'])
-def api_zones():
     data = request.json
-    state["zones"] = data.get("zones", state["zones"])
-    if "zone_id_counter" in data:
-        state["zone_id_counter"] = data["zone_id_counter"]
-    return jsonify({"ok": True})
-
-@app.route('/api/settings', methods=['POST'])
-def api_settings():
-    data = request.json
-    if "admin_bg" in data:
-        state["admin_bg"] = data["admin_bg"]
-    if "projection_bg" in data:
-        state["projection_bg"] = data["projection_bg"]
+    screen_proc.update_corners(data['corners'])
     return jsonify({"ok": True})
 
 @app.route('/api/save_all', methods=['POST'])
@@ -181,53 +126,16 @@ def api_save_all():
 
 @app.route('/api/load_all', methods=['POST'])
 def api_load_all():
-    if screen_proc.load_config():
-        screen_proc.update_matrix()
-        return jsonify({"ok": True})
-    return jsonify({"ok": False, "msg": "加载失败"})
-
-@app.route('/api/status')
-def api_status():
-    return jsonify({
-        "feet_detected": state["feet_detected"],
-        "feet_x": state["feet_x"],
-        "feet_y": state["feet_y"],
-        "active_zones": state["active_zones"]
-    })
+    ok = screen_proc.load_config()
+    return jsonify({"ok": ok})
 
 @app.route('/api/system/state')
 def api_system_state():
-    return jsonify({
-        "state": system_state,
-        "preferences": user_preferences
-    })
+    return jsonify({"state": system_state})
 
 @app.route('/api/health')
 def api_health():
-    return jsonify(processor.get_health_data())
-
-# ============================================================================
-# Socket事件 - 导航控制
-# ============================================================================
-@socketio.on('navigate')
-def handle_navigate(data):
-    page = data.get('page')
-    source = data.get('source', 'user')
-    
-    if system_state["game"]["active"]:
-        socketio.emit('navigate_error', {
-            "error": "game_active",
-            "message": "请先退出当前游戏"
-        })
-        return
-    
-    system_state["current_page"] = page
-    user_preferences["pages"][page] = user_preferences["pages"].get(page, 0) + 1
-    socketio.emit('navigate_to', {"page": page})
-
-@socketio.on('request_nav')
-def handle_request_nav(data):
-    handle_navigate(data)
+    return jsonify({"bpm": None, "emotion": None})
 
 # ============================================================================
 # Socket事件 - 游戏控制
@@ -262,6 +170,25 @@ def handle_game_control(data):
         system_state["mode"] = "normal"
         whack_a_mole.stop()
     
+    elif action == 'restart':
+        # 先停止（不发送状态）
+        system_state["game"]["active"] = False
+        system_state["game"]["name"] = None
+        system_state["game"]["status"] = "IDLE"
+        system_state["mode"] = "normal"
+        whack_a_mole.status = "IDLE"
+        whack_a_mole.current_mole = -1
+        print("[打地鼠] 重新开始：停止游戏")
+        
+        # 立即重新开始
+        system_state["game"]["active"] = True
+        system_state["game"]["name"] = game_name
+        system_state["game"]["status"] = "READY"
+        system_state["mode"] = "game"
+        whack_a_mole.set_ready()
+        print("[打地鼠] 重新开始：进入准备状态")
+        return  # 不发送 system_state
+    
     socketio.emit('system_state', {"state": system_state})
 
 @socketio.on('game_hit')
@@ -271,97 +198,53 @@ def handle_game_hit(data):
     whack_a_mole.handle_hit(hole, hit)
 
 # ============================================================================
-# Socket事件 - 用户交互
+# Socket事件 - 导航
 # ============================================================================
-@socketio.on('user_interaction')
-def handle_user_interaction(data):
-    interaction_type = data.get('type')
-    interaction_data = data.get('data', {})
-    print(f"[用户交互] type={interaction_type}")
-
-# ============================================================================
-# Socket事件 - 校准
-# ============================================================================
-@socketio.on('update_calibration_point')
-def handle_update_point(data):
-    index = data.get('index')
-    x = data.get('x')
-    y = data.get('y')
-    if 0 <= index < 4:
-        state["corners"][index] = [x, y]
-        screen_proc.update_matrix()
-
-@socketio.on('save_calibration')
-def handle_save_calibration():
-    screen_proc.save_config()
-
-@socketio.on('reset_calibration')
-def handle_reset_calibration():
-    state["corners"] = [[0.15, 0.2], [0.85, 0.2], [0.85, 0.85], [0.15, 0.85]]
-    screen_proc.update_matrix()
+@socketio.on('navigate')
+def handle_navigate(data):
+    page = data.get('page')
+    source = data.get('source')
+    print(f"[导航] page={page}, source={source}")
+    
+    if system_state["game"]["active"]:
+        emit('navigate_error', {"message": "请先退出当前游戏"})
+        return
+    
+    system_state["current_page"] = page
+    socketio.emit('navigate_to', {"page": page})
 
 # ============================================================================
 # Socket事件 - 获取状态
 # ============================================================================
 @socketio.on('get_state')
-def handle_get_state():
+def handle_get_state(data=None):
     """客户端请求获取当前状态"""
-    socketio.emit('system_state', {"state": system_state})
-
-# ============================================================================
-# API - 阿康对话
-# ============================================================================
-@app.route('/api/akon/chat', methods=['POST'])
-def akon_chat():
-    data = request.json
-    user_message = data.get('message', '')
-    sid = data.get('sid')
-    
-    response_text, action_name, action_params = ask_akon(user_message)
-    
-    if action_name == "navigate_to" and action_params:
-        target_page = action_params[0]
+    # 如果是平板客户端首次连接，检查是否需要导航到首页
+    if data and data.get('client') == 'tablet' and data.get('first_connect'):
         if not system_state["game"]["active"]:
-            system_state["current_page"] = target_page
-            socketio.emit('navigate_to', {"page": target_page})
+            socketio.emit('navigate_to', {"page": "/"})
     
-    result = {
-        'reply': response_text,
-        'action': {'name': action_name, 'params': action_params}
-    }
-    
-    if sid:
-        socketio.emit('akon_response', result, to=sid)
-    
-    return jsonify({'status': 'success'})
+    socketio.emit('system_state', {"state": system_state})
 
 # ============================================================================
 # 后台任务
 # ============================================================================
 def main_worker():
-    last_emit_time = 0
     while True:
-        now = time.time()
-        
-        t_data = processor.get_ui_data()
+        t_data = None  # processor.get_ui_data() if processor else None
         whack_a_mole.update(t_data['state'] if t_data else None)
         
         if system_state["game"]["active"]:
             system_state["game"]["score"] = whack_a_mole.score
             system_state["game"]["timer"] = whack_a_mole.timer
+            system_state["game"]["status"] = whack_a_mole.status
         
-        if now - last_emit_time > 0.05:
-            if t_data:
-                socketio.emit('tablet_stream', {'image': t_data['image'], 'state': t_data['state']})
-            last_emit_time = now
-        
-        socketio.sleep(0.01)
+        socketio.sleep(0.05)
 
 # ============================================================================
 # 启动
 # ============================================================================
 if __name__ == '__main__':
-    processor.start()
     threading.Thread(target=main_worker, daemon=True).start()
     
     print("=" * 60)

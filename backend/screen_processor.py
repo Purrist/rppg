@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 地面投影交互系统 - Screen Processor
-修复绿点破裂和丢失问题
+优化版 - 平衡流畅性和准确性
 """
 
 import cv2
@@ -18,10 +18,11 @@ import os
 CONFIG_FILE = "projection_config.json"
 
 # ============================================================================
-# 平滑滤波器
+# 平滑滤波器 - 平衡版本
 # ============================================================================
 class SmoothFilter:
-    def __init__(self, alpha=0.6, threshold=20):
+    """自适应滤波器，平衡流畅性和准确性"""
+    def __init__(self, alpha=0.5, threshold=20):
         self.alpha = alpha
         self.threshold = threshold
         self.value = None
@@ -31,21 +32,24 @@ class SmoothFilter:
             self.value = new_value
             return new_value
         diff = abs(new_value - self.value)
+        # 大变化时快速响应，小变化时平滑
         alpha = 0.85 if diff > self.threshold else self.alpha
         self.value = alpha * new_value + (1 - alpha) * self.value
         return self.value
 
 class PositionSmoother:
+    """位置平滑器，处理X和Y坐标"""
     def __init__(self):
-        self.x_filter = SmoothFilter(alpha=0.5, threshold=15)
-        self.y_filter = SmoothFilter(alpha=0.5, threshold=15)
+        self.x_filter = SmoothFilter(alpha=0.5, threshold=20)
+        self.y_filter = SmoothFilter(alpha=0.5, threshold=20)
         self.last_x = 320
         self.last_y = 180
         self.last_time = 0
+        self.lost_count = 0
     
     def update(self, x, y, detected):
         if detected:
-            # ⭐ 限制坐标在有效范围内
+            # 边界检查
             x = max(50, min(590, x))
             y = max(50, min(310, y))
             
@@ -54,10 +58,14 @@ class PositionSmoother:
             self.last_x = smooth_x
             self.last_y = smooth_y
             self.last_time = time.time()
+            self.lost_count = 0
             return int(smooth_x), int(smooth_y), True
-        elif time.time() - self.last_time < 0.2:
-            return int(self.last_x), int(self.last_y), True
-        return int(self.last_x), int(self.last_y), False
+        else:
+            self.lost_count += 1
+            # 短暂丢失时保持最后位置（最多0.3秒）
+            if self.lost_count < 18:
+                return int(self.last_x), int(self.last_y), True
+            return int(self.last_x), int(self.last_y), False
 
 # ============================================================================
 # 全局状态
@@ -117,21 +125,25 @@ class ScreenProcessor:
     def __init__(self, camera_source=1, socketio=None):
         self.socketio = socketio
         
+        # 打开摄像头
         self.cap = cv2.VideoCapture(camera_source)
         if not self.cap.isOpened():
             self.cap = cv2.VideoCapture(0)
         
+        # 摄像头设置
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        self.cap.set(cv2.CAP_PROP_FPS, 30)
         
         self.frame_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.frame_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         
+        # ⭐ 优化后的MediaPipe Pose参数
         self.pose = mp.solutions.pose.Pose(
-            min_detection_confidence=0.6,
-            min_tracking_confidence=0.6,
-            model_complexity=1,
+            min_detection_confidence=0.55,  # 平衡值
+            min_tracking_confidence=0.55,   # 平衡值
+            model_complexity=1,             # 中等模型
             smooth_landmarks=True
         )
         
@@ -146,7 +158,7 @@ class ScreenProcessor:
         while self.running:
             ret, frame = self.cap.read()
             if not ret:
-                time.sleep(0.01)
+                time.sleep(0.005)
                 continue
             
             frame = cv2.flip(frame, 0)
@@ -167,7 +179,8 @@ class ScreenProcessor:
                 left_ankle = lm[27]
                 right_ankle = lm[28]
                 
-                if left_ankle.visibility > 0.5 and right_ankle.visibility > 0.5:
+                # ⭐ 提高可见度阈值
+                if left_ankle.visibility > 0.4 and right_ankle.visibility > 0.4:
                     l_pt = (int(left_ankle.x * w), int(left_ankle.y * h))
                     r_pt = (int(right_ankle.x * w), int(right_ankle.y * h))
                     
@@ -186,12 +199,12 @@ class ScreenProcessor:
                         except:
                             pass
             
-            # 平滑处理（内部已做边界检查）
+            # 平滑处理
             smooth_x, smooth_y, smooth_detected = self.position_smoother.update(
                 raw_feet_x, raw_feet_y, raw_feet_detected
             )
             
-            # ⭐ 再次确保坐标在有效范围内
+            # 边界检查
             smooth_x = max(50, min(590, smooth_x))
             smooth_y = max(50, min(310, smooth_y))
             
@@ -221,7 +234,7 @@ class ScreenProcessor:
             
             self.raw_frame = frame
             self.corrected_frame = corrected
-            time.sleep(0.005)
+            time.sleep(0.002)
     
     def get_raw_jpeg(self):
         if self.raw_frame is None: return None

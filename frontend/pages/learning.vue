@@ -34,6 +34,7 @@
   </div>
 </template>
 
+
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
@@ -59,18 +60,25 @@ onMounted(() => {
   
   socket.on('connect', () => {
     console.log('[益智] 后端已连接')
+    // ⭐ 不需要发送 get_state，app.vue 已经处理了首次连接
   })
   
   socket.on('navigate_to', (data) => {
     router.push(data.page)
   })
   
-  // 监听游戏状态变化
+  // ⭐ 监听游戏状态变化
+  socket.on('game_update', (data) => {
+    // 如果状态变为READY，跳转到training
+    if (data.status === 'READY') {
+      router.push('/training')
+    }
+  })
+  
   socket.on('system_state', (data) => {
     // 如果游戏状态变为IDLE，返回游戏列表
     if (data.state && data.state.game && data.state.game.status === 'IDLE') {
       if (data.state.game.active === false) {
-        // 游戏已停止，返回游戏列表
         router.push('/learning')
       }
     }
@@ -85,11 +93,8 @@ const startGame = (gameName) => {
   console.log('[益智] 开始游戏:', gameName)
   
   if (socket && socket.connected) {
+    // ⭐ 发送ready，等待状态变为READY后自动跳转
     socket.emit('game_control', { action: 'ready', game: gameName })
-    // 等待一小段时间确保后端处理完成
-    setTimeout(() => {
-      router.push('/training')
-    }, 100)
   } else {
     alert('后端未连接，请稍后重试')
   }

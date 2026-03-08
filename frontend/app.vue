@@ -14,14 +14,10 @@
           <div class="nav-item" :class="{ 'active-custom': currentPath === '/entertainment' }" @click="handleNavigate('/entertainment')">🎵<br>娱乐</div>
           <div class="nav-item" :class="{ 'active-custom': currentPath === '/learning' }" @click="handleNavigate('/learning')">🧩<br>益智</div> 
         </div>
-        <div class="user-zone" @click.stop="ui.menu = !ui.menu">
+        <!-- ⭐ 点击张爷爷直接跳转设置页 -->
+        <div class="user-zone" @click="goToSettings">
           <div class="avatar">👴</div>
           <div class="name">张爷爷</div>
-          <div v-if="ui.menu" class="pop-menu">
-            <div @click="handleAdminNav('/developer')">🛠 开发者后台</div>
-            <div @click="handleAdminNav('/projection')">📽 投影页面</div>
-            <div @click="handleAdminNav('/settings')">⚙️ 系统设置</div>
-          </div>
         </div>
       </aside>
 
@@ -82,6 +78,10 @@ const currentPath = computed(() => route.path)
 // 后端连接状态
 const backendConnected = ref(false)
 const gameActive = ref(false)
+// 标记是否已经初始化过（用于重启后回到首页）
+const hasInitialized = ref(false)
+// ⭐ 标记是否正在重新开始
+const isRestarting = ref(false)
 
 // UI状态
 const ui = reactive({ menu: false, akon: false })
@@ -106,11 +106,14 @@ watch(isDevPage, (dev) => {
 }, { immediate: true })
 
 // ==================== 导航 ====================
-function handleNavigate(page) {
-  if (gameActive.value) {
-    alert('请先退出当前游戏')
-    return
+async function handleNavigate(page) {
+  // 如果游戏活跃，先停止游戏
+  if (gameActive.value && socket && socket.connected) {
+    console.log('[App] 游戏活跃，先停止游戏')
+    socket.emit('game_control', { action: 'stop' })
+    await new Promise(resolve => setTimeout(resolve, 100))
   }
+  
   if (backendConnected.value && socket) {
     socket.emit('navigate', { page, source: 'user' })
   } else {
@@ -118,9 +121,9 @@ function handleNavigate(page) {
   }
 }
 
-function handleAdminNav(path) {
-  ui.menu = false
-  router.push(path)
+// ⭐ 点击张爷爷直接跳转设置页
+function goToSettings() {
+  router.push('/settings')
 }
 
 // ==================== Socket ====================
@@ -144,8 +147,11 @@ onMounted(() => {
     backendConnected.value = true
     console.log('[App] 后端已连接')
     
-    // ⭐ 连接时获取当前状态
-    socket.emit('get_state')
+    // 只在首次连接时检查是否需要导航到首页
+    if (!hasInitialized.value) {
+      hasInitialized.value = true
+      socket.emit('get_state', { client: 'tablet', first_connect: true })
+    }
   })
   
   socket.on('disconnect', () => {
@@ -158,15 +164,22 @@ onMounted(() => {
     console.log('[App] 连接错误:', err.message)
   })
   
-  // ⭐ 收到系统状态时，检查是否需要导航到首页
+  // 收到系统状态时，检查是否需要导航
   socket.on('system_state', (data) => {
     if (data.state && data.state.game) {
       gameActive.value = data.state.game.active
       
-      // ⭐ 如果游戏状态是IDLE且不活跃，确保在首页
-      if (data.state.game.status === 'IDLE' && data.state.game.active === false) {
-        // 如果当前在训练页面，返回首页
+      // ⭐ 如果收到 READY 状态，重置重新开始标记
+      if (data.state.game.status === 'READY') {
+        isRestarting.value = false
+      }
+      
+      // 如果游戏状态是IDLE且不活跃，检查当前页面
+      // ⭐ 但如果正在重新开始，忽略这个状态
+      if (data.state.game.status === 'IDLE' && data.state.game.active === false && !isRestarting.value) {
+        // 如果当前在训练页面，返回游戏列表
         if (route.path === '/training') {
+          console.log('[App] 游戏已停止，返回游戏列表')
           router.push('/learning')
         }
       }
@@ -305,11 +318,7 @@ html, body {
 .user-zone { text-align: center; position: relative; cursor: pointer; margin-top: auto; }
 .avatar { font-size: 50px; }
 .name { font-size: 20px; font-weight: bold; margin-top: 5px; }
-.pop-menu {
-  position: absolute; left: 150px; bottom: 0; width: 220px; 
-  background: white; border-radius: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.15); z-index: 200;
-}
-.pop-menu div { padding: 20px; font-size: 20px; border-bottom: 1px solid #F5F5F5; text-align: left; }
+
 .akon-modal { position: absolute; inset: 0; background: rgba(0,0,0,0.4); z-index: 600; display: flex; align-items: flex-end; }
 .akon-panel { width: 100%; background: #FFF; border-radius: 40px 40px 0 0; padding: 60px; }
 .akon-btn { width: 100%; padding: 25px; background: #FF7222; color: #fff; border: none; border-radius: 20px; font-size: 24px; font-weight: bold; }

@@ -22,13 +22,17 @@ class WhackAMole:
         # 时间控制
         self.start_time = 0
         self.last_mole_time = 0
-        self.mole_appear_time = 0  # 地鼠出现时间
+        self.mole_appear_time = 0
         self.paused_time = 0
         self.total_paused = 0
         
-        # 游戏参数（调整后）
-        self.mole_stay = 5.0       # 地鼠停留时间 4秒
-        self.mole_interval = 1.5   # 地鼠出现间隔 1.5秒
+        # ⭐ 结算时间
+        self.settling_start_time = 0
+        self.SETTLING_DURATION = 5.0  # 结算阶段5秒
+        
+        # 游戏参数
+        self.mole_stay = 5.0
+        self.mole_interval = 1.5
         
         # 统计
         self.total_hits = 0
@@ -76,6 +80,13 @@ class WhackAMole:
         self._emit_state()
         print("[打地鼠] 游戏结束")
     
+    def start_settling(self):
+        """进入结算状态"""
+        self.status = "SETTLING"
+        self.settling_start_time = time.time()
+        self._emit_state()
+        print("[打地鼠] 进入结算状态")
+    
     def handle_hit(self, hole_index, hit):
         """处理击中判定"""
         if self.status != "PLAYING":
@@ -84,14 +95,12 @@ class WhackAMole:
         self.total_hits += 1
         
         if hit and hole_index == self.current_mole:
-            # 击中地鼠
             self.score += 10
             self.success_hits += 1
             self.current_mole = -1
-            self.last_mole_time = time.time()  # 立即开始计时下一只
+            self.last_mole_time = time.time()
             print(f"[打地鼠] 击中！+10分，总分：{self.score}")
         else:
-            # 击中错误
             self.score = max(0, self.score - 5)
             print(f"[打地鼠] 未击中，-5分，总分：{self.score}")
         
@@ -99,35 +108,39 @@ class WhackAMole:
     
     def update(self, health_state=None):
         """更新游戏状态"""
+        # ⭐ 结算状态处理
+        if self.status == "SETTLING":
+            elapsed = time.time() - self.settling_start_time
+            if elapsed >= self.SETTLING_DURATION:
+                print("[打地鼠] 结算结束，回到准备状态")
+                self.set_ready()
+            return
+        
         if self.status == "PLAYING":
             now = time.time()
             
-            # 计算有效时间
             elapsed = now - self.start_time - self.total_paused
             self.timer = max(0, int(60 - elapsed))
             
-            # 时间结束
+            # 时间结束 -> 进入结算状态
             if self.timer <= 0:
                 print(f"[打地鼠] 时间到！最终得分：{self.score}")
-                self.status = "READY"
-                self.current_mole = -1
-                self._emit_state()
+                self.start_settling()
                 return
             
             # 地鼠逻辑
             if self.current_mole == -1:
-                # 没有地鼠，等待后出现
                 if now - self.last_mole_time > self.mole_interval:
                     self.current_mole = random.randint(0, 2)
                     self.mole_appear_time = now
                     self.last_mole_time = now
                     print(f"[打地鼠] 地鼠出现在洞 {self.current_mole}")
             else:
-                # 有地鼠，检查是否超时
                 if now - self.mole_appear_time > self.mole_stay:
+                    self.score = max(0, self.score - 5)
                     self.current_mole = -1
                     self.last_mole_time = now
-                    print("[打地鼠] 地鼠消失（超时）")
+                    print(f"[打地鼠] 地鼠逃走！-5分，总分：{self.score}")
             
             self._emit_state()
     
