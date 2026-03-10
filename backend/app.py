@@ -49,7 +49,16 @@ if len(sys.argv) >= 3:
 
 app = Flask(__name__, static_folder='../frontend/.output/public', static_url_path='')
 CORS(app)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+# SocketIO配置 - 修复WebSocket问题
+socketio = SocketIO(
+    app, 
+    cors_allowed_origins="*", 
+    async_mode='threading',
+    ping_timeout=60,
+    ping_interval=25,
+    engineio_logger=False,
+    logger=False
+)
 
 # ============================================================================
 # 系统状态
@@ -74,34 +83,40 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from screen_processor import init_screen_processor, get_screen_processor, state
 from games import WhackAMole
 from akon_agent import ask_akon
-from rppg_processor import RPPGProcessor
+from perception import PerceptionManager
+from perception.utils import draw_detection_info
 
 # ============================================================================
 # 初始化
 # ============================================================================
 screen_proc = init_screen_processor(camera_source=PROJECTION_CAMERA_SOURCE, socketio=socketio)
 whack_a_mole = WhackAMole(socketio)
-rppg_processor = RPPGProcessor(fps=30)
 
-# rPPG 状态
-rppg_status = {
-    "bpm": None,
-    "emotion": None,
-    "confidence": 0
+# 感知管理器
+perception_manager = PerceptionManager()
+
+# 用户状态
+user_state = {
+    "emotion": {"primary": "neutral"},
+    "heart_rate": {"bpm": None},
+    "environment": {"person_present": False},
+    "body_state": {"posture": "unknown"},
+    "eye_state": {"attention_score": 0},
+    "overall": {"fatigue_level": 0, "state_summary": "normal"},
 }
 
-# rPPG处理线程
-rppg_frame = None
-rppg_frame_lock = threading.Lock()
+# 感知处理线程
+perception_frame = None
+perception_frame_lock = threading.Lock()
 
-def rppg_worker():
-    """rPPG处理线程：独立处理心率检测"""
+def perception_worker():
+    """感知处理线程：整合所有感知模块"""
     import urllib.request
     
-    global rppg_frame, rppg_status
+    global perception_frame, user_state
     tablet_url = TABLET_VIDEO_URL
     
-    print(f"[rPPG线程] 启动，连接: {tablet_url}")
+    print(f"[感知线程] 启动，连接: {tablet_url}")
     
     while True:
         try:
@@ -120,34 +135,19 @@ def rppg_worker():
                     frame = cv2.imdecode(np.frombuffer(jpg, dtype=np.uint8), cv2.IMREAD_COLOR)
                     
                     if frame is not None:
-                        # 处理rPPG
-                        bpm, conf, face, roi = rppg_processor.process_frame(frame)
+                        # 处理感知
+                        user_state = perception_manager.process_frame(frame, "tablet")
                         
-                        # 更新状态
-                        if bpm and conf > 2.0:
-                            rppg_status["bpm"] = round(bpm, 1)
-                            rppg_status["confidence"] = round(conf, 2)
-                        
-                        # 绘制结果
-                        if face:
-                            x, y, w, h = face
-                            cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
-                        
-                        if roi:
-                            rx, ry, rw, rh = roi
-                            cv2.rectangle(frame, (rx, ry), (rx+rw, ry+rh), (255, 0, 0), 2)
-                        
-                        if rppg_status["bpm"]:
-                            cv2.putText(frame, f"BPM: {rppg_status['bpm']}", (10, 30),
-                                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                        # 绘制检测信息
+                        frame = draw_detection_info(frame, user_state)
                         
                         # 更新共享帧
-                        with rppg_frame_lock:
+                        with perception_frame_lock:
                             _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
-                            rppg_frame = jpeg.tobytes()
+                            perception_frame = jpeg.tobytes()
                         
         except Exception as e:
-            print(f"[rPPG线程] 错误: {e}")
+            print(f"[感知线程] 错误: {e}")
             time.sleep(1)
 
 # ============================================================================
@@ -187,11 +187,11 @@ def corrected_feed():
 def tablet_video_feed():
     """平板摄像头视频流（从共享帧读取，流畅不卡顿）"""
     def gen_tablet_video():
-        global rppg_frame
+        global perception_frame
         
         while True:
-            with rppg_frame_lock:
-                frame = rppg_frame
+            with perception_frame_lock:
+                frame = perception_frame
             
             if frame:
                 yield (b'--frame\r\n'
@@ -243,7 +243,13 @@ def api_system_state():
 
 @app.route('/api/health')
 def api_health():
-    return jsonify(rppg_status)
+    """获取用户健康状态"""
+    return jsonify(perception_manager.get_summary())
+
+@app.route('/api/user_state')
+def api_user_state():
+    """获取完整用户状态"""
+    return jsonify(user_state)
 
 # ============================================================================
 # 阿康对话 API
@@ -273,12 +279,46 @@ def api_akon_chat():
         "action": action
     }
     
-    # 如果有导航动作，执行导航
-    if action and action.get("action") == "navigate":
-        page = action.get("page", "/")
-        if not system_state["game"]["active"]:
-            system_state["current_page"] = page
-            socketio.emit('navigate_to', {"page": page})
+    # 处理动作
+    if action:
+        action_type = action.get("type", "none")
+        
+        # 导航+推荐
+        if action_type == "navigate_and_recommend":
+            page = action.get("page", "/")
+            content = action.get("content", {})
+            
+            # 执行导航
+            if not system_state["game"]["active"]:
+                system_state["current_page"] = page
+                socketio.emit('navigate_to', {"page": page})
+            
+            # 发送推荐内容
+            if content:
+                socketio.emit('akon_recommend', {
+                    "type": content.get("type"),
+                    "items": content.get("items", [])
+                })
+        
+        # 纯导航
+        elif action_type == "navigate":
+            page = action.get("page", "/")
+            if not system_state["game"]["active"]:
+                system_state["current_page"] = page
+                socketio.emit('navigate_to', {"page": page})
+        
+        # 播放
+        elif action_type == "play":
+            content = action.get("content", {})
+            socketio.emit('akon_play', {
+                "type": content.get("type"),
+                "items": content.get("items", [])
+            })
+        
+        # 开始游戏
+        elif action_type == "game":
+            game_name = action.get("game_name", "打地鼠")
+            socketio.emit('akon_start_game', {"game": game_name})
     
     return jsonify(result)
 
@@ -309,11 +349,38 @@ def handle_game_control(data):
         system_state["game"]["status"] = whack_a_mole.status
         
     elif action == 'stop':
+        # ⭐ 先更新游戏状态
+        whack_a_mole.stop()  # 这会发送 game_update，status = IDLE
+        
+        # 再更新系统状态
         system_state["game"]["active"] = False
         system_state["game"]["name"] = None
         system_state["game"]["status"] = "IDLE"
         system_state["mode"] = "normal"
+        
+        # 发送系统状态
+        socketio.emit('system_state', {"state": system_state})
+        print("[游戏控制] 游戏已停止，状态已同步到所有客户端")
+    
+    elif action == 'timeout_stop':
+        # ⭐ 超时停止：3分钟没人进入灰圈
+        print("[游戏控制] 准备超时，停止游戏并导航回游戏列表")
+        
+        # 停止游戏
         whack_a_mole.stop()
+        
+        # 更新系统状态
+        system_state["game"]["active"] = False
+        system_state["game"]["name"] = None
+        system_state["game"]["status"] = "IDLE"
+        system_state["mode"] = "normal"
+        
+        # 发送状态
+        socketio.emit('system_state', {"state": system_state})
+        
+        # ⭐ 导航平板回游戏列表
+        socketio.emit('navigate_to', {"page": "/learning"})
+        print("[游戏控制] 已发送导航指令，平板返回游戏列表")
     
     elif action == 'restart':
         # 先停止（不发送状态）
@@ -393,11 +460,11 @@ if __name__ == '__main__':
     # 启动后台任务
     threading.Thread(target=main_worker, daemon=True).start()
     
-    # 启动rPPG处理线程
-    threading.Thread(target=rppg_worker, daemon=True).start()
+    # 启动感知处理线程
+    threading.Thread(target=perception_worker, daemon=True).start()
     
     print("=" * 60)
-    print("AI具身智能认知训练系统")
+    print("AI具身智能认知训练系统 - EAOS")
     print("=" * 60)
     print()
     print(f"本机IP:     http://{LOCAL_IP}:5000")
@@ -409,6 +476,13 @@ if __name__ == '__main__':
     print(f"平板访问:   http://{LOCAL_IP}:3000")
     print(f"投影页面:   http://{LOCAL_IP}:3000/projection")
     print(f"开发后台:   http://{LOCAL_IP}:3000/developer")
+    print()
+    print("感知模块:")
+    print("  - 情绪检测")
+    print("  - 心率检测 (rPPG)")
+    print("  - 环境检测")
+    print("  - 身体状态检测")
+    print("  - 眼部追踪")
     print("=" * 60)
     
     socketio.run(app, host='0.0.0.0', port=5000, debug=False)

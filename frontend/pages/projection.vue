@@ -433,7 +433,8 @@ function updateReadyState() {
     readyProgress.value = 0
     readyStartTime.value = 0
     if (socket) {
-      socket.emit('game_control', { action: 'stop' })
+      // ⭐ 发送超时停止，后端会导航平板回游戏列表
+      socket.emit('game_control', { action: 'timeout_stop' })
     }
   }
 }
@@ -549,11 +550,14 @@ onMounted(() => {
   // ⭐ 监听游戏状态更新
   socket.on('game_update', (data) => {
     console.log('[投影] 收到game_update:', data.status)
-    game.value = data
+    game.value = { ...game.value, ...data }
   })
   
+  // ⭐ 监听系统状态（确保同步）
   socket.on('system_state', (data) => {
+    console.log('[投影] 收到system_state:', data.state?.game?.status)
     if (data.state && data.state.game) {
+      // 强制同步状态
       game.value.status = data.state.game.status || 'IDLE'
       game.value.score = data.state.game.score || 0
       game.value.timer = data.state.game.timer || 60

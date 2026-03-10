@@ -196,7 +196,10 @@ const exitGame = () => {
     socket.emit('game_control', { action: 'stop' })
   }
   
-  router.push('/learning')
+  // ⭐ 延迟跳转，确保状态同步完成
+  setTimeout(() => {
+    router.push('/learning')
+  }, 100)
 }
 </script>
 
