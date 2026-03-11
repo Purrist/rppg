@@ -7,7 +7,7 @@
 
 # Python (Backend)
 backend/__pycache__/
-backend/perceptron/__pycache__/
+backend/perception/__pycache__/
 backend/*.pyc
 backend/.env
 backend/.venv

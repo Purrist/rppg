@@ -11,6 +11,13 @@
         "http://192.168.3.94:8080/video",
         "1"
       ]
+    },    
+    {
+      "name": "一键转化",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "convert.py",
+      "cwd": "${workspaceFolder}/"
     },
     {
       "name": "前端 (Nuxt)",
