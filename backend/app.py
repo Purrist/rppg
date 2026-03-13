@@ -1,17 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-AI具身智能认知训练系统 - 主程序
+AI具身智能认知训练系统 - 主程序 v2.1
+模块化架构
 """
 
 import os
 import sys
 import time
-import json
 import threading
 import socket
-from datetime import datetime
 
-from flask import Flask, render_template, Response, request, jsonify, send_from_directory
+from flask import Flask, Response, request, jsonify, send_from_directory
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 import cv2
@@ -29,13 +28,8 @@ try:
 except:
     pass
 
-# ============================================================================
-# 解析命令行参数
-# ============================================================================
-# args[0]: 平板视频地址 (如 http://192.168.3.94:8080/video)
-# args[1]: 投影摄像头源 (如 1)
-TABLET_VIDEO_URL = "http://192.168.3.94:8080/video"  # 默认值
-PROJECTION_CAMERA_SOURCE = 1  # 默认值
+TABLET_VIDEO_URL = "http://192.168.3.94:8080/video"
+PROJECTION_CAMERA_SOURCE = 1
 
 if len(sys.argv) >= 2:
     TABLET_VIDEO_URL = sys.argv[1]
@@ -49,7 +43,6 @@ if len(sys.argv) >= 3:
 
 app = Flask(__name__, static_folder='../frontend/.output/public', static_url_path='')
 CORS(app)
-# SocketIO配置 - 修复WebSocket问题
 socketio = SocketIO(
     app, 
     cors_allowed_origins="*", 
@@ -61,49 +54,48 @@ socketio = SocketIO(
 )
 
 # ============================================================================
-# 系统状态
-# ============================================================================
-system_state = {
-    "mode": "normal",
-    "current_page": "/",
-    "game": {
-        "active": False,
-        "name": None,
-        "status": "IDLE",
-        "score": 0,
-        "timer": 60
-    }
-}
-
-# ============================================================================
 # 导入模块
 # ============================================================================
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from screen_processor import init_screen_processor, get_screen_processor, state
-from games import WhackAMole
-from akon_agent import ask_akon
-from perception import PerceptionManager
-from perception.utils import draw_detection_info
+# 核心模块
+from core import SystemStateManager, ask_akon, think, should_think, get_agent_state, ActionExecutor
+
+# 游戏系统
+from games import GameManager, GAME_REGISTRY
+
+# 感知模块
+from perception import PerceptionManager, init_screen_processor, draw_detection_info
 
 # ============================================================================
 # 初始化
 # ============================================================================
+# 投影摄像头处理器
 screen_proc = init_screen_processor(camera_source=PROJECTION_CAMERA_SOURCE, socketio=socketio)
-whack_a_mole = WhackAMole(socketio)
+
+# 游戏管理器
+game_manager = GameManager(socketio)
+for game_id, game_class in GAME_REGISTRY.items():
+    game_manager.register(game_id, game_class)
+print(f"[游戏系统] 已注册游戏: {list(GAME_REGISTRY.keys())}")
 
 # 感知管理器
 perception_manager = PerceptionManager()
 
+# 状态管理器（世界模型）
+state_manager = SystemStateManager(socketio)
+
+# 行动执行器
+action_executor = ActionExecutor(socketio, state_manager)
+
 # 用户状态
 user_state = {
-    "emotion": {"primary": "neutral", "confidence": 0.0, "valence": 0.5, "arousal": 0.5},
-    "heart_rate": {"bpm": None, "hrv": None, "confidence": 0.0, "trend": "stable"},
-    "environment": {"light_level": "normal", "light_value": 0, "person_count": 0, "person_present": False, "person_distance": None, "face_detected": False, "face_id": None},
-    "body_state": {"posture": "unknown", "activity_level": 0.0, "activity_duration": 0, "head_pose": "frontal", "movement_frequency": 0.0, "stillness_duration": 0},
-    "eye_state": {"blink_rate": 0, "blink_frequency": 0.0, "gaze_direction": "screen", "gaze_duration": 0, "attention_score": 0.0, "eye_contact": False},
-    "overall": {"fatigue_level": 0.0, "engagement_level": 0.0, "comfort_level": 0.5, "state_summary": "normal"},
-    "meta": {"last_update": 0, "frame_count": 0, "detection_success": True}
+    "emotion": {"primary": "neutral"},
+    "heart_rate": {"bpm": None},
+    "environment": {"person_present": False},
+    "body_state": {"posture": "unknown"},
+    "eye_state": {"attention_score": 0},
+    "overall": {"fatigue_level": 0, "state_summary": "normal"},
 }
 
 # 感知处理线程
@@ -111,7 +103,7 @@ perception_frame = None
 perception_frame_lock = threading.Lock()
 
 def perception_worker():
-    """感知处理线程：整合所有感知模块"""
+    """感知处理线程"""
     import urllib.request
     
     global perception_frame, user_state
@@ -136,19 +128,40 @@ def perception_worker():
                     frame = cv2.imdecode(np.frombuffer(jpg, dtype=np.uint8), cv2.IMREAD_COLOR)
                     
                     if frame is not None:
-                        # 处理感知
                         user_state = perception_manager.process_frame(frame, "tablet")
-                        
-                        # 绘制检测信息
+                        state_manager.update_world(user_state)
                         frame = draw_detection_info(frame, user_state)
                         
-                        # 更新共享帧
                         with perception_frame_lock:
                             _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
                             perception_frame = jpeg.tobytes()
                     
         except Exception as e:
             print(f"[感知线程] 错误: {e}")
+            time.sleep(1)
+
+# ============================================================================
+# Agent循环
+# ============================================================================
+def agent_loop():
+    """Agent持续运行循环"""
+    print("[Agent循环] 启动")
+    
+    while True:
+        try:
+            world_state = state_manager.get_world_state()
+            
+            if should_think(world_state):
+                print(f"[Agent循环] 触发思考")
+                decision = think(world_state, state_manager)
+                
+                if decision.get("need_action"):
+                    action_executor.execute(decision)
+            
+            time.sleep(0.5)
+            
+        except Exception as e:
+            print(f"[Agent循环] 错误: {e}")
             time.sleep(1)
 
 # ============================================================================
@@ -186,7 +199,6 @@ def corrected_feed():
 
 @app.route('/tablet_video_feed')
 def tablet_video_feed():
-    """平板摄像头视频流（从共享帧读取，流畅不卡顿）"""
     def gen_tablet_video():
         global perception_frame
         
@@ -198,11 +210,10 @@ def tablet_video_feed():
                 yield (b'--frame\r\n'
                        b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
             else:
-                # 等待帧
                 yield (b'--frame\r\n'
                        b'Content-Type: image/jpeg\r\n\r\n' + b'' + b'\r\n')
             
-            time.sleep(0.03)  # ~30fps
+            time.sleep(0.03)
     
     return Response(gen_tablet_video(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
@@ -240,75 +251,95 @@ def api_load_all():
 
 @app.route('/api/system/state')
 def api_system_state():
-    return jsonify({"state": system_state})
+    return jsonify({
+        "state": {
+            "mode": "game" if game_manager.is_game_active() else "normal",
+            "current_page": state_manager.get_current_page(),
+            "game": {
+                "active": game_manager.is_game_active(),
+                "name": game_manager.get_current_game_id(),
+                "status": game_manager.get_game_status(),
+                "score": game_manager.get_game_state().get("score", 0) if game_manager.get_game_state() else 0,
+                "timer": game_manager.get_game_state().get("timer", 0) if game_manager.get_game_state() else 0,
+            }
+        }
+    })
 
 @app.route('/api/health')
 def api_health():
-    """获取用户健康状态摘要"""
     return jsonify(perception_manager.get_summary())
 
 @app.route('/api/user_state')
 def api_user_state():
-    """获取完整用户状态"""
     return jsonify(user_state)
+
+@app.route('/api/world_state')
+def api_world_state():
+    return jsonify(state_manager.get_world_state())
+
+@app.route('/api/agent_state')
+def api_agent_state():
+    return jsonify(get_agent_state())
+
+@app.route('/api/games')
+def api_games():
+    """获取游戏列表"""
+    return jsonify(game_manager.get_game_list())
+
+@app.route('/api/games/<game_id>/config')
+def api_game_config(game_id):
+    """获取游戏配置"""
+    config = game_manager.get_game_config(game_id)
+    if config:
+        return jsonify(config)
+    return jsonify({"error": "游戏不存在"}), 404
 
 # ============================================================================
 # 阿康对话 API
 # ============================================================================
 @app.route('/api/akon/chat', methods=['POST'])
 def api_akon_chat():
-    """阿康对话接口"""
     data = request.json
     user_input = data.get('message', '')
     
     if not user_input:
         return jsonify({"error": "请输入内容"}), 400
     
-    # 构建系统状态
+    state_manager.set_user_speaking(True, user_input)
+    
     akon_state = {
-        "current_page": system_state.get("current_page", "/"),
-        "game_active": system_state["game"]["active"],
-        "game_name": system_state["game"]["name"],
-        "game_score": system_state["game"]["score"]
+        "current_page": state_manager.get_current_page(),
+        "game_active": game_manager.is_game_active(),
+        "game_name": game_manager.get_current_game_id(),
+        "game_score": game_manager.get_game_state().get("score", 0) if game_manager.get_game_state() else 0
     }
     
-    # 调用阿康
     response, action = ask_akon(user_input, akon_state)
+    state_manager.set_user_speaking(False)
     
-    result = {
-        "response": response,
-        "action": action
-    }
+    result = {"response": response, "action": action}
     
-    # 处理动作
     if action:
         action_type = action.get("type", "none")
         
-        # 导航+推荐
         if action_type == "navigate_and_recommend":
             page = action.get("page", "/")
             content = action.get("content", {})
-            
-            # 执行导航
-            if not system_state["game"]["active"]:
-                system_state["current_page"] = page
+            if not game_manager.is_game_active():
+                state_manager.navigate_to(page)
                 socketio.emit('navigate_to', {"page": page})
-            
-            # 发送推荐内容
             if content:
                 socketio.emit('akon_recommend', {
                     "type": content.get("type"),
                     "items": content.get("items", [])
                 })
         
-        # 纯导航
         elif action_type == "navigate":
             page = action.get("page", "/")
-            if not system_state["game"]["active"]:
-                system_state["current_page"] = page
+            if not game_manager.is_game_active():
+                state_manager.navigate_to(page)
                 socketio.emit('navigate_to', {"page": page})
         
-        # 播放
         elif action_type == "play":
             content = action.get("content", {})
             socketio.emit('akon_play', {
@@ -316,9 +347,8 @@ def api_akon_chat():
                 "items": content.get("items", [])
             })
         
-        # 开始游戏
         elif action_type == "game":
-            game_name = action.get("game_name", "打地鼠")
+            game_name = action.get("game_name", "whack_a_mole")
             socketio.emit('akon_start_game', {"game": game_name})
     
     return jsonify(result)
@@ -328,60 +358,62 @@ def api_akon_chat():
 # ============================================================================
 @socketio.on('game_control')
 def handle_game_control(data):
-    global system_state
     action = data.get('action')
-    game_name = data.get('game', 'whack_a_mole')
+    game_id = data.get('game', 'whack_a_mole')
     
-    print(f"[游戏控制] action={action}, game={game_name}")
+    print(f"[游戏控制] action={action}, game={game_id}")
     
     if action == 'ready':
-        system_state["game"]["active"] = True
-        system_state["game"]["name"] = game_name
-        system_state["game"]["status"] = "READY"
-        system_state["mode"] = "game"
-        whack_a_mole.set_ready()
-        
+        game_manager.set_ready(game_id)
+    
     elif action == 'start':
-        system_state["game"]["status"] = "PLAYING"
-        whack_a_mole.start_game()
-        
+        game_manager.start_game()
+    
     elif action == 'pause':
-        whack_a_mole.toggle_pause()
-        system_state["game"]["status"] = whack_a_mole.status
-        
+        game_manager.toggle_pause()
+    
     elif action == 'stop':
-        system_state["game"]["active"] = False
-        system_state["game"]["name"] = None
-        system_state["game"]["status"] = "IDLE"
-        system_state["mode"] = "normal"
-        whack_a_mole.stop()
+        game_manager.stop_game()
+    
+    elif action == 'timeout_stop':
+        print("[游戏控制] 超时停止")
+        game_manager.stop_game()
+        socketio.emit('navigate_to', {"page": "/learning"})
     
     elif action == 'restart':
-        # 先停止（不发送状态）
-        system_state["game"]["active"] = False
-        system_state["game"]["name"] = None
-        system_state["game"]["status"] = "IDLE"
-        system_state["mode"] = "normal"
-        whack_a_mole.status = "IDLE"
-        whack_a_mole.current_mole = -1
-        print("[打地鼠] 重新开始：停止游戏")
-        
-        # 立即重新开始
-        system_state["game"]["active"] = True
-        system_state["game"]["name"] = game_name
-        system_state["game"]["status"] = "READY"
-        system_state["mode"] = "game"
-        whack_a_mole.set_ready()
-        print("[打地鼠] 重新开始：进入准备状态")
+        game_manager.stop_game()
+        game_manager.set_ready(game_id)
         return  # 不发送 system_state
     
-    socketio.emit('system_state', {"state": system_state})
+    
+    socketio.emit('system_state', {
+        "state": {
+            "mode": "game" if game_manager.is_game_active() else "normal",
+            "game": {
+                "active": game_manager.is_game_active(),
+                "name": game_manager.get_current_game_id(),
+                "status": game_manager.get_game_status(),
+                "score": game_manager.get_game_state().get("score", 0) if game_manager.get_game_state() else 0,
+                "timer": game_manager.get_game_state().get("timer", 0) if game_manager.get_game_state() else 0,
+            }
+        }
+    })
+
+@socketio.on('game_action')
+def handle_game_action(data):
+    """处理游戏内动作"""
+    action = data.get('action')
+    zone = data.get('zone', -1)
+    success = data.get('success', False)
+    
+    game_manager.handle_action(action, {"zone": zone, "success": success})
 
 @socketio.on('game_hit')
 def handle_game_hit(data):
+    """兼容旧接口"""
     hole = data.get('hole', -1)
     hit = data.get('hit', False)
-    whack_a_mole.handle_hit(hole, hit)
+    game_manager.handle_action("hit", {"zone": hole, "success": hit})
 
 # ============================================================================
 # Socket事件 - 导航
@@ -392,71 +424,63 @@ def handle_navigate(data):
     source = data.get('source')
     print(f"[导航] page={page}, source={source}")
     
-    if system_state["game"]["active"]:
+    if game_manager.is_game_active():
         emit('navigate_error', {"message": "请先退出当前游戏"})
         return
     
-    system_state["current_page"] = page
+    state_manager.navigate_to(page)
     socketio.emit('navigate_to', {"page": page})
 
-# ============================================================================
-# Socket事件 - 获取状态
-# ============================================================================
 @socketio.on('get_state')
 def handle_get_state(data=None):
-    """客户端请求获取当前状态"""
-    # 如果是平板客户端首次连接，检查是否需要导航到首页
     if data and data.get('client') == 'tablet' and data.get('first_connect'):
-        if not system_state["game"]["active"]:
+        if not game_manager.is_game_active():
             socketio.emit('navigate_to', {"page": "/"})
     
-    socketio.emit('system_state', {"state": system_state})
+    socketio.emit('system_state', {
+        "state": {
+            "mode": "game" if game_manager.is_game_active() else "normal",
+            "game": {
+                "active": game_manager.is_game_active(),
+                "name": game_manager.get_current_game_id(),
+                "status": game_manager.get_game_status(),
+            }
+        }
+    })
 
 # ============================================================================
 # 后台任务
 # ============================================================================
 def main_worker():
     while True:
-        t_data = None  # processor.get_ui_data() if processor else None
-        whack_a_mole.update(t_data['state'] if t_data else None)
-        
-        if system_state["game"]["active"]:
-            system_state["game"]["score"] = whack_a_mole.score
-            system_state["game"]["timer"] = whack_a_mole.timer
-            system_state["game"]["status"] = whack_a_mole.status
-        
+        game_manager.update()
         socketio.sleep(0.05)
 
 # ============================================================================
 # 启动
 # ============================================================================
 if __name__ == '__main__':
-    # 启动后台任务
     threading.Thread(target=main_worker, daemon=True).start()
-    
-    # 启动感知处理线程
     threading.Thread(target=perception_worker, daemon=True).start()
+    threading.Thread(target=agent_loop, daemon=True).start()
     
     print("=" * 60)
-    print("AI具身智能认知训练系统 - EAOS")
+    print("AI具身智能认知训练系统 - EAOS v2.1")
     print("=" * 60)
     print()
     print(f"本机IP:     http://{LOCAL_IP}:5000")
-    print(f"Flask API:  http://127.0.0.1:5000")
-    print()
-    print(f"平板视频:   {TABLET_VIDEO_URL}")
-    print(f"投影摄像头: {PROJECTION_CAMERA_SOURCE}")
-    print()
     print(f"平板访问:   http://{LOCAL_IP}:3000")
     print(f"投影页面:   http://{LOCAL_IP}:3000/projection")
     print(f"开发后台:   http://{LOCAL_IP}:3000/developer")
     print()
-    print("感知模块:")
-    print("  - 情绪检测")
-    print("  - 心率检测 (rPPG)")
-    print("  - 环境检测")
-    print("  - 身体状态检测")
-    print("  - 眼部追踪")
+    print("已注册游戏:")
+    for game_id in GAME_REGISTRY:
+        print(f"  - {game_id}")
+    print()
+    print("模块结构:")
+    print("  core/       - Agent、世界模型、工具")
+    print("  games/      - 游戏系统（可扩展）")
+    print("  perception/ - 感知系统")
     print("=" * 60)
     
     socketio.run(app, host='0.0.0.0', port=5000, debug=False)
