@@ -97,12 +97,13 @@ perception_manager = PerceptionManager()
 
 # 用户状态
 user_state = {
-    "emotion": {"primary": "neutral"},
-    "heart_rate": {"bpm": None},
-    "environment": {"person_present": False},
-    "body_state": {"posture": "unknown"},
-    "eye_state": {"attention_score": 0},
-    "overall": {"fatigue_level": 0, "state_summary": "normal"},
+    "emotion": {"primary": "neutral", "confidence": 0.0, "valence": 0.5, "arousal": 0.5},
+    "heart_rate": {"bpm": None, "hrv": None, "confidence": 0.0, "trend": "stable"},
+    "environment": {"light_level": "normal", "light_value": 0, "person_count": 0, "person_present": False, "person_distance": None, "face_detected": False, "face_id": None},
+    "body_state": {"posture": "unknown", "activity_level": 0.0, "activity_duration": 0, "head_pose": "frontal", "movement_frequency": 0.0, "stillness_duration": 0},
+    "eye_state": {"blink_rate": 0, "blink_frequency": 0.0, "gaze_direction": "screen", "gaze_duration": 0, "attention_score": 0.0, "eye_contact": False},
+    "overall": {"fatigue_level": 0.0, "engagement_level": 0.0, "comfort_level": 0.5, "state_summary": "normal"},
+    "meta": {"last_update": 0, "frame_count": 0, "detection_success": True}
 }
 
 # 感知处理线程
@@ -145,7 +146,7 @@ def perception_worker():
                         with perception_frame_lock:
                             _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
                             perception_frame = jpeg.tobytes()
-                        
+                    
         except Exception as e:
             print(f"[感知线程] 错误: {e}")
             time.sleep(1)
@@ -243,7 +244,7 @@ def api_system_state():
 
 @app.route('/api/health')
 def api_health():
-    """获取用户健康状态"""
+    """获取用户健康状态摘要"""
     return jsonify(perception_manager.get_summary())
 
 @app.route('/api/user_state')
@@ -349,38 +350,11 @@ def handle_game_control(data):
         system_state["game"]["status"] = whack_a_mole.status
         
     elif action == 'stop':
-        # ⭐ 先更新游戏状态
-        whack_a_mole.stop()  # 这会发送 game_update，status = IDLE
-        
-        # 再更新系统状态
         system_state["game"]["active"] = False
         system_state["game"]["name"] = None
         system_state["game"]["status"] = "IDLE"
         system_state["mode"] = "normal"
-        
-        # 发送系统状态
-        socketio.emit('system_state', {"state": system_state})
-        print("[游戏控制] 游戏已停止，状态已同步到所有客户端")
-    
-    elif action == 'timeout_stop':
-        # ⭐ 超时停止：3分钟没人进入灰圈
-        print("[游戏控制] 准备超时，停止游戏并导航回游戏列表")
-        
-        # 停止游戏
         whack_a_mole.stop()
-        
-        # 更新系统状态
-        system_state["game"]["active"] = False
-        system_state["game"]["name"] = None
-        system_state["game"]["status"] = "IDLE"
-        system_state["mode"] = "normal"
-        
-        # 发送状态
-        socketio.emit('system_state', {"state": system_state})
-        
-        # ⭐ 导航平板回游戏列表
-        socketio.emit('navigate_to', {"page": "/learning"})
-        print("[游戏控制] 已发送导航指令，平板返回游戏列表")
     
     elif action == 'restart':
         # 先停止（不发送状态）

@@ -274,7 +274,6 @@
   </div>
 </template>
 
-
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 
@@ -624,7 +623,6 @@ onUnmounted(() => {
   window.removeEventListener('resize', resize)
 })
 </script>
-
 
 <style scoped>
 .dev-page {
