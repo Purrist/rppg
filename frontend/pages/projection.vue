@@ -42,7 +42,7 @@ const readyProgress = ref(0)
 const readyStartTime = ref(0)
 const readyEnterTime = ref(0)
 const READY_DURATION = 3000
-const READY_TIMEOUT = 180000  // 3分钟超时
+const READY_TIMEOUT = 180000
 
 // ==================== 地鼠洞配置 ====================
 const holes = [
@@ -115,7 +115,6 @@ function createParticle() {
 }
 
 function updateParticles() {
-  // 只有PLAYING状态才清除粒子
   if (gameState.value === 'PLAYING') {
     particles = []
     return
@@ -258,13 +257,11 @@ function drawReadyCircle() {
   
   ctx.restore()
   
-  const textYOffset = -250
-  
   ctx.font = 'bold 48px Arial'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
   ctx.fillStyle = '#ffffff'
-  ctx.fillText('请进入圆圈内', mainCanvas.value.width / 2, mainCanvas.value.height / 2 + textYOffset)
+  ctx.fillText('请进入圆圈内', mainCanvas.value.width / 2, mainCanvas.value.height / 2 - 250)
 }
 
 // ==================== 绘制结算界面 ====================
@@ -274,23 +271,19 @@ function drawSettling() {
   ctx.save()
   ctx.scale(scaleX, scaleY)
   
-  // 半透明背景
   ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'
   ctx.fillRect(0, 0, canvasWidth, canvasHeight)
   
-  // 游戏结束文字
   ctx.font = 'bold 72px Arial'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
   ctx.fillStyle = '#FFD700'
   ctx.fillText('游戏结束', canvasWidth / 2, canvasHeight / 2 - 60)
   
-  // 得分
   ctx.font = 'bold 48px Arial'
   ctx.fillStyle = '#ffffff'
   ctx.fillText(`得分: ${game.value.score}`, canvasWidth / 2, canvasHeight / 2 + 20)
   
-  // 准确率
   ctx.font = 'bold 36px Arial'
   ctx.fillStyle = '#888888'
   ctx.fillText(`准确率: ${game.value.accuracy}%`, canvasWidth / 2, canvasHeight / 2 + 80)
@@ -360,7 +353,9 @@ function drawMoleHoles() {
 
 // ==================== 绘制游戏信息 ====================
 function drawGameInfo() {
-  if (!ctx || gameState.value !== 'PLAYING') return
+  if (!ctx) return
+  // ⭐ PLAYING 和 PAUSED 状态都显示游戏信息
+  if (gameState.value !== 'PLAYING' && gameState.value !== 'PAUSED') return
   
   ctx.font = 'bold 40px Arial'
   ctx.textAlign = 'center'
@@ -370,6 +365,27 @@ function drawGameInfo() {
   ctx.font = 'bold 36px Arial'
   ctx.fillStyle = '#FFD700'
   ctx.fillText(`得分: ${game.value.score}`, mainCanvas.value.width / 2, 110)
+}
+
+// ==================== 绘制暂停遮罩 ====================
+function drawPauseOverlay() {
+  if (!ctx) return
+  
+  ctx.save()
+  ctx.scale(scaleX, scaleY)
+  
+  // 半透明遮罩
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.5)'
+  ctx.fillRect(0, 0, canvasWidth, canvasHeight)
+  
+  // 暂停文字
+  ctx.font = 'bold 72px Arial'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillStyle = '#ffffff'
+  ctx.fillText('已暂停', canvasWidth / 2, canvasHeight / 2)
+  
+  ctx.restore()
 }
 
 // ==================== 主绘制循环 ====================
@@ -382,17 +398,19 @@ function draw() {
   updateParticles()
   drawParticles()
   
-  // 根据状态绘制不同内容
   if (gameState.value === 'READY') {
     drawReadyCircle()
   } else if (gameState.value === 'PLAYING') {
     drawMoleHoles()
     drawGameInfo()
+  } else if (gameState.value === 'PAUSED') {
+    // ⭐ 暂停状态：保持游戏界面显示
+    drawMoleHoles()
+    drawGameInfo()
+    drawPauseOverlay()
   } else if (gameState.value === 'SETTLING') {
-    // ⭐ 结算状态：显示游戏结束和成绩
     drawSettling()
   }
-  // IDLE状态：只显示粒子
   
   drawFootPoint()
   
@@ -424,7 +442,6 @@ function updateReadyState() {
     readyProgress.value = 0
   }
   
-  // 3分钟超时，回到待机状态
   if (readyEnterTime.value > 0 && Date.now() - readyEnterTime.value > READY_TIMEOUT) {
     console.log('[投影] 准备超时，回到待机状态')
     gameState.value = 'IDLE'
@@ -433,7 +450,6 @@ function updateReadyState() {
     readyProgress.value = 0
     readyStartTime.value = 0
     if (socket) {
-      // ⭐ 发送超时停止，后端会导航平板回游戏列表
       socket.emit('game_control', { action: 'timeout_stop' })
     }
   }
@@ -507,31 +523,28 @@ async function updateStatus() {
 watch(() => game.value.status, (newStatus, oldStatus) => {
   console.log('[投影] 状态变化:', oldStatus, '->', newStatus)
   
+  gameState.value = newStatus
+  
   if (newStatus === 'IDLE') {
-    gameState.value = 'IDLE'
     readyEnterTime.value = 0
     readyProgress.value = 0
     readyStartTime.value = 0
     holeProgress.value = [0, 0, 0]
     holeStartTime.value = [0, 0, 0]
     holeFeedback.value = [null, null, null]
-    // ⭐ IDLE状态恢复粒子
     initParticles()
   } else if (newStatus === 'READY') {
-    gameState.value = 'READY'
     readyProgress.value = 0
     readyStartTime.value = 0
     readyEnterTime.value = Date.now()
-    // ⭐ READY状态保持粒子
   } else if (newStatus === 'PLAYING') {
-    gameState.value = 'PLAYING'
     holeProgress.value = [0, 0, 0]
     holeStartTime.value = [0, 0, 0]
     holeFeedback.value = [null, null, null]
     particles = []
-  } else if (newStatus === 'SETTLING') {
-    // ⭐ 结算状态
-    gameState.value = 'SETTLING'
+  } else if (newStatus === 'PAUSED') {
+    // ⭐ 暂停状态：保持游戏界面，不做任何重置
+    console.log('[投影] 游戏暂停')
   }
 })
 
@@ -547,21 +560,23 @@ onMounted(() => {
     socket.emit('get_state', { client: 'projection' })
   })
   
-  // ⭐ 监听游戏状态更新
+  // ⭐ 只从 game_update 获取数据，忽略 system_state
   socket.on('game_update', (data) => {
-    console.log('[投影] 收到game_update:', data.status)
-    game.value = { ...game.value, ...data }
+    // 直接更新，不做任何过滤
+    game.value.status = data.status || 'IDLE'
+    game.value.score = data.score || 0
+    game.value.timer = data.timer || 60
+    if (data.extra) {
+      game.value.current_mole = data.extra.current_mole ?? -1
+    }
+    if (data.stats) {
+      game.value.accuracy = data.stats.accuracy || 0
+    }
   })
   
-  // ⭐ 监听系统状态（确保同步）
+  // ⭐ 完全忽略 system_state，避免数据冲突
   socket.on('system_state', (data) => {
-    console.log('[投影] 收到system_state:', data.state?.game?.status)
-    if (data.state && data.state.game) {
-      // 强制同步状态
-      game.value.status = data.state.game.status || 'IDLE'
-      game.value.score = data.state.game.score || 0
-      game.value.timer = data.state.game.timer || 60
-    }
+    // 不做任何处理
   })
   
   setTimeout(() => {

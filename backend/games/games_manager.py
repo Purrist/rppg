@@ -63,6 +63,17 @@ class GameManager:
             self._current_game_id = None
             self._emit_system_state()
     
+    # ⭐ 新增：重新开始（直接进入READY）
+    def restart_game(self, game_id: str = None):
+        """重新开始游戏 - 直接进入READY状态，不经过IDLE"""
+        if game_id and game_id != self._current_game_id:
+            self.create_game(game_id)
+        if self._current_game:
+            # ⭐ 直接调用 restart，不调用 stop
+            self._current_game.restart()
+            # ⭐ 发送 system_state，但此时 is_game_active() 返回 True（因为 READY 算激活）
+            self._emit_system_state()
+    
     def handle_action(self, action: str, data: Dict):
         if self._current_game:
             self._current_game.handle_action(action, data)
@@ -76,7 +87,12 @@ class GameManager:
         return self._current_game.state.status if self._current_game else "IDLE"
     
     def is_game_active(self) -> bool:
-        return self._current_game.state.status not in ["IDLE"] if self._current_game else False
+        """游戏是否激活 - READY/PLAYING/PAUSED/SETTLING 都算激活"""
+        if not self._current_game:
+            return False
+        status = self._current_game.state.status
+        # ⭐ READY 和 PAUSED 也算激活，这样 restart 不会导致平板返回游戏列表
+        return status in ["READY", "PLAYING", "PAUSED", "SETTLING"]
     
     def get_current_game_id(self) -> Optional[str]:
         return self._current_game_id

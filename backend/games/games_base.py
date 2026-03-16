@@ -106,6 +106,18 @@ class GameBase(ABC):
         self._on_settling()
         self._emit_state()
     
+    # ⭐ 重置到准备状态（不经过IDLE）
+    def restart(self):
+        """重新开始 - 直接进入READY状态"""
+        self.state.status = "READY"
+        self.state.score = 0
+        self.state.timer = self.config.duration
+        self._total_paused = 0
+        self._start_time = 0
+        self._paused_time = 0
+        self._on_ready()
+        self._emit_state()
+    
     # 更新
     def update(self, perception_data: Optional[Dict] = None):
         if self.state.status == "SETTLING":
@@ -123,6 +135,9 @@ class GameBase(ABC):
                 return
             
             self._on_update(perception_data)
+            
+            # ⭐ 每次update都广播状态，确保前端实时同步
+            self._emit_state()
     
     # 交互
     def handle_action(self, action: str, data: Dict):

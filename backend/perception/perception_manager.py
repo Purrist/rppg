@@ -40,20 +40,26 @@ class PerceptionManager:
         )
     
     def process_frame(self, frame, source="tablet") -> Dict[str, Any]:
-        """处理帧，返回用户状态"""
+        """处理帧，返回用户状态 - 优化版"""
         if frame is None:
             return self.user_state
         
         with self.lock:
             try:
+                # ⭐ 缩小图像加速处理
                 h, w = frame.shape[:2]
+                if w > 320:
+                    scale = 320 / w
+                    frame = cv2.resize(frame, (320, int(h * scale)))
+                    h, w = frame.shape[:2]
+                
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 
                 # 1. 环境检测
                 self._detect_environment(frame, gray)
                 
-                # 2. 人脸检测
-                faces = self.face_cascade.detectMultiScale(gray, 1.3, 5)
+                # 2. 人脸检测 - 使用更快的参数
+                faces = self.face_cascade.detectMultiScale(gray, 1.4, 6, minSize=(30, 30))
                 person_present = len(faces) > 0
                 
                 self.user_state["environment"]["person_present"] = person_present
@@ -70,7 +76,7 @@ class PerceptionManager:
                 self._calculate_overall()
                 
             except Exception as e:
-                print(f"[PerceptionManager] 处理错误: {e}")
+                pass  # ⭐ 静默处理错误
         
         return self.user_state
     

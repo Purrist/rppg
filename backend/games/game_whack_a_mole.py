@@ -63,6 +63,7 @@ class WhackAMoleGame(GameBase):
     def _on_start(self):
         self.last_mole_time = time.time()
         self.current_mole = -1
+        self.state.extra["current_mole"] = -1
         print("[打地鼠] 游戏开始！")
     
     def _on_update(self, perception_data: Optional[Dict]):
@@ -83,6 +84,7 @@ class WhackAMoleGame(GameBase):
     
     def _on_stop(self):
         self.current_mole = -1
+        self.state.extra["current_mole"] = -1
         print("[打地鼠] 游戏结束")
     
     def _on_settling(self):
@@ -102,20 +104,23 @@ class WhackAMoleGame(GameBase):
         print(f"[打地鼠] 难度设置为: {difficulty}")
     
     def _spawn_mole(self):
+        """生成地鼠 - 不发送状态，由 update() 统一发送"""
         self.current_mole = random.randint(0, 2)
         self.mole_appear_time = time.time()
         self.state.extra["current_mole"] = self.current_mole
-        self._emit_state()
+        # ⭐ 不调用 _emit_state()，由 update() 统一发送
     
     def _miss_mole(self):
+        """地鼠逃跑 - 不发送状态，由 update() 统一发送"""
         self.state.score = max(0, self.state.score - 5)
         self.missed_moles += 1
         self.current_mole = -1
         self.state.extra["current_mole"] = -1
         self.last_mole_time = time.time()
-        self._emit_state()
+        # ⭐ 不调用 _emit_state()，由 update() 统一发送
     
     def _handle_hit(self, zone: int, success: bool):
+        """处理踩踏 - 立即发送状态（用户交互需要即时反馈）"""
         self.total_hits += 1
         if success and zone == self.current_mole:
             self.state.score += 10
@@ -123,7 +128,7 @@ class WhackAMoleGame(GameBase):
             self.current_mole = -1
             self.state.extra["current_mole"] = -1
             self.last_mole_time = time.time()
-            self._emit_state()
+            self._emit_state()  # ⭐ 用户交互需要即时反馈
     
     def _handle_zone_enter(self, zone: int):
         if self.current_mole != -1 and zone == self.current_mole:

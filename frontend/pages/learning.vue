@@ -75,11 +75,13 @@ onMounted(() => {
     }
   })
   
+  // ⭐ system_state 只用于检测游戏是否完全停止
   socket.on('system_state', (data) => {
-    // 如果游戏状态变为IDLE，返回游戏列表
-    if (data.state && data.state.game && data.state.game.status === 'IDLE') {
-      if (data.state.game.active === false) {
-        router.push('/learning')
+    // ⭐ 只有当 active=false 且 status=IDLE 时才返回游戏列表
+    // restart 时 active=true（因为 READY 算激活），不会触发返回
+    if (data.state && data.state.game) {
+      if (data.state.game.active === false && data.state.game.status === 'IDLE') {
+        // 已经在 learning 页面，不需要跳转
       }
     }
   })
@@ -93,7 +95,7 @@ const startGame = (gameName) => {
   console.log('[益智] 开始游戏:', gameName)
   
   if (socket && socket.connected) {
-    // ⭐ 发送ready，等待状态变为READY后自动跳转
+    // ⭐ 发送 ready，等待后端返回 READY 状态后自动跳转
     socket.emit('game_control', { action: 'ready', game: gameName })
   } else {
     alert('后端未连接，请稍后重试')

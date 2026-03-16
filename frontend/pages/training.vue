@@ -1,5 +1,6 @@
 <template>
   <div class="training-container">
+    
     <!-- 结算状态 -->
     <div v-if="game.status === 'SETTLING'" class="settling-view">
       <h1 class="settling-title">游戏结束</h1>
@@ -59,6 +60,10 @@
     <!-- 暂停状态 -->
     <div v-else-if="game.status === 'PAUSED'" class="paused-view">
       <h1>⏸ 游戏已暂停</h1>
+      <div class="pause-info">
+        <span>得分: {{ game.score }}</span>
+        <span>剩余: {{ game.timer }}s</span>
+      </div>
       <div class="pause-buttons">
         <button @click="resumeGame" class="resume-btn">▶ 继续游戏</button>
         <button @click="restartGame" class="restart-btn">🔄 重新开始</button>
@@ -66,22 +71,22 @@
       </div>
     </div>
     
-    <!-- 加载中 -->
-    <div v-else class="loading-view">
-      <div class="loading-text">加载中...</div>
+    <!-- IDLE状态 - 显示提示而不是加载中 -->
+    <div v-else class="ready-view">
+      <div class="center-hint">正在连接...</div>
+      <div class="hint-sub">请稍候</div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { io } from 'socket.io-client'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
-const game = ref({ status: 'LOADING', score: 0, timer: 60, accuracy: 0, current_mole: -1 })
+const game = ref({ status: 'IDLE', score: 0, timer: 60, accuracy: 0, current_mole: -1 })
 const isExiting = ref(false)
-const isRestarting = ref(false)
 let socket = null
 
 const getBackendHost = () => {
@@ -91,26 +96,6 @@ const getBackendHost = () => {
 
 const FLASK_PORT = 5000
 const backendUrl = `http://${getBackendHost()}:${FLASK_PORT}`
-
-// ⭐ 监听游戏状态
-watch(() => game.value.status, (newStatus) => {
-  // ⭐ 如果正在重新开始，忽略IDLE状态
-  if (newStatus === 'IDLE' && !isRestarting.value) {
-    console.log('[训练页] 游戏已停止，返回游戏列表')
-    router.push('/learning')
-  }
-  
-  // ⭐ 收到READY状态，重置重新开始标记
-  if (newStatus === 'READY') {
-    console.log('[训练页] 进入准备状态')
-    isRestarting.value = false
-  }
-  
-  // ⭐ 结算状态不返回游戏列表
-  if (newStatus === 'SETTLING') {
-    console.log('[训练页] 进入结算状态')
-  }
-})
 
 onMounted(() => {
   socket = io(backendUrl, {
@@ -123,27 +108,26 @@ onMounted(() => {
     socket.emit('get_state', { client: 'training' })
   })
   
+  // ⭐ 只从 game_update 获取数据
   socket.on('game_update', (data) => {
-    // ⭐ 如果正在重新开始，忽略IDLE状态
-    if (data.status === 'IDLE' && isRestarting.value) {
-      console.log('[训练页] 忽略重新开始过程中的IDLE状态')
-      return
+    console.log('[训练页] game_update:', data.status, 'timer:', data.timer)
+    game.value = {
+      status: data.status || 'IDLE',
+      score: data.score || 0,
+      timer: data.timer || 60,
+      accuracy: data.stats?.accuracy || 0,
+      current_mole: data.extra?.current_mole ?? -1
     }
-    game.value = data
-    console.log('[训练页] 游戏状态:', data.status)
   })
   
+  // ⭐ system_state 只用于检测游戏是否完全停止
   socket.on('system_state', (data) => {
     if (data.state && data.state.game) {
-      // ⭐ 如果正在重新开始，忽略IDLE状态
-      if (data.state.game.status === 'IDLE' && isRestarting.value) {
-        console.log('[训练页] 忽略system_state中的IDLE状态')
-        return
+      // ⭐ 只有当 active=false 且 status=IDLE 时才返回游戏列表
+      if (data.state.game.active === false && data.state.game.status === 'IDLE') {
+        console.log('[训练页] 游戏已停止，返回游戏列表')
+        router.push('/learning')
       }
-      game.value.status = data.state.game.status || 'IDLE'
-      game.value.score = data.state.game.score || 0
-      game.value.timer = data.state.game.timer || 60
-      game.value.accuracy = data.state.game.accuracy || 0
     }
   })
   
@@ -172,12 +156,10 @@ const resumeGame = () => {
 const restartGame = () => {
   if (socket && socket.connected) {
     console.log('[训练页] 重新开始游戏')
-    isRestarting.value = true
     socket.emit('game_control', { action: 'restart', game: 'whack_a_mole' })
   }
 }
 
-// ⭐ 结束游戏：进入结算状态
 const endGame = () => {
   if (socket && socket.connected) {
     console.log('[训练页] 结束游戏')
@@ -185,7 +167,6 @@ const endGame = () => {
   }
 }
 
-// ⭐ 退出游戏：从准备状态退出
 const exitGame = () => {
   if (isExiting.value) return
   
@@ -196,7 +177,6 @@ const exitGame = () => {
     socket.emit('game_control', { action: 'stop' })
   }
   
-  // ⭐ 延迟跳转，确保状态同步完成
   setTimeout(() => {
     router.push('/learning')
   }, 100)
@@ -213,7 +193,7 @@ const exitGame = () => {
   flex-direction: column;
 }
 
-/* ⭐ 结算状态样式 */
+/* 结算状态样式 */
 .settling-view {
   flex: 1;
   display: flex;
@@ -429,7 +409,15 @@ const exitGame = () => {
 .paused-view h1 { 
   font-size: 48px; 
   color: #333; 
-  margin-bottom: 40px; 
+  margin-bottom: 20px; 
+}
+
+.pause-info {
+  display: flex;
+  gap: 40px;
+  font-size: 24px;
+  color: #666;
+  margin-bottom: 40px;
 }
 
 .pause-buttons { 
@@ -468,17 +456,5 @@ const exitGame = () => {
   font-weight: bold; 
   border: none;
   cursor: pointer;
-}
-
-.loading-view {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.loading-text {
-  font-size: 32px;
-  color: #888;
 }
 </style>

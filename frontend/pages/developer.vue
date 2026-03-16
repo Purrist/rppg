@@ -614,7 +614,7 @@ onMounted(async () => {
   
   resize()
   requestAnimationFrame(draw)
-  interval = setInterval(updateStatus, 200)  // 200ms更新一次
+  interval = setInterval(updateStatus, 500)  // 500ms更新一次，与后端同步
   window.addEventListener('resize', resize)
 })
 

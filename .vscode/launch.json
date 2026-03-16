@@ -13,20 +13,17 @@
       ]
     },    
     {
-      "name": "一键转化",
-      "type": "debugpy",
-      "request": "launch",
-      "program": "convert.py",
-      "cwd": "${workspaceFolder}/"
-    },
-    {
       "name": "前端 (Nuxt)",
-      "type": "node-terminal",
+      "type": "pwa-node",           // 改为 pwa-node
       "request": "launch",
-      "command": "npm run dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
       "cwd": "${workspaceFolder}/frontend",
-      "console": "integratedTerminal"
-    },
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",  // 不自动打开控制台
+      "restart": true,                         // 自动重启
+      "autoAttachChildProcesses": true         // 附加子进程
+    }
   ],
   "compounds": [
     {
