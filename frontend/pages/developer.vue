@@ -8,194 +8,55 @@
       </div>
     </header>
     
-    <!-- 感知信息面板 -->
-    <section class="perception-panel">
-      <h2>📊 感知信息</h2>
-      <div class="perception-grid">
-        <!-- 情绪状态 -->
-        <div class="p-card emotion">
-          <div class="p-header">
-            <span class="p-icon">😊</span>
-            <span class="p-title">情绪状态</span>
-          </div>
-          <div class="p-content">
-            <div class="p-main">{{ userState.emotion?.primary || '--' }}</div>
-            <div class="p-details">
-              <div class="p-row">
-                <span class="p-label">效价</span>
-                <div class="p-bar">
-                  <div class="p-fill" :style="{ width: (userState.emotion?.valence || 0.5) * 100 + '%' }"></div>
-                </div>
-                <span class="p-val">{{ ((userState.emotion?.valence || 0.5) * 100).toFixed(0) }}%</span>
-              </div>
-              <div class="p-row">
-                <span class="p-label">唤醒</span>
-                <div class="p-bar">
-                  <div class="p-fill arousal" :style="{ width: (userState.emotion?.arousal || 0.5) * 100 + '%' }"></div>
-                </div>
-                <span class="p-val">{{ ((userState.emotion?.arousal || 0.5) * 100).toFixed(0) }}%</span>
-              </div>
-            </div>
-          </div>
+    <!-- ⭐ 核心状态卡片 -->
+    <section class="core-status">
+      <!-- 有人/无人 -->
+      <div class="person-card" :class="personDetected ? 'detected' : 'not-detected'">
+        <div class="person-icon">{{ personDetected ? '👤' : '🚫' }}</div>
+        <div class="person-text">{{ personDetected ? '有人' : '无人' }}</div>
+      </div>
+      
+      <!-- 10个高价值数据卡片 -->
+      <div class="data-cards">
+        <div class="data-card">
+          <span class="d-label">人数</span>
+          <span class="d-value">{{ personDetected ? userState.face_count : '--' }}</span>
         </div>
-        
-        <!-- 心率状态 -->
-        <div class="p-card heart">
-          <div class="p-header">
-            <span class="p-icon">❤️</span>
-            <span class="p-title">心率状态</span>
-          </div>
-          <div class="p-content">
-            <div class="p-main">
-              <span class="bpm-num">{{ userState.heart_rate?.bpm || '--' }}</span>
-              <span class="bpm-unit">BPM</span>
-            </div>
-            <div class="p-details">
-              <div class="p-row">
-                <span class="p-label">HRV</span>
-                <span class="p-val">{{ userState.heart_rate?.hrv?.toFixed(0) || '--' }} ms</span>
-              </div>
-              <div class="p-row">
-                <span class="p-label">趋势</span>
-                <span class="p-val" :class="'trend-' + userState.heart_rate?.trend">
-                  {{ trendText[userState.heart_rate?.trend] || '--' }}
-                </span>
-              </div>
-              <div class="p-row">
-                <span class="p-label">置信度</span>
-                <span class="p-val">{{ ((userState.heart_rate?.confidence || 0) * 100).toFixed(0) }}%</span>
-              </div>
-            </div>
-          </div>
+        <div class="data-card">
+          <span class="d-label">心率</span>
+          <span class="d-value">{{ personDetected && userState.heart_rate ? userState.heart_rate + ' BPM' : '--' }}</span>
         </div>
-        
-        <!-- 环境状态 -->
-        <div class="p-card environment">
-          <div class="p-header">
-            <span class="p-icon">🏠</span>
-            <span class="p-title">环境状态</span>
-          </div>
-          <div class="p-content">
-            <div class="p-details">
-              <div class="p-row">
-                <span class="p-label">光照</span>
-                <span class="p-val" :class="'light-' + userState.environment?.light_level">
-                  {{ lightText[userState.environment?.light_level] || '--' }}
-                </span>
-              </div>
-              <div class="p-row">
-                <span class="p-label">人数</span>
-                <span class="p-val">{{ userState.environment?.person_count || 0 }}</span>
-              </div>
-              <div class="p-row">
-                <span class="p-label">距离</span>
-                <span class="p-val">{{ userState.environment?.person_distance?.toFixed(1) || '--' }} m</span>
-              </div>
-              <div class="p-row">
-                <span class="p-label">人脸</span>
-                <span class="p-val" :class="userState.environment?.face_detected ? 'ok' : 'err'">
-                  {{ userState.environment?.face_detected ? '✓ 检测到' : '✗ 未检测' }}
-                </span>
-              </div>
-            </div>
-          </div>
+        <div class="data-card">
+          <span class="d-label">眨眼</span>
+          <span class="d-value">{{ personDetected ? userState.blink_count + '次/30s' : '--' }}</span>
         </div>
-        
-        <!-- 身体状态 -->
-        <div class="p-card body">
-          <div class="p-header">
-            <span class="p-icon">🧍</span>
-            <span class="p-title">身体状态</span>
-          </div>
-          <div class="p-content">
-            <div class="p-main">{{ postureText[userState.body_state?.posture] || '--' }}</div>
-            <div class="p-details">
-              <div class="p-row">
-                <span class="p-label">活动量</span>
-                <div class="p-bar">
-                  <div class="p-fill activity" :style="{ width: (userState.body_state?.activity_level || 0) * 100 + '%' }"></div>
-                </div>
-                <span class="p-val">{{ ((userState.body_state?.activity_level || 0) * 100).toFixed(0) }}%</span>
-              </div>
-              <div class="p-row">
-                <span class="p-label">头部</span>
-                <span class="p-val">{{ headPoseText[userState.body_state?.head_pose] || '--' }}</span>
-              </div>
-              <div class="p-row">
-                <span class="p-label">动作频率</span>
-                <span class="p-val">{{ (userState.body_state?.movement_frequency || 0).toFixed(1) }}/min</span>
-              </div>
-            </div>
-          </div>
+        <div class="data-card">
+          <span class="d-label">眼睛</span>
+          <span class="d-value" :class="userState.eye_state">{{ personDetected ? eyeStateText[userState.eye_state] : '--' }}</span>
         </div>
-        
-        <!-- 眼部状态 -->
-        <div class="p-card eye">
-          <div class="p-header">
-            <span class="p-icon">👁️</span>
-            <span class="p-title">眼部状态</span>
-          </div>
-          <div class="p-content">
-            <div class="p-details">
-              <div class="p-row">
-                <span class="p-label">眨眼频率</span>
-                <span class="p-val">{{ userState.eye_state?.blink_rate || 0 }}/min</span>
-              </div>
-              <div class="p-row">
-                <span class="p-label">注视方向</span>
-                <span class="p-val">{{ gazeText[userState.eye_state?.gaze_direction] || '--' }}</span>
-              </div>
-              <div class="p-row">
-                <span class="p-label">注意力</span>
-                <div class="p-bar">
-                  <div class="p-fill attention" :style="{ width: (userState.eye_state?.attention_score || 0) * 100 + '%' }"></div>
-                </div>
-                <span class="p-val">{{ ((userState.eye_state?.attention_score || 0) * 100).toFixed(0) }}%</span>
-              </div>
-              <div class="p-row">
-                <span class="p-label">眼神接触</span>
-                <span class="p-val" :class="userState.eye_state?.eye_contact ? 'ok' : 'err'">
-                  {{ userState.eye_state?.eye_contact ? '✓' : '✗' }}
-                </span>
-              </div>
-            </div>
-          </div>
+        <div class="data-card">
+          <span class="d-label">头部</span>
+          <span class="d-value">{{ personDetected ? headDirText[userState.head_direction] : '--' }}</span>
         </div>
-        
-        <!-- 综合状态 -->
-        <div class="p-card overall">
-          <div class="p-header">
-            <span class="p-icon">🧠</span>
-            <span class="p-title">综合状态</span>
-          </div>
-          <div class="p-content">
-            <div class="p-main" :class="'summary-' + userState.overall?.state_summary">
-              {{ summaryText[userState.overall?.state_summary] || '--' }}
-            </div>
-            <div class="p-details">
-              <div class="p-row">
-                <span class="p-label">疲劳度</span>
-                <div class="p-bar">
-                  <div class="p-fill fatigue" :style="{ width: (userState.overall?.fatigue_level || 0) * 100 + '%' }"></div>
-                </div>
-                <span class="p-val">{{ ((userState.overall?.fatigue_level || 0) * 100).toFixed(0) }}%</span>
-              </div>
-              <div class="p-row">
-                <span class="p-label">参与度</span>
-                <div class="p-bar">
-                  <div class="p-fill engagement" :style="{ width: (userState.overall?.engagement_level || 0) * 100 + '%' }"></div>
-                </div>
-                <span class="p-val">{{ ((userState.overall?.engagement_level || 0) * 100).toFixed(0) }}%</span>
-              </div>
-              <div class="p-row">
-                <span class="p-label">舒适度</span>
-                <div class="p-bar">
-                  <div class="p-fill comfort" :style="{ width: (userState.overall?.comfort_level || 0.5) * 100 + '%' }"></div>
-                </div>
-                <span class="p-val">{{ ((userState.overall?.comfort_level || 0.5) * 100).toFixed(0) }}%</span>
-              </div>
-            </div>
-          </div>
+        <div class="data-card">
+          <span class="d-label">微笑</span>
+          <span class="d-value" :class="userState.is_smiling ? 'smile' : ''">{{ personDetected ? (userState.is_smiling ? '😊 是' : '😐 否') : '--' }}</span>
+        </div>
+        <div class="data-card">
+          <span class="d-label">亮度</span>
+          <span class="d-value" :class="'light-' + userState.light_level">{{ lightText[userState.light_level] }}</span>
+        </div>
+        <div class="data-card">
+          <span class="d-label">姿态</span>
+          <span class="d-value">{{ personDetected ? postureText[userState.posture] : '--' }}</span>
+        </div>
+        <div class="data-card">
+          <span class="d-label">活动</span>
+          <span class="d-value">{{ personDetected ? Math.round(userState.activity_level * 100) + '%' : '--' }}</span>
+        </div>
+        <div class="data-card">
+          <span class="d-label">注意力</span>
+          <span class="d-value">{{ personDetected ? Math.round(userState.attention_score * 100) + '%' : '--' }}</span>
         </div>
       </div>
     </section>
@@ -290,12 +151,10 @@ const correctedUrl = `${baseUrl}/corrected_feed`
 const tabletVideoUrl = `${baseUrl}/tablet_video_feed`
 
 // ==================== 文本映射 ====================
-const trendText = { 'stable': '稳定', 'rising': '上升', 'falling': '下降' }
-const lightText = { 'dark': '黑暗', 'dim': '昏暗', 'normal': '正常', 'bright': '明亮' }
-const postureText = { 'sitting': '坐着', 'standing': '站立', 'walking': '走动', 'lying': '躺下', 'unknown': '未知' }
-const headPoseText = { 'frontal': '正面', 'left': '左转', 'right': '右转', 'up': '抬头', 'down': '低头' }
-const gazeText = { 'screen': '看屏幕', 'away': '看别处', 'closed': '闭眼', 'unknown': '未知' }
-const summaryText = { 'normal': '正常', 'fatigued': '疲劳', 'engaged': '专注', 'uncomfortable': '不适' }
+const eyeStateText = { 'open': '睁眼', 'closed': '闭眼', 'partial': '半睁', 'unknown': '未知' }
+const headDirText = { 'front': '正面', 'left': '左转', 'right': '右转', 'up': '抬头', 'down': '低头', 'far': '远处', 'unknown': '未知' }
+const lightText = { 'dark': '暗', 'normal': '正常', 'bright': '亮' }
+const postureText = { 'standing': '站立', 'sitting': '坐着', 'unknown': '未知' }
 
 // ==================== 状态 ====================
 const connected = ref(false)
@@ -305,7 +164,6 @@ const correctedCanvas = ref(null)
 // 编辑状态
 const isEditing = ref(false)
 const savedCorners = ref(null)
-
 const corners = ref([[0.15, 0.2], [0.85, 0.2], [0.85, 0.85], [0.15, 0.85]])
 
 const status = reactive({
@@ -314,15 +172,23 @@ const status = reactive({
   feet_y: 180
 })
 
-// 用户状态（感知信息）
+// ⭐ 用户状态（简化版 - 10个高价值数据）
 const userState = reactive({
-  emotion: { primary: 'neutral', valence: 0.5, arousal: 0.5 },
-  heart_rate: { bpm: null, hrv: null, trend: 'stable', confidence: 0 },
-  environment: { light_level: 'normal', person_count: 0, person_distance: null, face_detected: false },
-  body_state: { posture: 'unknown', activity_level: 0, head_pose: 'frontal', movement_frequency: 0 },
-  eye_state: { blink_rate: 0, gaze_direction: 'unknown', attention_score: 0, eye_contact: false },
-  overall: { fatigue_level: 0, engagement_level: 0, comfort_level: 0.5, state_summary: 'normal' }
+  person_detected: false,
+  face_count: 0,
+  heart_rate: null,
+  blink_count: 0,
+  eye_state: 'unknown',
+  head_direction: 'unknown',
+  is_smiling: false,
+  light_level: 'normal',
+  posture: 'unknown',
+  activity_level: 0,
+  attention_score: 0,
 })
+
+// 计算属性
+const personDetected = computed(() => userState.person_detected)
 
 const gameState = reactive({
   status: 'IDLE',
@@ -464,15 +330,13 @@ async function updateStatus() {
       }
     }
     
-    // 用户状态（感知信息）
+    // ⭐ 用户状态（感知信息）
     const ur = await fetch(`${baseUrl}/api/user_state`)
     if (ur.ok) {
       const ud = await ur.json()
-      // 深度合并
+      // 直接赋值
       for (const key in ud) {
-        if (typeof ud[key] === 'object' && ud[key] !== null) {
-          userState[key] = { ...userState[key], ...ud[key] }
-        } else {
+        if (key in userState) {
           userState[key] = ud[key]
         }
       }
@@ -614,7 +478,7 @@ onMounted(async () => {
   
   resize()
   requestAnimationFrame(draw)
-  interval = setInterval(updateStatus, 500)  // 500ms更新一次，与后端同步
+  interval = setInterval(updateStatus, 500)  // 500ms更新一次
   window.addEventListener('resize', resize)
 })
 
@@ -658,131 +522,81 @@ onUnmounted(() => {
 .conn-badge.ok { background: rgba(51, 181, 85, 0.2); color: #33B555; }
 .conn-badge.err { background: rgba(255, 68, 68, 0.2); color: #ff6b6b; }
 
-/* 感知面板 */
-.perception-panel {
-  margin-bottom: 25px;
-}
-
-.perception-panel h2 {
-  font-size: 18px;
-  margin-bottom: 15px;
-  color: #fff;
-}
-
-.perception-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 15px;
-}
-
-.p-card {
-  background: rgba(255,255,255,0.05);
-  border-radius: 16px;
-  padding: 16px;
-  border: 1px solid rgba(255,255,255,0.1);
-}
-
-.p-header {
+/* ⭐ 核心状态 */
+.core-status {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 12px;
+  gap: 15px;
+  margin-bottom: 25px;
+  flex-wrap: wrap;
 }
 
-.p-icon {
-  font-size: 24px;
-}
-
-.p-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: #fff;
-}
-
-.p-content {
-  padding-left: 34px;
-}
-
-.p-main {
-  font-size: 28px;
-  font-weight: 700;
-  margin-bottom: 10px;
-}
-
-.bpm-num {
-  font-size: 42px;
-  color: #ff6b6b;
-}
-
-.bpm-unit {
-  font-size: 16px;
-  color: #888;
-  margin-left: 5px;
-}
-
-.p-details {
+/* 有人/无人卡片 */
+.person-card {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-}
-
-.p-row {
-  display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: center;
+  padding: 20px 30px;
+  border-radius: 16px;
+  min-width: 120px;
+  transition: all 0.3s;
 }
 
-.p-label {
+.person-card.detected {
+  background: linear-gradient(135deg, #33B555 0%, #228B22 100%);
+  box-shadow: 0 4px 20px rgba(51, 181, 85, 0.3);
+}
+
+.person-card.not-detected {
+  background: rgba(255,255,255,0.05);
+  border: 2px dashed rgba(255,255,255,0.2);
+}
+
+.person-icon {
+  font-size: 48px;
+  margin-bottom: 8px;
+}
+
+.person-text {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+/* 数据卡片容器 */
+.data-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  flex: 1;
+}
+
+.data-card {
+  background: rgba(255,255,255,0.05);
+  border-radius: 12px;
+  padding: 12px 16px;
+  min-width: 90px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.d-label {
   font-size: 12px;
   color: #888;
-  width: 60px;
-  flex-shrink: 0;
+  margin-bottom: 4px;
 }
 
-.p-val {
-  font-size: 14px;
-  font-weight: 500;
+.d-value {
+  font-size: 16px;
+  font-weight: 600;
 }
 
-.p-bar {
-  flex: 1;
-  height: 6px;
-  background: rgba(255,255,255,0.1);
-  border-radius: 3px;
-  overflow: hidden;
-}
-
-.p-fill {
-  height: 100%;
-  background: #FF7222;
-  border-radius: 3px;
-  transition: width 0.3s;
-}
-
-.p-fill.arousal { background: #2196F3; }
-.p-fill.activity { background: #33B555; }
-.p-fill.attention { background: #9C27B0; }
-.p-fill.fatigue { background: #ff6b6b; }
-.p-fill.engagement { background: #FFD111; }
-.p-fill.comfort { background: #00BCD4; }
-
-/* 状态颜色 */
-.ok { color: #33B555; }
-.err { color: #ff6b6b; }
-
-.trend-stable { color: #888; }
-.trend-rising { color: #ff6b6b; }
-.trend-falling { color: #2196F3; }
-
-.light-dark { color: #666; }
-.light-dim { color: #888; }
-.light-normal { color: #33B555; }
-.light-bright { color: #FFD111; }
-
-.summary-normal { color: #33B555; }
-.summary-fatigued { color: #ff6b6b; }
-.summary-engaged { color: #FFD111; }
-.summary-uncomfortable { color: #FB4422; }
+.d-value.open { color: #33B555; }
+.d-value.closed { color: #ff6b6b; }
+.d-value.smile { color: #FFD700; }
+.d-value.light-dark { color: #666; }
+.d-value.light-normal { color: #33B555; }
+.d-value.light-bright { color: #FFD700; }
 
 /* 状态卡片 */
 .status-row {
@@ -811,6 +625,9 @@ onUnmounted(() => {
   font-size: 20px;
   font-weight: 600;
 }
+
+.ok { color: #33B555; }
+.err { color: #ff6b6b; }
 
 .s-IDLE { color: #888; }
 .s-READY { color: #FF7222; }

@@ -102,13 +102,13 @@ user_state = {
 perception_frame = None
 perception_frame_lock = threading.Lock()
 _last_perception_time = 0
-PERCEPTION_INTERVAL = 0.5  # 500ms处理一次感知，平衡性能和实时性
+PERCEPTION_INTERVAL = 0.5  # 500ms处理一次感知
 
 def perception_worker():
     """感知处理线程 - 优化版"""
     import urllib.request
     
-    global perception_frame, user_state, _last_perception_time
+    global perception_frame, _last_perception_time
     tablet_url = TABLET_VIDEO_URL
     
     print(f"[感知线程] 启动，连接: {tablet_url}")
@@ -119,7 +119,7 @@ def perception_worker():
             bytes_data = bytes()
             
             while True:
-                bytes_data += stream.read(4096)  # 增加读取大小
+                bytes_data += stream.read(4096)
                 a = bytes_data.find(b'\xff\xd8')
                 b = bytes_data.find(b'\xff\xd9')
                 
@@ -148,10 +148,10 @@ def perception_worker():
             time.sleep(1)
 
 # ============================================================================
-# Agent循环 - 降低频率
+# Agent循环
 # ============================================================================
 def agent_loop():
-    """Agent持续运行循环 - 降低频率"""
+    """Agent持续运行循环"""
     print("[Agent循环] 启动")
     
     while True:
@@ -165,11 +165,11 @@ def agent_loop():
                 if decision.get("need_action"):
                     action_executor.execute(decision)
             
-            time.sleep(1.0)  # ⭐ 降低到1秒检查一次
+            time.sleep(0.5)
             
         except Exception as e:
             print(f"[Agent循环] 错误: {e}")
-            time.sleep(2)
+            time.sleep(1)
 
 # ============================================================================
 # 静态文件
@@ -278,7 +278,8 @@ def api_health():
 
 @app.route('/api/user_state')
 def api_user_state():
-    return jsonify(user_state)
+    """获取用户状态（感知信息）"""
+    return jsonify(perception_manager.get_state())
 
 @app.route('/api/world_state')
 def api_world_state():
@@ -444,7 +445,6 @@ def handle_get_state(data=None):
         if not game_manager.is_game_active():
             socketio.emit('navigate_to', {"page": "/"})
     
-    # ⭐ 发送 system_state
     socketio.emit('system_state', {
         "state": {
             "mode": "game" if game_manager.is_game_active() else "normal",
@@ -452,18 +452,9 @@ def handle_get_state(data=None):
                 "active": game_manager.is_game_active(),
                 "name": game_manager.get_current_game_id(),
                 "status": game_manager.get_game_status(),
-                "score": game_manager.get_game_state().get("score", 0) if game_manager.get_game_state() else 0,
-                "timer": game_manager.get_game_state().get("timer", 0) if game_manager.get_game_state() else 0,
             }
         }
     })
-    
-    # ⭐ 如果游戏激活，也发送 game_update
-    if game_manager.is_game_active() and game_manager.get_game_state():
-        socketio.emit('game_update', {
-            "game_id": game_manager.get_current_game_id(),
-            **game_manager.get_game_state()
-        })
 
 # ============================================================================
 # 后台任务

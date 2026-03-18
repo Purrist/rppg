@@ -6,47 +6,70 @@ import numpy as np
 
 
 def draw_detection_info(frame, user_state: dict):
-    """在帧上绘制检测信息"""
+    """在帧上绘制检测信息 - 兼容新版数据结构"""
     if frame is None:
         return frame
     
     y = 30
     
-    # 情绪
-    emotion = user_state.get('emotion', {})
-    cv2.putText(frame, f"Emotion: {emotion.get('primary', 'unknown')}", (10, y), 
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-    y += 25
-    
-    # 心率
-    hr = user_state.get('heart_rate', {}).get('bpm')
-    hr_text = f"HR: {hr:.0f} BPM" if hr else "HR: -- BPM"
-    cv2.putText(frame, hr_text, (10, y), 
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-    y += 25
-    
     # 是否有人
-    env = user_state.get('environment', {})
-    person = env.get('person_present', False)
+    person = user_state.get('person_detected', False)
     cv2.putText(frame, f"Person: {'Yes' if person else 'No'}", (10, y), 
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
     y += 25
     
-    # 光照
-    light = env.get('light_level', 'unknown')
+    # 人数
+    face_count = user_state.get('face_count', 0)
+    cv2.putText(frame, f"Faces: {face_count}", (10, y), 
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+    y += 25
+    
+    # 心率
+    hr = user_state.get('heart_rate')
+    hr_text = f"HR: {hr} BPM" if hr else "HR: -- BPM"
+    cv2.putText(frame, hr_text, (10, y), 
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+    y += 25
+    
+    # 眼睛状态
+    eye_state = user_state.get('eye_state', 'unknown')
+    cv2.putText(frame, f"Eyes: {eye_state}", (10, y), 
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+    y += 25
+    
+    # 头部朝向
+    head_dir = user_state.get('head_direction', 'unknown')
+    cv2.putText(frame, f"Head: {head_dir}", (10, y), 
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+    y += 25
+    
+    # 微笑
+    smiling = user_state.get('is_smiling', False)
+    cv2.putText(frame, f"Smile: {'Yes' if smiling else 'No'}", (10, y), 
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+    y += 25
+    
+    # 亮度
+    light = user_state.get('light_level', 'unknown')
     cv2.putText(frame, f"Light: {light}", (10, y), 
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
     y += 25
     
-    # 注意力
-    attention = user_state.get('eye_state', {}).get('attention_score', 0)
-    cv2.putText(frame, f"Attention: {attention:.0%}", (10, y), 
+    # 姿态
+    posture = user_state.get('posture', 'unknown')
+    cv2.putText(frame, f"Posture: {posture}", (10, y), 
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
     y += 25
     
-    # 疲劳度
-    fatigue = user_state.get('overall', {}).get('fatigue_level', 0)
-    cv2.putText(frame, f"Fatigue: {fatigue:.0%}", (10, y), 
+    # 活动水平
+    activity = user_state.get('activity_level', 0)
+    cv2.putText(frame, f"Activity: {activity:.0%}", (10, y), 
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+    y += 25
+    
+    # 注意力
+    attention = user_state.get('attention_score', 0)
+    cv2.putText(frame, f"Attention: {attention:.0%}", (10, y), 
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
     
     return frame

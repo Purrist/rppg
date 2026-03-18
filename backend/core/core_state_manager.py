@@ -78,9 +78,14 @@ class SystemStateManager:
         emotion = perception_data.get("emotion", {})
         elder["mood"] = emotion.get("primary", "neutral")
         
-        # 注意力
-        eye = perception_data.get("eye_state", {})
-        elder["attention"] = eye.get("attention_score", 0.5)
+        # 注意力 - 兼容新旧数据结构
+        # 新结构：顶层 attention_score
+        # 旧结构：eye_state.attention_score 或 eye_state_detail.attention_score
+        attention = perception_data.get("attention_score")
+        if attention is None:
+            eye = perception_data.get("eye_state_detail", {})
+            attention = eye.get("attention_score", 0.5)
+        elder["attention"] = attention
         
         # 疲劳度
         overall = perception_data.get("overall", {})
