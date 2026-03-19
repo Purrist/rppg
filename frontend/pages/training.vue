@@ -12,6 +12,10 @@
         <span class="label">准确率</span>
         <span class="value">{{ game.accuracy }}%</span>
       </div>
+      <div class="settling-buttons">
+        <button @click="restartGame" class="restart-btn">🔄 再来一次</button>
+        <button @click="endGame" class="exit-btn">✖ 返回列表</button>
+      </div>
     </div>
 
     <!-- 准备状态 -->
@@ -71,10 +75,15 @@
       </div>
     </div>
     
-    <!-- IDLE状态 - 显示提示而不是加载中 -->
+    <!-- ⭐ 其他状态（包括IDLE）都显示"请在投影区域开始游戏" -->
     <div v-else class="ready-view">
-      <div class="center-hint">正在连接...</div>
-      <div class="hint-sub">请稍候</div>
+      <div class="center-hint">请在投影区域开始游戏</div>
+      <div class="hint-sub">站在投影区域的圆圈内即可开始</div>
+      <div class="bottom-bar">
+        <button @click="exitGame" class="big-exit-btn" :disabled="isExiting">
+          {{ isExiting ? '退出中...' : '退出游戏' }}
+        </button>
+      </div>
     </div>
   </div>
 </template>
@@ -85,7 +94,7 @@ import { io } from 'socket.io-client'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
-const game = ref({ status: 'IDLE', score: 0, timer: 60, accuracy: 0, current_mole: -1 })
+const game = ref({ status: 'READY', score: 0, timer: 60, accuracy: 0, current_mole: -1 })
 const isExiting = ref(false)
 let socket = null
 
@@ -108,11 +117,10 @@ onMounted(() => {
     socket.emit('get_state', { client: 'training' })
   })
   
-  // ⭐ 只从 game_update 获取数据
   socket.on('game_update', (data) => {
     console.log('[训练页] game_update:', data.status, 'timer:', data.timer)
     game.value = {
-      status: data.status || 'IDLE',
+      status: data.status || 'READY',
       score: data.score || 0,
       timer: data.timer || 60,
       accuracy: data.stats?.accuracy || 0,
@@ -120,10 +128,8 @@ onMounted(() => {
     }
   })
   
-  // ⭐ system_state 只用于检测游戏是否完全停止
   socket.on('system_state', (data) => {
     if (data.state && data.state.game) {
-      // ⭐ 只有当 active=false 且 status=IDLE 时才返回游戏列表
       if (data.state.game.active === false && data.state.game.status === 'IDLE') {
         console.log('[训练页] 游戏已停止，返回游戏列表')
         router.push('/learning')
@@ -246,6 +252,34 @@ const exitGame = () => {
   font-size: 48px;
   font-weight: 700;
   color: #fff;
+}
+
+.settling-buttons {
+  display: flex;
+  gap: 20px;
+  margin-top: 40px;
+}
+
+.restart-btn { 
+  padding: 20px 40px;
+  background: #FF7222; 
+  color: #FFF; 
+  border-radius: 40px; 
+  font-size: 24px;
+  font-weight: bold; 
+  border: none;
+  cursor: pointer;
+}
+
+.exit-btn { 
+  padding: 20px 40px;
+  background: #FB4422; 
+  color: #FFF; 
+  border-radius: 40px; 
+  font-size: 24px;
+  font-weight: bold; 
+  border: none;
+  cursor: pointer;
 }
 
 .ready-view { 

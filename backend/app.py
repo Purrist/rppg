@@ -62,7 +62,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from core import SystemStateManager, ask_akon, think, should_think, get_agent_state, ActionExecutor
 
 # 游戏系统
-from games import GameManager, GAME_REGISTRY
+from games import GameManager, GAME_REGISTRY, GAME_CONFIGS
 
 # 感知模块
 from perception import PerceptionManager, init_screen_processor, draw_detection_info
@@ -76,11 +76,15 @@ screen_proc = init_screen_processor(camera_source=PROJECTION_CAMERA_SOURCE, sock
 # 游戏管理器
 game_manager = GameManager(socketio)
 for game_id, game_class in GAME_REGISTRY.items():
-    game_manager.register(game_id, game_class)
+    config = GAME_CONFIGS.get(game_id)
+    game_manager.register(game_id, game_class, config)
 print(f"[游戏系统] 已注册游戏: {list(GAME_REGISTRY.keys())}")
 
 # 感知管理器
 perception_manager = PerceptionManager()
+
+# ⭐ 设置感知管理器引用到游戏管理器
+game_manager.set_perception_manager(perception_manager)
 
 # 状态管理器（世界模型）
 state_manager = SystemStateManager(socketio)
@@ -102,13 +106,13 @@ user_state = {
 perception_frame = None
 perception_frame_lock = threading.Lock()
 _last_perception_time = 0
-PERCEPTION_INTERVAL = 0.5  # 500ms处理一次感知
+PERCEPTION_INTERVAL = 0.5  # 500ms处理一次感知，平衡性能和实时性
 
 def perception_worker():
     """感知处理线程 - 优化版"""
     import urllib.request
     
-    global perception_frame, _last_perception_time
+    global perception_frame, user_state, _last_perception_time
     tablet_url = TABLET_VIDEO_URL
     
     print(f"[感知线程] 启动，连接: {tablet_url}")
@@ -119,7 +123,7 @@ def perception_worker():
             bytes_data = bytes()
             
             while True:
-                bytes_data += stream.read(4096)
+                bytes_data += stream.read(4096)  # 增加读取大小
                 a = bytes_data.find(b'\xff\xd8')
                 b = bytes_data.find(b'\xff\xd9')
                 
@@ -148,10 +152,10 @@ def perception_worker():
             time.sleep(1)
 
 # ============================================================================
-# Agent循环
+# Agent循环 - 降低频率
 # ============================================================================
 def agent_loop():
-    """Agent持续运行循环"""
+    """Agent持续运行循环 - 降低频率"""
     print("[Agent循环] 启动")
     
     while True:
@@ -165,11 +169,11 @@ def agent_loop():
                 if decision.get("need_action"):
                     action_executor.execute(decision)
             
-            time.sleep(0.5)
+            time.sleep(1.0)  # ⭐ 降低到1秒检查一次
             
         except Exception as e:
             print(f"[Agent循环] 错误: {e}")
-            time.sleep(1)
+            time.sleep(2)
 
 # ============================================================================
 # 静态文件
@@ -301,6 +305,34 @@ def api_game_config(game_id):
     if config:
         return jsonify(config)
     return jsonify({"error": "游戏不存在"}), 404
+
+# ==================== 难度调整 API ====================
+@app.route('/api/difficulty')
+def api_difficulty():
+    """获取当前难度参数"""
+    return jsonify({
+        "level": game_manager.get_difficulty_level(),
+        "params": game_manager.get_difficulty_params(),
+        "adjuster_state": game_manager.get_difficulty_adjuster_state(),
+    })
+
+@app.route('/api/difficulty/levels')
+def api_difficulty_levels():
+    """获取所有难度等级"""
+    return jsonify(game_manager.difficulty_adjuster.get_all_levels())
+
+@app.route('/api/difficulty/set', methods=['POST'])
+def api_set_difficulty():
+    """手动设置难度等级"""
+    data = request.get_json()
+    level = data.get('level', 5)
+    result = game_manager.set_difficulty_level(level)
+    return jsonify(result)
+
+@app.route('/api/difficulty/adjustment')
+def api_difficulty_adjustment():
+    """获取难度调整建议"""
+    return jsonify(perception_manager.get_difficulty_adjustment())
 
 # ============================================================================
 # 阿康对话 API
@@ -445,6 +477,7 @@ def handle_get_state(data=None):
         if not game_manager.is_game_active():
             socketio.emit('navigate_to', {"page": "/"})
     
+    # ⭐ 发送 system_state
     socketio.emit('system_state', {
         "state": {
             "mode": "game" if game_manager.is_game_active() else "normal",
@@ -452,9 +485,18 @@ def handle_get_state(data=None):
                 "active": game_manager.is_game_active(),
                 "name": game_manager.get_current_game_id(),
                 "status": game_manager.get_game_status(),
+                "score": game_manager.get_game_state().get("score", 0) if game_manager.get_game_state() else 0,
+                "timer": game_manager.get_game_state().get("timer", 0) if game_manager.get_game_state() else 0,
             }
         }
     })
+    
+    # ⭐ 如果游戏激活，也发送 game_update
+    if game_manager.is_game_active() and game_manager.get_game_state():
+        socketio.emit('game_update', {
+            "game_id": game_manager.get_current_game_id(),
+            **game_manager.get_game_state()
+        })
 
 # ============================================================================
 # 后台任务

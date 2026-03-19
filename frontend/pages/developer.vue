@@ -14,54 +14,117 @@
       <div class="person-card" :class="personDetected ? 'detected' : 'not-detected'">
         <div class="person-icon">{{ personDetected ? '👤' : '🚫' }}</div>
         <div class="person-text">{{ personDetected ? '有人' : '无人' }}</div>
+        <div class="person-detail" v-if="personDetected">
+          人脸: {{ userState.face_count }} | 骨骼: {{ userState.skeleton_detected ? '✓' : '✗' }}
+        </div>
       </div>
       
-      <!-- 10个高价值数据卡片 -->
-      <div class="data-cards">
-        <div class="data-card">
-          <span class="d-label">人数</span>
-          <span class="d-value">{{ personDetected ? userState.face_count : '--' }}</span>
+      <!-- 三维指标 -->
+      <div class="indicator-cards">
+        <!-- 身体负荷 -->
+        <div class="indicator-card physical">
+          <div class="ind-header">
+            <span class="ind-icon">💪</span>
+            <span class="ind-title">身体负荷</span>
+          </div>
+          <div class="ind-value">{{ personDetected ? Math.round(userState.physical_load?.value * 100) : '--' }}%</div>
+          <div class="ind-bar">
+            <div class="ind-fill physical-fill" :style="{ width: (personDetected ? userState.physical_load?.value * 100 : 0) + '%' }"></div>
+          </div>
+          <div class="ind-details">
+            <div class="ind-row">
+              <span>心率</span>
+              <span>{{ personDetected && userState.physical_load?.heart_rate ? userState.physical_load.heart_rate + ' BPM' : '--' }}</span>
+            </div>
+            <div class="ind-row">
+              <span>运动强度</span>
+              <span>{{ personDetected ? Math.round(userState.physical_load?.movement_intensity * 100) + '%' : '--' }}</span>
+            </div>
+            <div class="ind-row" :class="{ 'warning': userState.physical_load?.fall_detected }">
+              <span>摔倒</span>
+              <span>{{ userState.physical_load?.fall_detected ? '⚠️ 检测到!' : '无' }}</span>
+            </div>
+          </div>
         </div>
-        <div class="data-card">
-          <span class="d-label">心率</span>
-          <span class="d-value">{{ personDetected && userState.heart_rate ? userState.heart_rate + ' BPM' : '--' }}</span>
+        
+        <!-- 认知负荷 -->
+        <div class="indicator-card cognitive">
+          <div class="ind-header">
+            <span class="ind-icon">🧠</span>
+            <span class="ind-title">认知负荷</span>
+          </div>
+          <div class="ind-value">{{ personDetected ? Math.round(userState.cognitive_load?.value * 100) : '--' }}%</div>
+          <div class="ind-bar">
+            <div class="ind-fill cognitive-fill" :style="{ width: (personDetected ? userState.cognitive_load?.value * 100 : 0) + '%' }"></div>
+          </div>
+          <div class="ind-details">
+            <div class="ind-row">
+              <span>错误率</span>
+              <span>{{ personDetected ? Math.round(userState.cognitive_load?.error_rate * 100) + '%' : '--' }}</span>
+            </div>
+            <div class="ind-row">
+              <span>注意力稳定性</span>
+              <span>{{ personDetected ? Math.round(userState.cognitive_load?.attention_stability * 100) + '%' : '--' }}</span>
+            </div>
+          </div>
         </div>
-        <div class="data-card">
-          <span class="d-label">眨眼</span>
-          <span class="d-value">{{ personDetected ? userState.blink_count + '次/30s' : '--' }}</span>
-        </div>
-        <div class="data-card">
-          <span class="d-label">眼睛</span>
-          <span class="d-value" :class="userState.eye_state">{{ personDetected ? eyeStateText[userState.eye_state] : '--' }}</span>
-        </div>
-        <div class="data-card">
-          <span class="d-label">头部</span>
-          <span class="d-value">{{ personDetected ? headDirText[userState.head_direction] : '--' }}</span>
-        </div>
-        <div class="data-card">
-          <span class="d-label">微笑</span>
-          <span class="d-value" :class="userState.is_smiling ? 'smile' : ''">{{ personDetected ? (userState.is_smiling ? '😊 是' : '😐 否') : '--' }}</span>
-        </div>
-        <div class="data-card">
-          <span class="d-label">亮度</span>
-          <span class="d-value" :class="'light-' + userState.light_level">{{ lightText[userState.light_level] }}</span>
-        </div>
-        <div class="data-card">
-          <span class="d-label">姿态</span>
-          <span class="d-value">{{ personDetected ? postureText[userState.posture] : '--' }}</span>
-        </div>
-        <div class="data-card">
-          <span class="d-label">活动</span>
-          <span class="d-value">{{ personDetected ? Math.round(userState.activity_level * 100) + '%' : '--' }}</span>
-        </div>
-        <div class="data-card">
-          <span class="d-label">注意力</span>
-          <span class="d-value">{{ personDetected ? Math.round(userState.attention_score * 100) + '%' : '--' }}</span>
+        
+        <!-- 参与意愿 -->
+        <div class="indicator-card engagement">
+          <div class="ind-header">
+            <span class="ind-icon">❤️</span>
+            <span class="ind-title">参与意愿</span>
+          </div>
+          <div class="ind-value">{{ personDetected ? Math.round(userState.engagement?.value * 100) : '--' }}%</div>
+          <div class="ind-bar">
+            <div class="ind-fill engagement-fill" :style="{ width: (personDetected ? userState.engagement?.value * 100 : 0) + '%' }"></div>
+          </div>
+          <div class="ind-details">
+            <div class="ind-row">
+              <span>正面情绪</span>
+              <span>{{ personDetected ? Math.round(userState.engagement?.emotion_positive * 100) + '%' : '--' }}</span>
+            </div>
+            <div class="ind-row">
+              <span>主动性</span>
+              <span>{{ personDetected ? Math.round(userState.engagement?.initiative_level * 100) + '%' : '--' }}</span>
+            </div>
+          </div>
         </div>
       </div>
     </section>
     
-    <!-- 状态卡片 -->
+    <!-- 详细数据 -->
+    <section class="detail-section">
+      <h3>📊 详细数据</h3>
+      <div class="detail-grid">
+        <div class="detail-card">
+          <span class="d-label">情绪</span>
+          <span class="d-value">{{ personDetected ? userState.emotion?.primary : '--' }}</span>
+        </div>
+        <div class="detail-card">
+          <span class="d-label">姿态</span>
+          <span class="d-value" :class="{ 'falling': userState.posture?.type === 'falling' }">{{ personDetected ? userState.posture?.type : '--' }}</span>
+        </div>
+        <div class="detail-card">
+          <span class="d-label">姿态稳定性</span>
+          <span class="d-value">{{ personDetected ? Math.round(userState.posture?.stability * 100) + '%' : '--' }}</span>
+        </div>
+        <div class="detail-card">
+          <span class="d-label">活动水平</span>
+          <span class="d-value">{{ personDetected ? Math.round(userState.activity?.level * 100) + '%' : '--' }}</span>
+        </div>
+        <div class="detail-card">
+          <span class="d-label">亮度</span>
+          <span class="d-value">{{ lightText[userState.environment?.light_level] || '--' }}</span>
+        </div>
+        <div class="detail-card">
+          <span class="d-label">状态总结</span>
+          <span class="d-value">{{ summaryText[userState.overall?.state_summary] || '--' }}</span>
+        </div>
+      </div>
+    </section>
+    
+    <!-- 游戏状态 -->
     <section class="status-row">
       <div class="stat-card">
         <span class="label">游戏</span>
@@ -85,7 +148,6 @@
     
     <!-- 摄像头 -->
     <section class="cam-row">
-      <!-- 投影摄像头 -->
       <div class="cam-box">
         <div class="cam-head">
           <span>投影摄像头</span>
@@ -101,7 +163,6 @@
         </div>
       </div>
       
-      <!-- 平板摄像头 -->
       <div class="cam-box">
         <div class="cam-head">
           <span>平板摄像头</span>
@@ -130,7 +191,6 @@
       <button class="btn reset" @click="resetCorners">🔄 重置校准</button>
     </section>
     
-    <!-- Toast -->
     <div v-if="toast.show" class="toast">{{ toast.msg }}</div>
   </div>
 </template>
@@ -138,7 +198,6 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 
-// ==================== 配置 ====================
 const getHost = () => {
   if (typeof window === 'undefined') return 'localhost'
   return window.location.hostname || 'localhost'
@@ -150,18 +209,12 @@ const videoUrl = `${baseUrl}/video_feed`
 const correctedUrl = `${baseUrl}/corrected_feed`
 const tabletVideoUrl = `${baseUrl}/tablet_video_feed`
 
-// ==================== 文本映射 ====================
-const eyeStateText = { 'open': '睁眼', 'closed': '闭眼', 'partial': '半睁', 'unknown': '未知' }
-const headDirText = { 'front': '正面', 'left': '左转', 'right': '右转', 'up': '抬头', 'down': '低头', 'far': '远处', 'unknown': '未知' }
 const lightText = { 'dark': '暗', 'normal': '正常', 'bright': '亮' }
-const postureText = { 'standing': '站立', 'sitting': '坐着', 'unknown': '未知' }
+const summaryText = { 'normal': '正常', 'fatigued': '疲劳', 'engaged': '专注', 'struggling': '困难' }
 
-// ==================== 状态 ====================
 const connected = ref(false)
 const rawCanvas = ref(null)
 const correctedCanvas = ref(null)
-
-// 编辑状态
 const isEditing = ref(false)
 const savedCorners = ref(null)
 const corners = ref([[0.15, 0.2], [0.85, 0.2], [0.85, 0.85], [0.15, 0.85]])
@@ -172,22 +225,20 @@ const status = reactive({
   feet_y: 180
 })
 
-// ⭐ 用户状态（简化版 - 10个高价值数据）
 const userState = reactive({
   person_detected: false,
   face_count: 0,
-  heart_rate: null,
-  blink_count: 0,
-  eye_state: 'unknown',
-  head_direction: 'unknown',
-  is_smiling: false,
-  light_level: 'normal',
-  posture: 'unknown',
-  activity_level: 0,
-  attention_score: 0,
+  skeleton_detected: false,
+  physical_load: { value: 0, heart_rate: null, movement_intensity: 0, fall_detected: false },
+  cognitive_load: { value: 0, error_rate: 0, attention_stability: 1 },
+  engagement: { value: 0.5, emotion_positive: 0.5, initiative_level: 0.5 },
+  emotion: { primary: 'neutral' },
+  posture: { type: 'unknown', stability: 1 },
+  activity: { level: 0 },
+  environment: { light_level: 'normal' },
+  overall: { state_summary: 'normal' },
 })
 
-// 计算属性
 const personDetected = computed(() => userState.person_detected)
 
 const gameState = reactive({
@@ -204,17 +255,14 @@ const gameStateText = computed(() => {
 const toast = reactive({ show: false, msg: '' })
 const dragging = ref(-1)
 const mouseDown = ref(false)
-
 let interval = null
 
-// ==================== 工具 ====================
 function showToast(msg) {
   toast.msg = msg
   toast.show = true
   setTimeout(() => toast.show = false, 2000)
 }
 
-// ==================== 编辑模式 ====================
 function startEdit() {
   isEditing.value = true
   savedCorners.value = JSON.parse(JSON.stringify(corners.value))
@@ -229,7 +277,6 @@ async function saveAndExitEdit() {
   showToast('校准区域已保存')
 }
 
-// ==================== API ====================
 async function checkConn() {
   try {
     const c = new AbortController()
@@ -300,7 +347,6 @@ async function resetCorners() {
   showToast('已重置')
 }
 
-// ==================== 状态更新 ====================
 async function updateStatus() {
   if (!connected.value) {
     await checkConn()
@@ -308,7 +354,6 @@ async function updateStatus() {
   }
   
   try {
-    // 投影状态
     const r = await fetch(`${baseUrl}/api/status`)
     if (r.ok) {
       const d = await r.json()
@@ -319,7 +364,6 @@ async function updateStatus() {
       status.feet_detected = d.feet_detected
     }
     
-    // 游戏状态
     const gr = await fetch(`${baseUrl}/api/system/state`)
     if (gr.ok) {
       const gd = await gr.json()
@@ -330,11 +374,9 @@ async function updateStatus() {
       }
     }
     
-    // ⭐ 用户状态（感知信息）
     const ur = await fetch(`${baseUrl}/api/user_state`)
     if (ur.ok) {
       const ud = await ur.json()
-      // 直接赋值
       for (const key in ud) {
         if (key in userState) {
           userState[key] = ud[key]
@@ -346,7 +388,6 @@ async function updateStatus() {
   }
 }
 
-// ==================== Canvas ====================
 function resize() {
   const raw = rawCanvas.value
   const cor = correctedCanvas.value
@@ -364,7 +405,6 @@ function resize() {
 }
 
 function draw() {
-  // 原始画面 - 绘制四角
   if (rawCanvas.value) {
     const ctx = rawCanvas.value.getContext('2d')
     const w = rawCanvas.value.width
@@ -403,7 +443,6 @@ function draw() {
     })
   }
   
-  // 校正后画面 - 只绘制绿点
   if (correctedCanvas.value) {
     const ctx = correctedCanvas.value.getContext('2d')
     const sx = correctedCanvas.value.width / 640
@@ -438,10 +477,8 @@ function draw() {
   requestAnimationFrame(draw)
 }
 
-// ==================== 鼠标事件 ====================
 function onMouseDown(e) {
   if (!isEditing.value) return
-  
   const rect = rawCanvas.value.getBoundingClientRect()
   const pos = { x: (e.clientX - rect.left) / rect.width, y: (e.clientY - rect.top) / rect.height }
   for (let i = 0; i < corners.value.length; i++) {
@@ -468,7 +505,6 @@ function onMouseUp() {
   dragging.value = -1
 }
 
-// ==================== 生命周期 ====================
 onMounted(async () => {
   const ok = await checkConn()
   if (ok) {
@@ -478,7 +514,7 @@ onMounted(async () => {
   
   resize()
   requestAnimationFrame(draw)
-  interval = setInterval(updateStatus, 500)  // 500ms更新一次
+  interval = setInterval(updateStatus, 500)
   window.addEventListener('resize', resize)
 })
 
@@ -508,29 +544,15 @@ onUnmounted(() => {
   border-bottom: 1px solid rgba(255,255,255,0.1);
 }
 
-.dev-header h1 {
-  font-size: 24px;
-  font-weight: 600;
-}
+.dev-header h1 { font-size: 24px; font-weight: 600; }
 
-.conn-badge {
-  padding: 8px 16px;
-  border-radius: 20px;
-  font-size: 14px;
-}
-
+.conn-badge { padding: 8px 16px; border-radius: 20px; font-size: 14px; }
 .conn-badge.ok { background: rgba(51, 181, 85, 0.2); color: #33B555; }
 .conn-badge.err { background: rgba(255, 68, 68, 0.2); color: #ff6b6b; }
 
-/* ⭐ 核心状态 */
-.core-status {
-  display: flex;
-  gap: 15px;
-  margin-bottom: 25px;
-  flex-wrap: wrap;
-}
+/* 核心状态 */
+.core-status { display: flex; gap: 15px; margin-bottom: 25px; flex-wrap: wrap; }
 
-/* 有人/无人卡片 */
 .person-card {
   display: flex;
   flex-direction: column;
@@ -538,7 +560,7 @@ onUnmounted(() => {
   justify-content: center;
   padding: 20px 30px;
   border-radius: 16px;
-  min-width: 120px;
+  min-width: 140px;
   transition: all 0.3s;
 }
 
@@ -552,83 +574,63 @@ onUnmounted(() => {
   border: 2px dashed rgba(255,255,255,0.2);
 }
 
-.person-icon {
-  font-size: 48px;
-  margin-bottom: 8px;
-}
+.person-icon { font-size: 48px; margin-bottom: 8px; }
+.person-text { font-size: 20px; font-weight: 700; }
+.person-detail { font-size: 12px; margin-top: 8px; opacity: 0.8; }
 
-.person-text {
-  font-size: 20px;
-  font-weight: 700;
-}
+/* 指标卡片 */
+.indicator-cards { display: flex; flex-wrap: wrap; gap: 15px; flex: 1; }
 
-/* 数据卡片容器 */
-.data-cards {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
+.indicator-card {
+  background: rgba(255,255,255,0.05);
+  border-radius: 16px;
+  padding: 16px;
+  min-width: 200px;
   flex: 1;
 }
 
-.data-card {
+.ind-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.ind-icon { font-size: 24px; }
+.ind-title { font-size: 14px; font-weight: 600; }
+.ind-value { font-size: 32px; font-weight: 700; margin-bottom: 8px; }
+
+.ind-bar { height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; overflow: hidden; margin-bottom: 12px; }
+.ind-fill { height: 100%; border-radius: 4px; transition: width 0.3s; }
+.physical-fill { background: linear-gradient(90deg, #33B555, #FFD700, #ff6b6b); }
+.cognitive-fill { background: linear-gradient(90deg, #2196F3, #9C27B0, #ff6b6b); }
+.engagement-fill { background: linear-gradient(90deg, #ff6b6b, #FFD700, #33B555); }
+
+.ind-details { display: flex; flex-direction: column; gap: 6px; }
+.ind-row { display: flex; justify-content: space-between; font-size: 12px; }
+.ind-row span:first-child { color: #888; }
+.ind-row.warning { color: #ff6b6b; font-weight: bold; }
+
+/* 详细数据 */
+.detail-section { margin-bottom: 25px; }
+.detail-section h3 { font-size: 16px; margin-bottom: 12px; color: #888; }
+.detail-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+
+.detail-card {
   background: rgba(255,255,255,0.05);
   border-radius: 12px;
   padding: 12px 16px;
-  min-width: 90px;
+  min-width: 100px;
   display: flex;
   flex-direction: column;
   align-items: center;
 }
 
-.d-label {
-  font-size: 12px;
-  color: #888;
-  margin-bottom: 4px;
-}
-
-.d-value {
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.d-value.open { color: #33B555; }
-.d-value.closed { color: #ff6b6b; }
-.d-value.smile { color: #FFD700; }
-.d-value.light-dark { color: #666; }
-.d-value.light-normal { color: #33B555; }
-.d-value.light-bright { color: #FFD700; }
+.d-label { font-size: 12px; color: #888; margin-bottom: 4px; }
+.d-value { font-size: 16px; font-weight: 600; }
+.d-value.falling { color: #ff6b6b; }
 
 /* 状态卡片 */
-.status-row {
-  display: flex;
-  gap: 15px;
-  margin-bottom: 25px;
-  flex-wrap: wrap;
-}
-
-.stat-card {
-  background: rgba(255,255,255,0.05);
-  padding: 15px 20px;
-  border-radius: 12px;
-  min-width: 100px;
-  flex: 1;
-}
-
-.stat-card .label {
-  display: block;
-  font-size: 12px;
-  color: #888;
-  margin-bottom: 5px;
-}
-
-.stat-card .val {
-  font-size: 20px;
-  font-weight: 600;
-}
-
+.status-row { display: flex; gap: 15px; margin-bottom: 25px; flex-wrap: wrap; }
+.stat-card { background: rgba(255,255,255,0.05); padding: 15px 20px; border-radius: 12px; min-width: 100px; flex: 1; }
+.stat-card .label { display: block; font-size: 12px; color: #888; margin-bottom: 5px; }
+.stat-card .val { font-size: 20px; font-weight: 600; }
 .ok { color: #33B555; }
 .err { color: #ff6b6b; }
-
 .s-IDLE { color: #888; }
 .s-READY { color: #FF7222; }
 .s-PLAYING { color: #33B555; }
@@ -636,109 +638,24 @@ onUnmounted(() => {
 .s-SETTLING { color: #9C27B0; }
 
 /* 摄像头 */
-.cam-row {
-  display: flex;
-  gap: 20px;
-  margin-bottom: 25px;
-  flex-wrap: wrap;
-}
-
-.cam-box {
-  flex: 1;
-  min-width: 300px;
-  background: rgba(255,255,255,0.05);
-  border-radius: 16px;
-  overflow: hidden;
-}
-
-.cam-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 12px 16px;
-  background: rgba(0,0,0,0.2);
-  font-size: 14px;
-}
-
-.cam-head .hint {
-  font-size: 12px;
-  color: #666;
-}
-
-.cam-view {
-  position: relative;
-  background: #000;
-  width: 100%;
-  aspect-ratio: 4/3;
-}
-
-.cam-view img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.cam-view canvas {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  cursor: crosshair;
-}
+.cam-row { display: flex; gap: 20px; margin-bottom: 25px; flex-wrap: wrap; }
+.cam-box { flex: 1; min-width: 300px; background: rgba(255,255,255,0.05); border-radius: 16px; overflow: hidden; }
+.cam-head { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: rgba(0,0,0,0.2); font-size: 14px; }
+.cam-head .hint { font-size: 12px; color: #666; }
+.cam-view { position: relative; background: #000; width: 100%; aspect-ratio: 4/3; }
+.cam-view img { width: 100%; height: 100%; object-fit: cover; }
+.cam-view canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: crosshair; }
 
 /* 校正画面 */
-.corr-section {
-  margin-bottom: 25px;
-}
-
-.corr-section h3 {
-  font-size: 14px;
-  color: #888;
-  margin-bottom: 12px;
-}
-
-.corr-view {
-  position: relative;
-  background: #000;
-  border-radius: 12px;
-  overflow: hidden;
-  width: 100%;
-  max-width: 640px;
-  aspect-ratio: 16/9;
-}
-
-.corr-view img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.corr-view canvas {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-}
+.corr-section { margin-bottom: 25px; }
+.corr-section h3 { font-size: 14px; color: #888; margin-bottom: 12px; }
+.corr-view { position: relative; background: #000; border-radius: 12px; overflow: hidden; width: 100%; max-width: 640px; aspect-ratio: 16/9; }
+.corr-view img { width: 100%; height: 100%; object-fit: cover; }
+.corr-view canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
 
 /* 按钮 */
-.btn-row {
-  display: flex;
-  gap: 15px;
-  flex-wrap: wrap;
-}
-
-.btn {
-  padding: 12px 24px;
-  border: none;
-  border-radius: 10px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: transform 0.2s;
-}
-
+.btn-row { display: flex; gap: 15px; flex-wrap: wrap; }
+.btn { padding: 12px 24px; border: none; border-radius: 10px; font-size: 14px; font-weight: 500; cursor: pointer; transition: transform 0.2s; }
 .btn:hover { transform: translateY(-2px); }
 .btn.edit { background: #FF7222; color: #fff; }
 .btn.save { background: #33B555; color: #fff; }

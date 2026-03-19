@@ -9,6 +9,15 @@
           <p>锻炼手眼协调与反应速度</p>
         </div>
       </div>
+      
+      <div class="l-card" @click="startGame('processing_speed')">
+        <div class="l-icon">⚡</div>
+        <div class="l-text">
+          <h3>处理速度训练</h3>
+          <p>科学提升认知处理速度</p>
+        </div>
+      </div>
+      
       <div class="l-card" @click="handleTodo">
         <div class="l-icon">🎨</div>
         <div class="l-text">
@@ -16,6 +25,7 @@
           <p>提升认知抑制与注意力</p>
         </div>
       </div>
+      
       <div class="l-card" @click="handleTodo">
         <div class="l-icon">🎵</div>
         <div class="l-text">
@@ -23,6 +33,7 @@
           <p>锻炼听觉记忆能力</p>
         </div>
       </div>
+      
       <div class="l-card" @click="handleTodo">
         <div class="l-icon">🧠</div>
         <div class="l-text">
@@ -34,7 +45,6 @@
   </div>
 </template>
 
-
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
@@ -43,7 +53,12 @@ import { io } from 'socket.io-client'
 const router = useRouter()
 let socket = null
 
-// 自动检测后端地址
+// 游戏到页面的映射
+const gamePageMap = {
+  'whack_a_mole': '/training',
+  'processing_speed': '/processing-speed',
+}
+
 const getBackendHost = () => {
   if (typeof window === 'undefined') return 'localhost'
   return window.location.hostname || 'localhost'
@@ -51,6 +66,9 @@ const getBackendHost = () => {
 
 const FLASK_PORT = 5000
 const backendUrl = `http://${getBackendHost()}:${FLASK_PORT}`
+
+// 当前等待的游戏
+const pendingGame = ref(null)
 
 onMounted(() => {
   socket = io(backendUrl, {
@@ -60,26 +78,24 @@ onMounted(() => {
   
   socket.on('connect', () => {
     console.log('[益智] 后端已连接')
-    // ⭐ 不需要发送 get_state，app.vue 已经处理了首次连接
   })
   
   socket.on('navigate_to', (data) => {
     router.push(data.page)
   })
   
-  // ⭐ 监听游戏状态变化
+  // 监听游戏状态变化
   socket.on('game_update', (data) => {
-    // 如果状态变为READY，跳转到training
-    if (data.status === 'READY') {
-      router.push('/training')
+    // 如果状态变为READY，跳转到对应页面
+    if (data.status === 'READY' && pendingGame.value) {
+      const page = gamePageMap[pendingGame.value] || '/training'
+      router.push(page)
+      pendingGame.value = null
     }
   })
   
-  // ⭐ system_state 只用于检测游戏是否完全停止
   socket.on('system_state', (data) => {
-    // ⭐ 只有当 active=false 且 status=IDLE 时才返回游戏列表
-    // restart 时 active=true（因为 READY 算激活），不会触发返回
-    if (data.state && data.state.game) {
+    if (data.state?.game) {
       if (data.state.game.active === false && data.state.game.status === 'IDLE') {
         // 已经在 learning 页面，不需要跳转
       }
@@ -95,7 +111,7 @@ const startGame = (gameName) => {
   console.log('[益智] 开始游戏:', gameName)
   
   if (socket && socket.connected) {
-    // ⭐ 发送 ready，等待后端返回 READY 状态后自动跳转
+    pendingGame.value = gameName
     socket.emit('game_control', { action: 'ready', game: gameName })
   } else {
     alert('后端未连接，请稍后重试')

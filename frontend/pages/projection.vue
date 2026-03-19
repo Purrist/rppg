@@ -26,6 +26,7 @@ let animationId = null
 
 // ==================== 游戏状态 ====================
 const gameState = ref('IDLE')
+const currentGame = ref('whack_a_mole')  // 当前游戏
 const game = ref({
   status: 'IDLE',
   score: 0,
@@ -33,6 +34,11 @@ const game = ref({
   current_mole: -1,
   accuracy: 0
 })
+
+// ==================== 处理速度训练状态 ====================
+const psStimulus = ref(null)  // 处理速度训练刺激
+const psFeedback = ref(null)  // 处理速度训练反馈
+const psModule = ref('go_no_go')  // 当前模块
 
 // ==================== 用户位置 ====================
 const footPosition = reactive({ x: 320, y: 180, detected: false })
@@ -388,6 +394,102 @@ function drawPauseOverlay() {
   ctx.restore()
 }
 
+// ==================== 处理速度训练区域 ====================
+const psZones = [
+  { id: 1, x: 54 + 105, y: 150 + 105 },   // 区域1中心
+  { id: 2, x: 518 + 105, y: 150 + 105 },  // 区域2中心
+  { id: 3, x: 982 + 105, y: 150 + 105 },  // 区域3中心
+  { id: 4, x: 1446 + 105, y: 150 + 105 }, // 区域4中心
+  { id: 5, x: 54 + 105, y: 597 + 105 },   // 区域5中心
+  { id: 6, x: 518 + 105, y: 597 + 105 },  // 区域6中心
+  { id: 7, x: 982 + 105, y: 597 + 105 },  // 区域7中心
+  { id: 8, x: 1446 + 105, y: 597 + 105 }, // 区域8中心
+]
+
+// 将投影坐标转换为画布坐标
+function projToCanvas(x, y) {
+  return {
+    x: x * canvasWidth / 1920,
+    y: y * canvasHeight / 1080
+  }
+}
+
+// 绘制处理速度训练界面
+function drawProcessingSpeed() {
+  if (!ctx) return
+  
+  ctx.save()
+  ctx.scale(scaleX, scaleY)
+  
+  // 绘制8个区域
+  const zoneRadius = 105 * canvasWidth / 1920
+  
+  for (let i = 0; i < 8; i++) {
+    const zone = psZones[i]
+    const pos = projToCanvas(zone.x, zone.y)
+    
+    // 获取区域状态
+    let color = '#D9D9D9'  // 默认灰色
+    let active = false
+    
+    if (psStimulus.value?.zones) {
+      const zoneState = psStimulus.value.zones[i + 1]
+      if (zoneState?.active) {
+        color = zoneState.color || '#D9D9D9'
+        active = true
+      }
+    }
+    
+    // 绘制区域
+    ctx.beginPath()
+    ctx.arc(pos.x, pos.y, zoneRadius, 0, Math.PI * 2)
+    ctx.fillStyle = color
+    ctx.fill()
+    
+    // 绘制边框
+    ctx.beginPath()
+    ctx.arc(pos.x, pos.y, zoneRadius, 0, Math.PI * 2)
+    ctx.strokeStyle = active ? '#fff' : '#888'
+    ctx.lineWidth = 3
+    ctx.stroke()
+    
+    // 绘制区域编号
+    ctx.font = 'bold 24px Arial'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillStyle = active ? '#fff' : '#666'
+    ctx.fillText(i + 1, pos.x, pos.y)
+  }
+  
+  // 绘制模块指示
+  const moduleNames = {
+    'go_no_go': '反应控制',
+    'choice_reaction': '选择反应',
+    'serial_reaction': '序列学习'
+  }
+  
+  ctx.font = 'bold 28px Arial'
+  ctx.textAlign = 'center'
+  ctx.fillStyle = '#fff'
+  ctx.fillText(moduleNames[psModule.value] || '处理速度训练', canvasWidth / 2, 30)
+  
+  // 绘制指令
+  if (psStimulus.value?.instruction) {
+    ctx.font = 'bold 36px Arial'
+    ctx.fillStyle = '#FFD700'
+    ctx.fillText(psStimulus.value.instruction, canvasWidth / 2, canvasHeight - 50)
+  }
+  
+  // 绘制反馈
+  if (psFeedback.value) {
+    ctx.font = 'bold 48px Arial'
+    ctx.fillStyle = psFeedback.value.correct ? '#33B555' : '#FF4444'
+    ctx.fillText(psFeedback.value.message, canvasWidth / 2, canvasHeight / 2)
+  }
+  
+  ctx.restore()
+}
+
 // ==================== 主绘制循环 ====================
 function draw() {
   if (!ctx) return
@@ -398,18 +500,35 @@ function draw() {
   updateParticles()
   drawParticles()
   
-  if (gameState.value === 'READY') {
-    drawReadyCircle()
-  } else if (gameState.value === 'PLAYING') {
-    drawMoleHoles()
-    drawGameInfo()
-  } else if (gameState.value === 'PAUSED') {
-    // ⭐ 暂停状态：保持游戏界面显示
-    drawMoleHoles()
-    drawGameInfo()
-    drawPauseOverlay()
-  } else if (gameState.value === 'SETTLING') {
-    drawSettling()
+  // 根据游戏类型选择绘制
+  if (currentGame.value === 'processing_speed') {
+    // 处理速度训练
+    if (gameState.value === 'READY') {
+      drawReadyCircle()
+    } else if (gameState.value === 'PLAYING') {
+      drawProcessingSpeed()
+      drawGameInfo()
+    } else if (gameState.value === 'PAUSED') {
+      drawProcessingSpeed()
+      drawGameInfo()
+      drawPauseOverlay()
+    } else if (gameState.value === 'SETTLING') {
+      drawSettling()
+    }
+  } else {
+    // 打地鼠（默认）
+    if (gameState.value === 'READY') {
+      drawReadyCircle()
+    } else if (gameState.value === 'PLAYING') {
+      drawMoleHoles()
+      drawGameInfo()
+    } else if (gameState.value === 'PAUSED') {
+      drawMoleHoles()
+      drawGameInfo()
+      drawPauseOverlay()
+    } else if (gameState.value === 'SETTLING') {
+      drawSettling()
+    }
   }
   
   drawFootPoint()
@@ -566,11 +685,33 @@ onMounted(() => {
     game.value.status = data.status || 'IDLE'
     game.value.score = data.score || 0
     game.value.timer = data.timer || 60
+    
+    // 更新当前游戏
+    if (data.module) {
+      currentGame.value = 'processing_speed'
+      psModule.value = data.module
+    } else {
+      currentGame.value = 'whack_a_mole'
+    }
+    
+    // 打地鼠数据
     if (data.extra) {
       game.value.current_mole = data.extra.current_mole ?? -1
     }
     if (data.stats) {
       game.value.accuracy = data.stats.accuracy || 0
+    }
+    
+    // 处理速度训练数据
+    if (data.stimulus) {
+      psStimulus.value = data.stimulus
+    }
+    if (data.feedback) {
+      psFeedback.value = data.feedback
+      // 2秒后清除反馈
+      setTimeout(() => {
+        psFeedback.value = null
+      }, 2000)
     }
   })
   
