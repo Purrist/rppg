@@ -3,12 +3,12 @@
     
     <!-- 结算状态 -->
     <div v-if="game.status === 'SETTLING'" class="settling-view">
-      <h1 class="settling-title">游戏结束</h1>
+      <h1 class="settling-title">{{ gameTitle }}结束</h1>
       <div class="settling-score">
         <span class="label">最终得分</span>
         <span class="value">{{ game.score }}</span>
       </div>
-      <div class="settling-accuracy">
+      <div class="settling-accuracy" v-if="game.accuracy > 0">
         <span class="label">准确率</span>
         <span class="value">{{ game.accuracy }}%</span>
       </div>
@@ -20,7 +20,7 @@
 
     <!-- 准备状态 -->
     <div v-else-if="game.status === 'READY'" class="ready-view">
-      <div class="center-hint">请在投影区域开始游戏</div>
+      <div class="center-hint">请在投影区域开始{{ gameTitle }}</div>
       <div class="hint-sub">站在投影区域的圆圈内即可开始</div>
       <div class="bottom-bar">
         <button @click="exitGame" class="big-exit-btn" :disabled="isExiting">
@@ -32,7 +32,7 @@
     <!-- 游戏中 -->
     <div v-else-if="game.status === 'PLAYING'" class="playing-view">
       <div class="header">
-        <h1>🐹 打地鼠</h1>
+        <h1>{{ gameIcon }} {{ gameTitle }}</h1>
         <div class="timer-display">
           <span class="timer-label">剩余时间</span>
           <span class="timer-value">{{ game.timer }}s</span>
@@ -44,14 +44,48 @@
           <span class="stat-label">得分</span>
           <span class="stat-value score">{{ game.score }}</span>
         </div>
-        <div class="stat-item">
+        <div class="stat-item" v-if="game.accuracy > 0">
           <span class="stat-label">准确率</span>
-          <span class="stat-value">{{ game.accuracy || 0 }}%</span>
+          <span class="stat-value">{{ game.accuracy }}%</span>
+        </div>
+        <div class="stat-item" v-if="game.module">
+          <span class="stat-label">当前模块</span>
+          <span class="stat-value">{{ moduleName }}</span>
+        </div>
+        <div class="stat-item" v-if="game.difficultyLevel">
+          <span class="stat-label">难度</span>
+          <span class="stat-value">{{ game.difficultyLevel }}</span>
+        </div>
+      </div>
+
+      <!-- 处理速度训练特有：显示指令 -->
+      <div v-if="game.gameType === 'processing_speed' && stimulus" class="instruction-area">
+        <div class="instruction-box" :class="stimulus.module">
+          <div v-if="stimulus.module === 'go_no_go'" class="instruction-text">
+            {{ stimulus.is_go ? '踩绿色区域！' : '不要踩！' }}
+          </div>
+          <div v-else-if="stimulus.module === 'choice_reaction'" class="instruction-text">
+            {{ stimulus.instruction || '踩指定颜色' }}
+          </div>
+          <div v-else-if="stimulus.module === 'serial_reaction'" class="instruction-text">
+            按顺序踩踏 ({{ stimulus.sequence_progress }})
+          </div>
+        </div>
+      </div>
+
+      <!-- 反馈显示 -->
+      <div v-if="feedback" class="feedback-overlay" :class="feedback.correct ? 'correct' : 'error'">
+        <div class="feedback-content">
+          <div class="feedback-icon">{{ feedback.correct ? '✓' : '✗' }}</div>
+          <div class="feedback-message">{{ feedback.message }}</div>
+          <div class="feedback-rt" v-if="feedback.rt > 0">
+            反应时间: {{ Math.round(feedback.rt) }}ms
+          </div>
         </div>
       </div>
 
       <div class="game-hint">
-        💡 请在投影区域踩踏地鼠所在的洞
+        💡 {{ gameHint }}
       </div>
 
       <div class="game-controls">
@@ -63,7 +97,7 @@
     
     <!-- 暂停状态 -->
     <div v-else-if="game.status === 'PAUSED'" class="paused-view">
-      <h1>⏸ 游戏已暂停</h1>
+      <h1>⏸ {{ gameTitle }}已暂停</h1>
       <div class="pause-info">
         <span>得分: {{ game.score }}</span>
         <span>剩余: {{ game.timer }}s</span>
@@ -75,9 +109,9 @@
       </div>
     </div>
     
-    <!-- ⭐ 其他状态（包括IDLE）都显示"请在投影区域开始游戏" -->
+    <!-- 其他状态 -->
     <div v-else class="ready-view">
-      <div class="center-hint">请在投影区域开始游戏</div>
+      <div class="center-hint">请在投影区域开始{{ gameTitle }}</div>
       <div class="hint-sub">站在投影区域的圆圈内即可开始</div>
       <div class="bottom-bar">
         <button @click="exitGame" class="big-exit-btn" :disabled="isExiting">
@@ -89,14 +123,25 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { io } from 'socket.io-client'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
-const game = ref({ status: 'READY', score: 0, timer: 60, accuracy: 0, current_mole: -1 })
+const game = ref({ 
+  status: 'READY', 
+  score: 0, 
+  timer: 60, 
+  accuracy: 0,
+  gameType: 'whack_a_mole',
+  module: null,
+  difficultyLevel: 5
+})
+const stimulus = ref(null)
+const feedback = ref(null)
 const isExiting = ref(false)
 let socket = null
+let feedbackTimeout = null
 
 const getBackendHost = () => {
   if (typeof window === 'undefined') return 'localhost'
@@ -105,6 +150,23 @@ const getBackendHost = () => {
 
 const FLASK_PORT = 5000
 const backendUrl = `http://${getBackendHost()}:${FLASK_PORT}`
+
+// 游戏信息
+const gameInfo = {
+  'whack_a_mole': { title: '打地鼠', icon: '🐹', hint: '请在投影区域踩踏地鼠所在的洞' },
+  'processing_speed': { title: '处理速度训练', icon: '⚡', hint: '根据提示踩踏目标区域，停留3秒确认' }
+}
+
+const moduleNames = {
+  'go_no_go': '反应控制',
+  'choice_reaction': '选择反应',
+  'serial_reaction': '序列学习'
+}
+
+const gameTitle = computed(() => gameInfo[game.value.gameType]?.title || '游戏')
+const gameIcon = computed(() => gameInfo[game.value.gameType]?.icon || '🎮')
+const gameHint = computed(() => gameInfo[game.value.gameType]?.hint || '')
+const moduleName = computed(() => moduleNames[game.value.module] || '')
 
 onMounted(() => {
   socket = io(backendUrl, {
@@ -118,18 +180,34 @@ onMounted(() => {
   })
   
   socket.on('game_update', (data) => {
-    console.log('[训练页] game_update:', data.status, 'timer:', data.timer)
+    console.log('[训练页] game_update:', data.status)
+    
     game.value = {
       status: data.status || 'READY',
       score: data.score || 0,
       timer: data.timer || 60,
       accuracy: data.stats?.accuracy || 0,
-      current_mole: data.extra?.current_mole ?? -1
+      gameType: data.module ? 'processing_speed' : 'whack_a_mole',
+      module: data.module || null,
+      difficultyLevel: data.difficulty_level || 5
+    }
+    
+    // 处理速度训练数据
+    if (data.stimulus) {
+      stimulus.value = data.stimulus
+    }
+    
+    if (data.feedback) {
+      feedback.value = data.feedback
+      if (feedbackTimeout) clearTimeout(feedbackTimeout)
+      feedbackTimeout = setTimeout(() => {
+        feedback.value = null
+      }, 2000)
     }
   })
   
   socket.on('system_state', (data) => {
-    if (data.state && data.state.game) {
+    if (data.state?.game) {
       if (data.state.game.active === false && data.state.game.status === 'IDLE') {
         console.log('[训练页] 游戏已停止，返回游戏列表')
         router.push('/learning')
@@ -144,9 +222,10 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (socket) socket.disconnect()
+  if (feedbackTimeout) clearTimeout(feedbackTimeout)
 })
 
-// ==================== 游戏控制 ====================
+// 游戏控制
 const pauseGame = () => {
   if (socket && socket.connected) {
     socket.emit('game_control', { action: 'pause' })
@@ -161,14 +240,12 @@ const resumeGame = () => {
 
 const restartGame = () => {
   if (socket && socket.connected) {
-    console.log('[训练页] 重新开始游戏')
-    socket.emit('game_control', { action: 'restart', game: 'whack_a_mole' })
+    socket.emit('game_control', { action: 'restart' })
   }
 }
 
 const endGame = () => {
   if (socket && socket.connected) {
-    console.log('[训练页] 结束游戏')
     socket.emit('game_control', { action: 'stop' })
   }
 }
@@ -176,7 +253,6 @@ const endGame = () => {
 const exitGame = () => {
   if (isExiting.value) return
   
-  console.log('[训练页] 退出游戏')
   isExiting.value = true
   
   if (socket && socket.connected) {
@@ -199,7 +275,7 @@ const exitGame = () => {
   flex-direction: column;
 }
 
-/* 结算状态样式 */
+/* 结算状态 */
 .settling-view {
   flex: 1;
   display: flex;
@@ -240,6 +316,7 @@ const exitGame = () => {
   display: flex;
   flex-direction: column;
   align-items: center;
+  margin-bottom: 30px;
 }
 
 .settling-accuracy .label {
@@ -257,7 +334,6 @@ const exitGame = () => {
 .settling-buttons {
   display: flex;
   gap: 20px;
-  margin-top: 40px;
 }
 
 .restart-btn { 
@@ -282,6 +358,7 @@ const exitGame = () => {
   cursor: pointer;
 }
 
+/* 准备状态 */
 .ready-view { 
   flex: 1;
   display: flex; 
@@ -325,6 +402,7 @@ const exitGame = () => {
   cursor: not-allowed;
 }
 
+/* 游戏中 */
 .playing-view { 
   flex: 1;
   padding: 30px; 
@@ -388,16 +466,99 @@ const exitGame = () => {
   color: #FF7222;
 }
 
-.game-hint {
+/* 指令区域 */
+.instruction-area {
   flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 24px;
-  color: #666;
-  background: #F9F9F9;
+}
+
+.instruction-box {
+  padding: 30px 60px;
   border-radius: 20px;
+  text-align: center;
+}
+
+.instruction-box.go_no_go {
+  background: #33B555;
+}
+
+.instruction-box.choice_reaction {
+  background: #2196F3;
+}
+
+.instruction-box.serial_reaction {
+  background: #9C27B0;
+}
+
+.instruction-text {
+  font-size: 48px;
+  font-weight: 900;
+  color: #fff;
+}
+
+/* 反馈 */
+.feedback-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.7);
+  z-index: 100;
+  animation: fadeIn 0.2s;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.feedback-content {
+  text-align: center;
+}
+
+.feedback-icon {
+  font-size: 80px;
   margin-bottom: 20px;
+}
+
+.feedback-message {
+  font-size: 32px;
+  font-weight: 700;
+}
+
+.feedback-rt {
+  font-size: 18px;
+  color: #888;
+  margin-top: 10px;
+}
+
+.feedback-overlay.correct .feedback-icon {
+  color: #33B555;
+}
+
+.feedback-overlay.correct .feedback-message {
+  color: #33B555;
+}
+
+.feedback-overlay.error .feedback-icon {
+  color: #FF4444;
+}
+
+.feedback-overlay.error .feedback-message {
+  color: #FF4444;
+}
+
+.game-hint {
+  text-align: center;
+  font-size: 18px;
+  color: #888;
+  padding: 20px;
 }
 
 .game-controls {
@@ -431,6 +592,7 @@ const exitGame = () => {
   color: #FFF;
 }
 
+/* 暂停状态 */
 .paused-view { 
   flex: 1;
   display: flex; 
@@ -462,28 +624,6 @@ const exitGame = () => {
 .resume-btn { 
   padding: 20px 40px;
   background: #33B555; 
-  color: #FFF; 
-  border-radius: 40px; 
-  font-size: 24px; 
-  font-weight: bold; 
-  border: none;
-  cursor: pointer;
-}
-
-.restart-btn { 
-  padding: 20px 40px;
-  background: #2196F3; 
-  color: #FFF; 
-  border-radius: 40px; 
-  font-size: 24px; 
-  font-weight: bold; 
-  border: none;
-  cursor: pointer;
-}
-
-.exit-btn { 
-  padding: 20px 40px;
-  background: #FB4422; 
   color: #FFF; 
   border-radius: 40px; 
   font-size: 24px; 

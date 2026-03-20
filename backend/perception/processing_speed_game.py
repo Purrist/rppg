@@ -1,13 +1,13 @@
 # games/processing_speed_game.py
 # 处理速度认知训练游戏
-# 基于文献：Ball et al. (2002) ACTIVE研究, Nissen & Bullemer (1987) SRTT, Nielson et al. (2002) Go/No-Go
+# 基于文献：Ball et al. (2002), Nissen & Bullemer (1987), Nielson et al. (2002)
 
 import random
 import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
 from enum import Enum
-from .games_base import GameBase, GameConfig
+from .games_base import GameBase, GameState, GameConfig
 
 
 class TrainingModule(Enum):
@@ -31,6 +31,18 @@ class ProcessingSpeedConfig(GameConfig):
     modules: List[str] = field(default_factory=lambda: ["go_no_go", "choice_reaction", "serial_reaction"])
     module_duration: int = 60  # 每个模块60秒
     
+    # 区域配置（8个圆形区域）
+    zones: List[Dict] = field(default_factory=lambda: [
+        {"id": 1, "x": 159, "y": 255},   # 区域1中心
+        {"id": 2, "x": 623, "y": 255},   # 区域2中心
+        {"id": 3, "x": 1087, "y": 255},  # 区域3中心
+        {"id": 4, "x": 1551, "y": 255},  # 区域4中心
+        {"id": 5, "x": 159, "y": 702},   # 区域5中心
+        {"id": 6, "x": 623, "y": 702},   # 区域6中心
+        {"id": 7, "x": 1087, "y": 702},  # 区域7中心
+        {"id": 8, "x": 1551, "y": 702},  # 区域8中心
+    ])
+    
     # 颜色配置
     colors: Dict[str, str] = field(default_factory=lambda: {
         "go": "#33B555",      # 绿色
@@ -47,57 +59,14 @@ class ProcessingSpeedGame(GameBase):
     """
     处理速度认知训练游戏
     
-    基于ACTIVE研究 (Ball et al., 2002) 的处理速度训练方法
-    包含三个经典认知训练模块：
+    训练模块：
     1. Go/No-Go：反应控制训练
     2. 选择反应：决策速度训练
     3. 序列反应：序列学习训练
-    
-    难度分级基于文献：
-    - Ball et al. (2002): 刺激呈现时间影响难度
-    - Hick (1952): 选择数量影响反应时
-    - Nissen & Bullemer (1987): 序列长度影响学习难度
     """
-    
-    # 难度参数表（基于文献）
-    DIFFICULTY_PARAMS = {
-        "go_no_go": {
-            1: {"go_ratio": 0.90, "display_time": 8000, "dwell_time": 3000, "zones": 1},
-            2: {"go_ratio": 0.80, "display_time": 7000, "dwell_time": 3000, "zones": 1},
-            3: {"go_ratio": 0.70, "display_time": 6000, "dwell_time": 2500, "zones": 2},
-            4: {"go_ratio": 0.60, "display_time": 5000, "dwell_time": 2500, "zones": 2},
-            5: {"go_ratio": 0.50, "display_time": 4500, "dwell_time": 2000, "zones": 3},
-            6: {"go_ratio": 0.50, "display_time": 4000, "dwell_time": 2000, "zones": 3},
-            7: {"go_ratio": 0.40, "display_time": 3500, "dwell_time": 1500, "zones": 4},
-            8: {"go_ratio": 0.40, "display_time": 3000, "dwell_time": 1500, "zones": 4},
-        },
-        "choice_reaction": {
-            1: {"stimuli": 2, "colors": 2, "display_time": 8000, "dwell_time": 3000},
-            2: {"stimuli": 3, "colors": 2, "display_time": 7000, "dwell_time": 3000},
-            3: {"stimuli": 3, "colors": 3, "display_time": 6000, "dwell_time": 2500},
-            4: {"stimuli": 4, "colors": 3, "display_time": 5000, "dwell_time": 2500},
-            5: {"stimuli": 4, "colors": 4, "display_time": 4500, "dwell_time": 2000},
-            6: {"stimuli": 5, "colors": 4, "display_time": 4000, "dwell_time": 2000},
-            7: {"stimuli": 6, "colors": 5, "display_time": 3500, "dwell_time": 1500},
-            8: {"stimuli": 8, "colors": 5, "display_time": 3000, "dwell_time": 1500},
-        },
-        "serial_reaction": {
-            1: {"sequence_length": 3, "display_time": 6000, "dwell_time": 3000},
-            2: {"sequence_length": 4, "display_time": 5000, "dwell_time": 3000},
-            3: {"sequence_length": 4, "display_time": 4500, "dwell_time": 2500},
-            4: {"sequence_length": 5, "display_time": 4000, "dwell_time": 2500},
-            5: {"sequence_length": 5, "display_time": 3500, "dwell_time": 2000},
-            6: {"sequence_length": 6, "display_time": 3000, "dwell_time": 2000},
-            7: {"sequence_length": 7, "display_time": 2500, "dwell_time": 1500},
-            8: {"sequence_length": 8, "display_time": 2000, "dwell_time": 1500},
-        }
-    }
     
     def __init__(self, socketio, config: ProcessingSpeedConfig = None):
         super().__init__(socketio, config or ProcessingSpeedConfig())
-        
-        # 难度等级（1-8级）
-        self.difficulty_level = 3  # 默认中等难度
         
         # 当前训练模块
         self.current_module = TrainingModule.GO_NO_GO
@@ -116,25 +85,39 @@ class ProcessingSpeedGame(GameBase):
         self.module_start_time = 0
         self.module_duration = self.config.module_duration
         
+        # 难度等级（1-10）
+        self.difficulty_level = 5
+        
         # 模块统计
         self.module_stats = {
-            "go_no_go": {"correct": 0, "total": 0, "go_rt": [], "no_go_correct": 0, "no_go_total": 0},
+            "go_no_go": {"correct": 0, "total": 0, "go_rt": []},
             "choice_reaction": {"correct": 0, "total": 0, "rt_list": []},
             "serial_reaction": {"correct": 0, "total": 0, "sequences_completed": 0},
         }
-        
-        # 最近5个试次的表现（用于动态难度调整）
-        self.recent_trials = []
     
-    def get_difficulty_params(self) -> Dict:
+    def _get_difficulty_params(self) -> Dict:
         """获取当前难度的参数"""
-        level = max(1, min(8, self.difficulty_level))
-        module = self.current_module.value
-        return self.DIFFICULTY_PARAMS[module][level]
-    
-    def set_difficulty_level(self, level: int):
-        """设置难度等级（由难度调整器调用）"""
-        self.difficulty_level = max(1, min(8, int(level)))
+        level = self.difficulty_level
+        
+        return {
+            "go_no_go": {
+                "go_ratio": max(0.4, 0.9 - level * 0.05),
+                "display_time": max(3000, 8000 - level * 500),
+                "dwell_time": max(1500, 3000 - level * 150),
+                "zones": min(4, 1 + level // 2),
+            },
+            "choice_reaction": {
+                "stimuli": min(8, 2 + level // 2),
+                "colors": min(5, 2 + level // 3),
+                "display_time": max(3000, 8000 - level * 500),
+                "dwell_time": max(1500, 3000 - level * 150),
+            },
+            "serial_reaction": {
+                "sequence_length": min(8, 3 + level // 2),
+                "display_time": max(2000, 6000 - level * 400),
+                "dwell_time": max(1500, 3000 - level * 150),
+            }
+        }
     
     # ==================== 实现抽象方法 ====================
     def _on_ready(self):
@@ -146,11 +129,10 @@ class ProcessingSpeedGame(GameBase):
         self.current_sequence = []
         self.sequence_index = 0
         self.module_stats = {
-            "go_no_go": {"correct": 0, "total": 0, "go_rt": [], "no_go_correct": 0, "no_go_total": 0},
+            "go_no_go": {"correct": 0, "total": 0, "go_rt": []},
             "choice_reaction": {"correct": 0, "total": 0, "rt_list": []},
             "serial_reaction": {"correct": 0, "total": 0, "sequences_completed": 0},
         }
-        self.recent_trials = []
     
     def _on_start(self):
         """开始游戏回调"""
@@ -167,7 +149,7 @@ class ProcessingSpeedGame(GameBase):
         
         # 检查刺激超时
         if self.current_stimulus:
-            params = self.get_difficulty_params()
+            params = self._get_difficulty_params().get(self.current_module.value, {})
             display_time = params.get("display_time", 5000) / 1000
             
             if time.time() - self.stimulus_start_time > display_time:
@@ -189,14 +171,10 @@ class ProcessingSpeedGame(GameBase):
     
     def _on_settling(self):
         """结算回调 - 计算统计数据"""
-        total_correct = sum(m["correct"] for m in self.module_stats.values())
-        total_trials = sum(m["total"] for m in self.module_stats.values())
-        
         self.state.stats = {
             "modules": self.module_stats,
-            "total_trials": total_trials,
-            "total_correct": total_correct,
-            "accuracy": total_correct / max(1, total_trials),
+            "total_trials": sum(m["total"] for m in self.module_stats.values()),
+            "total_correct": sum(m["correct"] for m in self.module_stats.values()),
         }
     
     # ==================== 游戏逻辑 ====================
@@ -217,14 +195,8 @@ class ProcessingSpeedGame(GameBase):
         self._emit_stimulus()
     
     def _generate_go_no_go_trial(self):
-        """
-        生成Go/No-Go试次
-        
-        文献依据：
-        - Nielson et al. (2002): Go比例50-80%为最佳训练范围
-        - Rush et al. (2006): 呈现时间500-1000ms（地面交互需加移动时间）
-        """
-        params = self.get_difficulty_params()
+        """生成Go/No-Go试次"""
+        params = self._get_difficulty_params()["go_no_go"]
         
         is_go = random.random() < params["go_ratio"]
         num_zones = params["zones"]
@@ -246,16 +218,8 @@ class ProcessingSpeedGame(GameBase):
         }
     
     def _generate_choice_reaction_trial(self):
-        """
-        生成选择反应试次
-        
-        文献依据：
-        - Hick (1952): RT = a + b × log₂(n+1)，选择数量影响反应时
-        - Jensen (2006): CRT与智力相关r=0.45
-        """
-        # 获取选择反应模块的难度参数
-        level = max(1, min(8, self.difficulty_level))
-        params = self.DIFFICULTY_PARAMS["choice_reaction"][level]
+        """生成选择反应试次"""
+        params = self._get_difficulty_params()["choice_reaction"]
         
         num_stimuli = params["stimuli"]
         color_names = ["blue", "yellow", "purple", "orange"]
@@ -290,16 +254,8 @@ class ProcessingSpeedGame(GameBase):
         }
     
     def _generate_serial_reaction_trial(self):
-        """
-        生成序列反应试次
-        
-        文献依据：
-        - Nissen & Bullemer (1987): SRTT经典范式
-        - Howard & Howard (1997): 老年人序列学习
-        """
-        # 获取序列反应模块的难度参数
-        level = max(1, min(8, self.difficulty_level))
-        params = self.DIFFICULTY_PARAMS["serial_reaction"][level]
+        """生成序列反应试次"""
+        params = self._get_difficulty_params()["serial_reaction"]
         
         if self.sequence_index == 0 or self.sequence_index >= len(self.current_sequence):
             self.current_sequence = random.sample(range(1, 9), params["sequence_length"])
@@ -325,7 +281,7 @@ class ProcessingSpeedGame(GameBase):
         if not self.current_stimulus:
             return
         
-        rt = (time.time() - self.stimulus_start_time) * 1000  # 反应时间（毫秒）
+        rt = (time.time() - self.stimulus_start_time) * 1000
         correct = False
         
         if self.current_module == TrainingModule.GO_NO_GO:
@@ -334,15 +290,6 @@ class ProcessingSpeedGame(GameBase):
             correct = self._evaluate_choice_reaction(zone_id, rt)
         elif self.current_module == TrainingModule.SERIAL_REACTION:
             correct = self._evaluate_serial_reaction(zone_id)
-        
-        # 记录试次
-        self.recent_trials.append({"correct": correct, "rt": rt})
-        if len(self.recent_trials) > 5:
-            self.recent_trials.pop(0)
-        
-        # 动态难度调整（每5个试次）
-        if len(self.recent_trials) >= 5:
-            self._adjust_difficulty()
         
         # 发送反馈
         self._emit_feedback(correct, rt)
@@ -354,10 +301,6 @@ class ProcessingSpeedGame(GameBase):
         """处理超时"""
         stats = self.module_stats[self.current_module.value]
         stats["total"] += 1
-        
-        self.recent_trials.append({"correct": False, "rt": 0})
-        if len(self.recent_trials) > 5:
-            self.recent_trials.pop(0)
         
         self._emit_feedback(False, 0, timeout=True)
         self._start_next_trial()
@@ -371,17 +314,12 @@ class ProcessingSpeedGame(GameBase):
         target_zone = self.current_stimulus["target_zone"]
         
         if is_go:
-            # Go试次：应该踩目标区域
             if zone_id == target_zone:
                 stats["correct"] += 1
                 stats["go_rt"].append(rt)
-                self.state.score += int(100 * (1 + max(0, (5000 - rt) / 5000)))
+                self.state.score += int(100 * (1 + (5000 - rt) / 5000))
                 return True
-        else:
-            # No-Go试次：不应该踩任何区域
-            stats["no_go_total"] += 1
-            # 如果用户踩了，就是错误（这里已经踩了，所以是错误）
-        
+        # No-Go时不应该踩，踩了就是错误
         return False
     
     def _evaluate_choice_reaction(self, zone_id: int, rt: float) -> bool:
@@ -392,7 +330,7 @@ class ProcessingSpeedGame(GameBase):
         if zone_id == self.current_stimulus["target_zone"]:
             stats["correct"] += 1
             stats["rt_list"].append(rt)
-            self.state.score += int(100 * (1 + max(0, (5000 - rt) / 5000)))
+            self.state.score += int(100 * (1 + (5000 - rt) / 5000))
             return True
         return False
     
@@ -416,30 +354,6 @@ class ProcessingSpeedGame(GameBase):
             self.sequence_index = 0
             return False
     
-    def _adjust_difficulty(self):
-        """
-        动态难度调整
-        
-        文献依据：
-        - Ball et al. (2002) ACTIVE研究：正确率60-90%为最佳训练区间
-        - Loh et al. (2015)：每5个试次评估一次
-        """
-        if len(self.recent_trials) < 5:
-            return
-        
-        correct_count = sum(1 for t in self.recent_trials if t["correct"])
-        accuracy = correct_count / 5
-        
-        avg_rt = sum(t["rt"] for t in self.recent_trials if t["rt"] > 0) / max(1, sum(1 for t in self.recent_trials if t["rt"] > 0))
-        
-        # 调整规则
-        if accuracy < 0.6:
-            # 正确率过低，降低难度
-            self.difficulty_level = max(1, self.difficulty_level - 1)
-        elif accuracy > 0.9 and avg_rt < 3000:
-            # 正确率高且反应快，提高难度
-            self.difficulty_level = min(8, self.difficulty_level + 1)
-    
     def _next_module(self):
         """切换到下一个模块"""
         self.module_index += 1
@@ -458,11 +372,10 @@ class ProcessingSpeedGame(GameBase):
         self.socketio.emit("game_update", {
             "status": self.state.status,
             "score": self.state.score,
-            "timer": int(self.module_duration - (time.time() - self.module_start_time)),
+            "timer": self.state.timer,
             "module": self.current_module.value,
             "trial_id": self.trial_id,
             "stimulus": self.current_stimulus,
-            "difficulty_level": self.difficulty_level,
         })
     
     def _emit_feedback(self, correct: bool, rt: float, timeout: bool = False):
@@ -483,12 +396,6 @@ class ProcessingSpeedGame(GameBase):
         names = {"blue": "蓝色", "yellow": "黄色", "purple": "紫色", "orange": "橙色"}
         return names.get(color, color)
     
-    def get_state(self) -> Dict:
-        """获取游戏状态"""
-        state = super().get_state()
-        state.update({
-            "module": self.current_module.value,
-            "trial_id": self.trial_id,
-            "difficulty_level": self.difficulty_level,
-        })
-        return state
+    def set_difficulty_level(self, level: int):
+        """设置难度等级"""
+        self.difficulty_level = max(1, min(10, level))

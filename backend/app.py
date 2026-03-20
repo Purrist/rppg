@@ -62,7 +62,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from core import SystemStateManager, ask_akon, think, should_think, get_agent_state, ActionExecutor
 
 # 游戏系统
-from games import GameManager, GAME_REGISTRY, GAME_CONFIGS
+from games import GameManager, GAME_REGISTRY
 
 # 感知模块
 from perception import PerceptionManager, init_screen_processor, draw_detection_info
@@ -76,15 +76,11 @@ screen_proc = init_screen_processor(camera_source=PROJECTION_CAMERA_SOURCE, sock
 # 游戏管理器
 game_manager = GameManager(socketio)
 for game_id, game_class in GAME_REGISTRY.items():
-    config = GAME_CONFIGS.get(game_id)
-    game_manager.register(game_id, game_class, config)
+    game_manager.register(game_id, game_class)
 print(f"[游戏系统] 已注册游戏: {list(GAME_REGISTRY.keys())}")
 
 # 感知管理器
 perception_manager = PerceptionManager()
-
-# ⭐ 设置感知管理器引用到游戏管理器
-game_manager.set_perception_manager(perception_manager)
 
 # 状态管理器（世界模型）
 state_manager = SystemStateManager(socketio)
@@ -282,8 +278,7 @@ def api_health():
 
 @app.route('/api/user_state')
 def api_user_state():
-    """获取用户状态（感知信息）"""
-    return jsonify(perception_manager.get_state())
+    return jsonify(user_state)
 
 @app.route('/api/world_state')
 def api_world_state():
@@ -305,34 +300,6 @@ def api_game_config(game_id):
     if config:
         return jsonify(config)
     return jsonify({"error": "游戏不存在"}), 404
-
-# ==================== 难度调整 API ====================
-@app.route('/api/difficulty')
-def api_difficulty():
-    """获取当前难度参数"""
-    return jsonify({
-        "level": game_manager.get_difficulty_level(),
-        "params": game_manager.get_difficulty_params(),
-        "adjuster_state": game_manager.get_difficulty_adjuster_state(),
-    })
-
-@app.route('/api/difficulty/levels')
-def api_difficulty_levels():
-    """获取所有难度等级"""
-    return jsonify(game_manager.difficulty_adjuster.get_all_levels())
-
-@app.route('/api/difficulty/set', methods=['POST'])
-def api_set_difficulty():
-    """手动设置难度等级"""
-    data = request.get_json()
-    level = data.get('level', 5)
-    result = game_manager.set_difficulty_level(level)
-    return jsonify(result)
-
-@app.route('/api/difficulty/adjustment')
-def api_difficulty_adjustment():
-    """获取难度调整建议"""
-    return jsonify(perception_manager.get_difficulty_adjustment())
 
 # ============================================================================
 # 阿康对话 API

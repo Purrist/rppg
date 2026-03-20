@@ -15,7 +15,10 @@
         <div class="person-icon">{{ personDetected ? '👤' : '🚫' }}</div>
         <div class="person-text">{{ personDetected ? '有人' : '无人' }}</div>
         <div class="person-detail" v-if="personDetected">
-          人脸: {{ userState.face_count }} | 骨骼: {{ userState.skeleton_detected ? '✓' : '✗' }}
+          人脸: {{ userState.face_count }} | 骨骼: {{ userState.body_detected ? '✓' : '✗' }}
+        </div>
+        <div class="person-detail" v-else>
+          等待检测...
         </div>
       </div>
       
@@ -227,8 +230,9 @@ const status = reactive({
 
 const userState = reactive({
   person_detected: false,
+  face_detected: false,
+  body_detected: false,
   face_count: 0,
-  skeleton_detected: false,
   physical_load: { value: 0, heart_rate: null, movement_intensity: 0, fall_detected: false },
   cognitive_load: { value: 0, error_rate: 0, attention_stability: 1 },
   engagement: { value: 0.5, emotion_positive: 0.5, initiative_level: 0.5 },
@@ -354,6 +358,7 @@ async function updateStatus() {
   }
   
   try {
+    // 获取脚部位置
     const r = await fetch(`${baseUrl}/api/status`)
     if (r.ok) {
       const d = await r.json()
@@ -364,6 +369,7 @@ async function updateStatus() {
       status.feet_detected = d.feet_detected
     }
     
+    // 获取游戏状态
     const gr = await fetch(`${baseUrl}/api/system/state`)
     if (gr.ok) {
       const gd = await gr.json()
@@ -374,13 +380,39 @@ async function updateStatus() {
       }
     }
     
+    // ⭐ 获取用户状态（感知数据）
     const ur = await fetch(`${baseUrl}/api/user_state`)
     if (ur.ok) {
       const ud = await ur.json()
-      for (const key in ud) {
-        if (key in userState) {
-          userState[key] = ud[key]
-        }
+      // 更新所有字段
+      userState.person_detected = ud.person_detected || false
+      userState.face_detected = ud.face_detected || false
+      userState.body_detected = ud.body_detected || false
+      userState.face_count = ud.face_count || 0
+      
+      if (ud.physical_load) {
+        userState.physical_load = ud.physical_load
+      }
+      if (ud.cognitive_load) {
+        userState.cognitive_load = ud.cognitive_load
+      }
+      if (ud.engagement) {
+        userState.engagement = ud.engagement
+      }
+      if (ud.emotion) {
+        userState.emotion = ud.emotion
+      }
+      if (ud.posture) {
+        userState.posture = ud.posture
+      }
+      if (ud.activity) {
+        userState.activity = ud.activity
+      }
+      if (ud.environment) {
+        userState.environment = ud.environment
+      }
+      if (ud.overall) {
+        userState.overall = ud.overall
       }
     }
   } catch {
@@ -514,7 +546,7 @@ onMounted(async () => {
   
   resize()
   requestAnimationFrame(draw)
-  interval = setInterval(updateStatus, 500)
+  interval = setInterval(updateStatus, 200)  // 200ms更新一次
   window.addEventListener('resize', resize)
 })
 

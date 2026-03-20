@@ -27,14 +27,6 @@
       </div>
       
       <div class="l-card" @click="handleTodo">
-        <div class="l-icon">🎵</div>
-        <div class="l-text">
-          <h3>听音猜歌</h3>
-          <p>锻炼听觉记忆能力</p>
-        </div>
-      </div>
-      
-      <div class="l-card" @click="handleTodo">
         <div class="l-icon">🧠</div>
         <div class="l-text">
           <h3>记忆配对</h3>
@@ -53,12 +45,6 @@ import { io } from 'socket.io-client'
 const router = useRouter()
 let socket = null
 
-// 游戏到页面的映射
-const gamePageMap = {
-  'whack_a_mole': '/training',
-  'processing_speed': '/processing-speed',
-}
-
 const getBackendHost = () => {
   if (typeof window === 'undefined') return 'localhost'
   return window.location.hostname || 'localhost'
@@ -66,9 +52,6 @@ const getBackendHost = () => {
 
 const FLASK_PORT = 5000
 const backendUrl = `http://${getBackendHost()}:${FLASK_PORT}`
-
-// 当前等待的游戏
-const pendingGame = ref(null)
 
 onMounted(() => {
   socket = io(backendUrl, {
@@ -86,11 +69,9 @@ onMounted(() => {
   
   // 监听游戏状态变化
   socket.on('game_update', (data) => {
-    // 如果状态变为READY，跳转到对应页面
-    if (data.status === 'READY' && pendingGame.value) {
-      const page = gamePageMap[pendingGame.value] || '/training'
-      router.push(page)
-      pendingGame.value = null
+    // 如果状态变为READY，跳转到training页面
+    if (data.status === 'READY') {
+      router.push('/training')
     }
   })
   
@@ -111,7 +92,6 @@ const startGame = (gameName) => {
   console.log('[益智] 开始游戏:', gameName)
   
   if (socket && socket.connected) {
-    pendingGame.value = gameName
     socket.emit('game_control', { action: 'ready', game: gameName })
   } else {
     alert('后端未连接，请稍后重试')

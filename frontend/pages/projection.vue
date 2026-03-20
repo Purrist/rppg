@@ -26,7 +26,7 @@ let animationId = null
 
 // ==================== 游戏状态 ====================
 const gameState = ref('IDLE')
-const currentGame = ref('whack_a_mole')  // 当前游戏
+const currentGame = ref('whack_a_mole')  // 当前游戏类型
 const game = ref({
   status: 'IDLE',
   score: 0,
@@ -39,6 +39,9 @@ const game = ref({
 const psStimulus = ref(null)  // 处理速度训练刺激
 const psFeedback = ref(null)  // 处理速度训练反馈
 const psModule = ref('go_no_go')  // 当前模块
+const psZoneProgress = ref({})  // 区域停留进度
+const psZoneStartTime = ref({})  // 区域停留开始时间
+const PS_DWELL_DURATION = 3000  // 停留确认时间（3秒）
 
 // ==================== 用户位置 ====================
 const footPosition = reactive({ x: 320, y: 180, detected: false })
@@ -360,7 +363,6 @@ function drawMoleHoles() {
 // ==================== 绘制游戏信息 ====================
 function drawGameInfo() {
   if (!ctx) return
-  // ⭐ PLAYING 和 PAUSED 状态都显示游戏信息
   if (gameState.value !== 'PLAYING' && gameState.value !== 'PAUSED') return
   
   ctx.font = 'bold 40px Arial'
@@ -380,11 +382,9 @@ function drawPauseOverlay() {
   ctx.save()
   ctx.scale(scaleX, scaleY)
   
-  // 半透明遮罩
   ctx.fillStyle = 'rgba(0, 0, 0, 0.5)'
   ctx.fillRect(0, 0, canvasWidth, canvasHeight)
   
-  // 暂停文字
   ctx.font = 'bold 72px Arial'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
@@ -396,14 +396,14 @@ function drawPauseOverlay() {
 
 // ==================== 处理速度训练区域 ====================
 const psZones = [
-  { id: 1, x: 54 + 105, y: 150 + 105 },   // 区域1中心
-  { id: 2, x: 518 + 105, y: 150 + 105 },  // 区域2中心
-  { id: 3, x: 982 + 105, y: 150 + 105 },  // 区域3中心
-  { id: 4, x: 1446 + 105, y: 150 + 105 }, // 区域4中心
-  { id: 5, x: 54 + 105, y: 597 + 105 },   // 区域5中心
-  { id: 6, x: 518 + 105, y: 597 + 105 },  // 区域6中心
-  { id: 7, x: 982 + 105, y: 597 + 105 },  // 区域7中心
-  { id: 8, x: 1446 + 105, y: 597 + 105 }, // 区域8中心
+  { id: 1, x: 159, y: 255 },   // 区域1中心
+  { id: 2, x: 623, y: 255 },   // 区域2中心
+  { id: 3, x: 1087, y: 255 },  // 区域3中心
+  { id: 4, x: 1551, y: 255 },  // 区域4中心
+  { id: 5, x: 159, y: 702 },   // 区域5中心
+  { id: 6, x: 623, y: 702 },   // 区域6中心
+  { id: 7, x: 1087, y: 702 },  // 区域7中心
+  { id: 8, x: 1551, y: 702 },  // 区域8中心
 ]
 
 // 将投影坐标转换为画布坐标
@@ -453,6 +453,17 @@ function drawProcessingSpeed() {
     ctx.lineWidth = 3
     ctx.stroke()
     
+    // 绘制停留进度
+    const progress = psZoneProgress.value[i] || 0
+    if (progress > 0 && active) {
+      ctx.beginPath()
+      ctx.arc(pos.x, pos.y, zoneRadius, -Math.PI / 2, -Math.PI / 2 + (Math.PI * 2 * progress / 100))
+      ctx.strokeStyle = '#FFD700'
+      ctx.lineWidth = 8
+      ctx.lineCap = 'round'
+      ctx.stroke()
+    }
+    
     // 绘制区域编号
     ctx.font = 'bold 24px Arial'
     ctx.textAlign = 'center'
@@ -500,7 +511,7 @@ function draw() {
   updateParticles()
   drawParticles()
   
-  // 根据游戏类型选择绘制
+  // ⭐ 根据游戏类型选择绘制
   if (currentGame.value === 'processing_speed') {
     // 处理速度训练
     if (gameState.value === 'READY') {
@@ -580,6 +591,13 @@ function updatePlayingState() {
   
   const now = Date.now()
   
+  // 处理速度训练的停留检测
+  if (currentGame.value === 'processing_speed') {
+    updateProcessingSpeedState(now)
+    return
+  }
+  
+  // 打地鼠的停留检测
   holes.forEach((hole, index) => {
     const feedback = holeFeedback.value[index]
     const feedbackTime = holeFeedbackTime.value[index]
@@ -621,6 +639,54 @@ function updatePlayingState() {
   })
 }
 
+// ==================== 处理速度训练停留检测 ====================
+function updateProcessingSpeedState(now) {
+  if (!psStimulus.value?.zones) return
+  
+  const zoneRadius = 105 * canvasWidth / 1920
+  
+  // 检查每个区域
+  for (let i = 0; i < 8; i++) {
+    const zone = psZones[i]
+    const pos = projToCanvas(zone.x, zone.y)
+    
+    // 只检测激活的区域
+    const zoneState = psStimulus.value.zones[i + 1]
+    if (!zoneState?.active) continue
+    
+    const dx = footPosition.x - pos.x
+    const dy = footPosition.y - pos.y
+    const inZone = footPosition.detected && (dx * dx + dy * dy <= zoneRadius * zoneRadius)
+    
+    if (inZone) {
+      if (!psZoneStartTime.value[i]) {
+        psZoneStartTime.value[i] = now
+      }
+      
+      const elapsed = now - psZoneStartTime.value[i]
+      psZoneProgress.value[i] = Math.min(100, (elapsed / PS_DWELL_DURATION) * 100)
+      
+      if (psZoneProgress.value[i] >= 100) {
+        // 停留完成，发送事件
+        if (socket) {
+          socket.emit('game_action', {
+            action: 'zone_dwell_completed',
+            zone_id: i + 1,
+            dwell_time: elapsed
+          })
+        }
+        
+        // 重置
+        psZoneProgress.value[i] = 0
+        psZoneStartTime.value[i] = 0
+      }
+    } else {
+      psZoneProgress.value[i] = 0
+      psZoneStartTime.value[i] = 0
+    }
+  }
+}
+
 // ==================== 状态更新 ====================
 async function updateStatus() {
   try {
@@ -651,6 +717,8 @@ watch(() => game.value.status, (newStatus, oldStatus) => {
     holeProgress.value = [0, 0, 0]
     holeStartTime.value = [0, 0, 0]
     holeFeedback.value = [null, null, null]
+    psZoneProgress.value = {}
+    psZoneStartTime.value = {}
     initParticles()
   } else if (newStatus === 'READY') {
     readyProgress.value = 0
@@ -660,9 +728,10 @@ watch(() => game.value.status, (newStatus, oldStatus) => {
     holeProgress.value = [0, 0, 0]
     holeStartTime.value = [0, 0, 0]
     holeFeedback.value = [null, null, null]
+    psZoneProgress.value = {}
+    psZoneStartTime.value = {}
     particles = []
   } else if (newStatus === 'PAUSED') {
-    // ⭐ 暂停状态：保持游戏界面，不做任何重置
     console.log('[投影] 游戏暂停')
   }
 })
@@ -679,14 +748,13 @@ onMounted(() => {
     socket.emit('get_state', { client: 'projection' })
   })
   
-  // ⭐ 只从 game_update 获取数据，忽略 system_state
   socket.on('game_update', (data) => {
-    // 直接更新，不做任何过滤
+    // 更新游戏状态
     game.value.status = data.status || 'IDLE'
     game.value.score = data.score || 0
     game.value.timer = data.timer || 60
     
-    // 更新当前游戏
+    // ⭐ 根据module判断游戏类型
     if (data.module) {
       currentGame.value = 'processing_speed'
       psModule.value = data.module
@@ -699,7 +767,7 @@ onMounted(() => {
       game.value.current_mole = data.extra.current_mole ?? -1
     }
     if (data.stats) {
-      game.value.accuracy = data.stats.accuracy || 0
+      game.value.accuracy = Math.round((data.stats.accuracy || 0) * 100)
     }
     
     // 处理速度训练数据
@@ -708,16 +776,14 @@ onMounted(() => {
     }
     if (data.feedback) {
       psFeedback.value = data.feedback
-      // 2秒后清除反馈
       setTimeout(() => {
         psFeedback.value = null
       }, 2000)
     }
   })
   
-  // ⭐ 完全忽略 system_state，避免数据冲突
   socket.on('system_state', (data) => {
-    // 不做任何处理
+    // 不做处理
   })
   
   setTimeout(() => {

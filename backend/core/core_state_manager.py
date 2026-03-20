@@ -78,29 +78,13 @@ class SystemStateManager:
         emotion = perception_data.get("emotion", {})
         elder["mood"] = emotion.get("primary", "neutral")
         
-        # 注意力 - 兼容新旧数据结构
-        attention = perception_data.get("attention_score")
-        if attention is None:
-            eye = perception_data.get("eye_state_detail", {})
-            attention = eye.get("attention_score", 0.5)
-        elder["attention"] = attention
+        # 注意力
+        eye = perception_data.get("eye_state", {})
+        elder["attention"] = eye.get("attention_score", 0.5)
         
-        # 疲劳度 - 兼容新旧数据结构
+        # 疲劳度
         overall = perception_data.get("overall", {})
         elder["fatigue"] = overall.get("fatigue_level", 0.0)
-        
-        # 新增：三维指标
-        physical_load = perception_data.get("physical_load", {})
-        cognitive_load = perception_data.get("cognitive_load", {})
-        engagement = perception_data.get("engagement", {})
-        
-        # 更新世界状态中的三维指标
-        if physical_load:
-            elder["physical_load"] = physical_load.get("value", 0.0)
-        if cognitive_load:
-            elder["cognitive_load"] = cognitive_load.get("value", 0.0)
-        if engagement:
-            elder["engagement"] = engagement.get("value", 0.5)
         
         # 空闲时间
         if elder["speaking"] or elder["activity_changed"]:
