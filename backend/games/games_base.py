@@ -194,3 +194,8 @@ class GameBase(ABC):
     
     def _on_difficulty_change(self, difficulty: str):
         pass
+    
+    def update_params(self, params: Dict):
+        """更新游戏参数（由GameManager调用）"""
+        # 子类可以重写此方法接收动态参数
+        pass

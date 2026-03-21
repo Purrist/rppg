@@ -62,7 +62,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from core import SystemStateManager, ask_akon, think, should_think, get_agent_state, ActionExecutor
 
 # 游戏系统
-from games import GameManager, GAME_REGISTRY
+from games import GameManager, GAME_REGISTRY, GAME_CONFIGS
 
 # 感知模块
 from perception import PerceptionManager, init_screen_processor, draw_detection_info
@@ -76,7 +76,8 @@ screen_proc = init_screen_processor(camera_source=PROJECTION_CAMERA_SOURCE, sock
 # 游戏管理器
 game_manager = GameManager(socketio)
 for game_id, game_class in GAME_REGISTRY.items():
-    game_manager.register(game_id, game_class)
+    config = GAME_CONFIGS.get(game_id)
+    game_manager.register(game_id, game_class, config)
 print(f"[游戏系统] 已注册游戏: {list(GAME_REGISTRY.keys())}")
 
 # 感知管理器
@@ -371,7 +372,13 @@ def handle_game_control(data):
     print(f"[游戏控制] action={action}, game={game_id}")
     
     if action == 'ready':
-        game_manager.set_ready(game_id)
+        # ⭐ 在准备游戏时，传递游戏参数
+        game_params = {}
+        # 从请求数据中获取 dwell_time（前端传来）
+        dwell_time = data.get('dwell_time', 2000)
+        game_params['dwell_time'] = dwell_time
+        print(f"[游戏控制] {game_id} 确认时间: {dwell_time}ms")
+        game_manager.set_ready(game_id, game_params=game_params)
     
     elif action == 'start':
         game_manager.start_game()
@@ -411,9 +418,19 @@ def handle_game_action(data):
     """处理游戏内动作"""
     action = data.get('action')
     zone = data.get('zone', -1)
+    zone_id = data.get('zone_id', -1)  # 处理速度训练使用 zone_id
     success = data.get('success', False)
+    dwell_time = data.get('dwell_time', 0)
     
-    game_manager.handle_action(action, {"zone": zone, "success": success})
+    # 优先使用 zone_id（处理速度训练），否则使用 zone
+    actual_zone = zone_id if zone_id > 0 else zone
+    
+    game_manager.handle_action(action, {
+        "zone": actual_zone,
+        "zone_id": zone_id,
+        "success": success,
+        "dwell_time": dwell_time
+    })
 
 @socketio.on('game_hit')
 def handle_game_hit(data):

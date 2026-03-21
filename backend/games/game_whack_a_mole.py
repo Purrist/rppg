@@ -103,6 +103,18 @@ class WhackAMoleGame(GameBase):
         self.mole_interval = params["mole_interval"]
         print(f"[打地鼠] 难度设置为: {difficulty}")
     
+    def update_params(self, params: Dict):
+        """更新游戏参数 - 接收统一的确认时间"""
+        if 'dwell_time' in params:
+            # 打地鼠使用确认时间作为停留判定时间
+            self._dwell_time_ms = params['dwell_time']
+            self._dwell_time_s = self._dwell_time_ms / 1000
+            print(f"[打地鼠] 更新确认时间: {self._dwell_time_ms}ms ({self._dwell_time_s}s)")
+    
+    def get_dwell_time(self) -> int:
+        """获取确认时间（毫秒）"""
+        return getattr(self, '_dwell_time_ms', 2000)
+    
     def _spawn_mole(self):
         """生成地鼠 - 不发送状态，由 update() 统一发送"""
         self.current_mole = random.randint(0, 2)

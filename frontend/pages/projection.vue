@@ -1,12 +1,34 @@
 <template>
   <div class="projection-page" ref="pageRef">
-    <canvas ref="mainCanvas"></canvas>
+    <!-- 底层：主Canvas（背景、粒子、绿点等） -->
+    <canvas ref="mainCanvas" class="main-canvas"></canvas>
+    
+    <!-- 中层：游戏内容（处理速度训练的8个区域） -->
+    <ProcessingSpeedGame
+      v-if="gameState === 'PLAYING' && currentGame === 'processing_speed'"
+      :game-state="game"
+      :foot-position="footPosition"
+      :canvas-width="containerWidth"
+      :canvas-height="containerHeight"
+      :scale-x="scaleX"
+      :scale-y="scaleY"
+      @action="handleGameAction"
+      class="game-layer"
+    />
+    
+    <!-- 顶层：绿点（始终显示在最上层） -->
+    <canvas ref="footCanvas" class="foot-canvas"></canvas>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, onMounted, onUnmounted, watch } from 'vue'
 import { io } from 'socket.io-client'
+import { initGameState, setCurrentGame, setGameStatus, updateGameData, getDwellTime } from '../composables/useGameState.js'
+import ProcessingSpeedGame from '../components/ProcessingSpeedGame.vue'
+
+// 初始化游戏状态管理
+initGameState()
 
 // ==================== 配置 ====================
 const getBackendHost = () => {
@@ -20,28 +42,43 @@ const apiUrl = backendUrl
 
 // ==================== Canvas ====================
 const mainCanvas = ref(null)
+const footCanvas = ref(null)
 const pageRef = ref(null)
 let ctx = null
+let footCtx = null
 let animationId = null
+let footAnimationId = null
+
+// ==================== 画布尺寸 ====================
+const canvasWidth = 640
+const canvasHeight = 360
+const scaleX = ref(1)
+const scaleY = ref(1)
+// ⭐ 实际容器尺寸（用于传递给游戏组件）
+const containerWidth = ref(1920)
+const containerHeight = ref(1080)
 
 // ==================== 游戏状态 ====================
 const gameState = ref('IDLE')
-const currentGame = ref('whack_a_mole')  // 当前游戏类型
+const currentGame = ref(null)  // ⭐ 初始为 null，等待后端确认
 const game = ref({
   status: 'IDLE',
   score: 0,
   timer: 60,
   current_mole: -1,
-  accuracy: 0
+  accuracy: 0,
+  module: null,
+  difficulty_level: 3,
+  stimulus: null,
+  feedback: null,
+  dwell_time: 3.0,  // ⭐ 确认时间（秒）
+  in_interval: true,  // ⭐ 是否在间隔期
+  question: null,  // ⭐ 当前题目
+  remaining_time: 0  // ⭐ 剩余作答时间
 })
 
-// ==================== 处理速度训练状态 ====================
-const psStimulus = ref(null)  // 处理速度训练刺激
-const psFeedback = ref(null)  // 处理速度训练反馈
-const psModule = ref('go_no_go')  // 当前模块
-const psZoneProgress = ref({})  // 区域停留进度
-const psZoneStartTime = ref({})  // 区域停留开始时间
-const PS_DWELL_DURATION = 3000  // 停留确认时间（3秒）
+// ==================== 处理速度训练状态（通过组件处理）====================
+// 注意：游戏中内容在ProcessingSpeedGame.vue组件中处理
 
 // ==================== 用户位置 ====================
 const footPosition = reactive({ x: 320, y: 180, detected: false })
@@ -64,8 +101,13 @@ const holeProgress = ref([0, 0, 0])
 const holeStartTime = ref([0, 0, 0])
 const holeFeedback = ref([null, null, null])
 const holeFeedbackTime = ref([0, 0, 0])
-const HOLE_DURATION = 2000
+// ⭐ 从统一状态管理读取确认时间
+const getHoleDuration = () => {
+  return getDwellTime()
+}
 const FEEDBACK_DURATION = 1000
+
+// 注意：处理速度训练的游戏内容在ProcessingSpeedGame.vue组件中处理
 
 // ==================== 粒子系统 ====================
 let particles = []
@@ -74,12 +116,6 @@ let particles = []
 let socket = null
 let statusInterval = null
 
-// ==================== 画布尺寸 ====================
-let canvasWidth = 640
-let canvasHeight = 360
-let scaleX = 1
-let scaleY = 1
-
 // ==================== 初始化Canvas ====================
 function initCanvas() {
   if (!mainCanvas.value || !pageRef.value) return
@@ -87,11 +123,22 @@ function initCanvas() {
   const container = pageRef.value
   mainCanvas.value.width = container.clientWidth
   mainCanvas.value.height = container.clientHeight
-  
-  scaleX = container.clientWidth / canvasWidth
-  scaleY = container.clientHeight / canvasHeight
+
+  // ⭐ 更新容器尺寸
+  containerWidth.value = container.clientWidth
+  containerHeight.value = container.clientHeight
+
+  scaleX.value = container.clientWidth / canvasWidth
+  scaleY.value = container.clientHeight / canvasHeight
   
   ctx = mainCanvas.value.getContext('2d')
+  
+  // 初始化绿点Canvas
+  if (footCanvas.value) {
+    footCanvas.value.width = container.clientWidth
+    footCanvas.value.height = container.clientHeight
+    footCtx = footCanvas.value.getContext('2d')
+  }
   
   if (particles.length === 0) {
     initParticles()
@@ -167,7 +214,7 @@ function drawParticles() {
   if (!ctx || gameState.value === 'PLAYING') return
   
   ctx.save()
-  ctx.scale(scaleX, scaleY)
+  ctx.scale(scaleX.value, scaleY.value)
   
   particles.forEach(p => {
     const alpha = p.alpha * p.life
@@ -206,9 +253,12 @@ function drawBackground() {
   ctx.fillRect(0, 0, mainCanvas.value.width, mainCanvas.value.height)
 }
 
-// ==================== 绘制绿点 ====================
+// ==================== 绘制绿点（独立Canvas，始终在最上层） ====================
 function drawFootPoint() {
-  if (!ctx || !footPosition.detected) return
+  if (!footCtx || !footPosition.detected) return
+  
+  // 清空绿点Canvas
+  footCtx.clearRect(0, 0, footCanvas.value.width, footCanvas.value.height)
   
   let x = Math.max(50, Math.min(590, footPosition.x))
   let y = Math.max(50, Math.min(310, footPosition.y))
@@ -216,28 +266,42 @@ function drawFootPoint() {
   if (!Number.isFinite(x)) x = 320
   if (!Number.isFinite(y)) y = 180
   
-  ctx.save()
-  ctx.scale(scaleX, scaleY)
+  footCtx.save()
+  footCtx.scale(scaleX.value, scaleY.value)
   
-  ctx.beginPath()
-  ctx.arc(x, y, 40, 0, Math.PI * 2)
-  ctx.fillStyle = 'rgba(51, 181, 85, 0.25)'
-  ctx.fill()
+  // 外圈光晕
+  footCtx.beginPath()
+  footCtx.arc(x, y, 40, 0, Math.PI * 2)
+  footCtx.fillStyle = 'rgba(51, 181, 85, 0.25)'
+  footCtx.fill()
   
-  ctx.beginPath()
-  ctx.arc(x, y, 25, 0, Math.PI * 2)
-  const gradient = ctx.createRadialGradient(x, y, 0, x, y, 25)
+  // 中圈
+  footCtx.beginPath()
+  footCtx.arc(x, y, 25, 0, Math.PI * 2)
+  const gradient = footCtx.createRadialGradient(x, y, 0, x, y, 25)
   gradient.addColorStop(0, '#55ee77')
   gradient.addColorStop(1, '#228B22')
-  ctx.fillStyle = gradient
-  ctx.fill()
+  footCtx.fillStyle = gradient
+  footCtx.fill()
   
-  ctx.beginPath()
-  ctx.arc(x, y, 9, 0, Math.PI * 2)
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.95)'
-  ctx.fill()
+  // 内圈高光
+  footCtx.beginPath()
+  footCtx.arc(x, y, 9, 0, Math.PI * 2)
+  footCtx.fillStyle = 'rgba(255, 255, 255, 0.95)'
+  footCtx.fill()
   
-  ctx.restore()
+  footCtx.restore()
+}
+
+// ==================== 绿点动画循环 ====================
+function drawFootLoop() {
+  if (footPosition.detected) {
+    drawFootPoint()
+  } else if (footCtx && footCanvas.value) {
+    // 没有检测到人时清空
+    footCtx.clearRect(0, 0, footCanvas.value.width, footCanvas.value.height)
+  }
+  footAnimationId = requestAnimationFrame(drawFootLoop)
 }
 
 // ==================== 绘制等待圈 ====================
@@ -245,7 +309,7 @@ function drawReadyCircle() {
   if (!ctx) return
   
   ctx.save()
-  ctx.scale(scaleX, scaleY)
+  ctx.scale(scaleX.value, scaleY.value)
   
   const cx = 320, cy = 180, radius = 80
   
@@ -278,7 +342,7 @@ function drawSettling() {
   if (!ctx) return
   
   ctx.save()
-  ctx.scale(scaleX, scaleY)
+  ctx.scale(scaleX.value, scaleY.value)
   
   ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'
   ctx.fillRect(0, 0, canvasWidth, canvasHeight)
@@ -300,12 +364,12 @@ function drawSettling() {
   ctx.restore()
 }
 
-// ==================== 绘制地鼠洞 ====================
+// ==================== 绘制地鼠洞 (打地鼠游戏) ====================
 function drawMoleHoles() {
   if (!ctx) return
   
   ctx.save()
-  ctx.scale(scaleX, scaleY)
+  ctx.scale(scaleX.value, scaleY.value)
   
   holes.forEach((hole, index) => {
     const hasMole = game.value.current_mole === index
@@ -365,6 +429,9 @@ function drawGameInfo() {
   if (!ctx) return
   if (gameState.value !== 'PLAYING' && gameState.value !== 'PAUSED') return
   
+  // 处理速度训练有自己的游戏信息显示
+  if (currentGame.value === 'processing_speed') return
+  
   ctx.font = 'bold 40px Arial'
   ctx.textAlign = 'center'
   ctx.fillStyle = '#ffffff'
@@ -380,7 +447,7 @@ function drawPauseOverlay() {
   if (!ctx) return
   
   ctx.save()
-  ctx.scale(scaleX, scaleY)
+  ctx.scale(scaleX.value, scaleY.value)
   
   ctx.fillStyle = 'rgba(0, 0, 0, 0.5)'
   ctx.fillRect(0, 0, canvasWidth, canvasHeight)
@@ -390,113 +457,6 @@ function drawPauseOverlay() {
   ctx.textBaseline = 'middle'
   ctx.fillStyle = '#ffffff'
   ctx.fillText('已暂停', canvasWidth / 2, canvasHeight / 2)
-  
-  ctx.restore()
-}
-
-// ==================== 处理速度训练区域 ====================
-const psZones = [
-  { id: 1, x: 159, y: 255 },   // 区域1中心
-  { id: 2, x: 623, y: 255 },   // 区域2中心
-  { id: 3, x: 1087, y: 255 },  // 区域3中心
-  { id: 4, x: 1551, y: 255 },  // 区域4中心
-  { id: 5, x: 159, y: 702 },   // 区域5中心
-  { id: 6, x: 623, y: 702 },   // 区域6中心
-  { id: 7, x: 1087, y: 702 },  // 区域7中心
-  { id: 8, x: 1551, y: 702 },  // 区域8中心
-]
-
-// 将投影坐标转换为画布坐标
-function projToCanvas(x, y) {
-  return {
-    x: x * canvasWidth / 1920,
-    y: y * canvasHeight / 1080
-  }
-}
-
-// 绘制处理速度训练界面
-function drawProcessingSpeed() {
-  if (!ctx) return
-  
-  ctx.save()
-  ctx.scale(scaleX, scaleY)
-  
-  // 绘制8个区域
-  const zoneRadius = 105 * canvasWidth / 1920
-  
-  for (let i = 0; i < 8; i++) {
-    const zone = psZones[i]
-    const pos = projToCanvas(zone.x, zone.y)
-    
-    // 获取区域状态
-    let color = '#D9D9D9'  // 默认灰色
-    let active = false
-    
-    if (psStimulus.value?.zones) {
-      const zoneState = psStimulus.value.zones[i + 1]
-      if (zoneState?.active) {
-        color = zoneState.color || '#D9D9D9'
-        active = true
-      }
-    }
-    
-    // 绘制区域
-    ctx.beginPath()
-    ctx.arc(pos.x, pos.y, zoneRadius, 0, Math.PI * 2)
-    ctx.fillStyle = color
-    ctx.fill()
-    
-    // 绘制边框
-    ctx.beginPath()
-    ctx.arc(pos.x, pos.y, zoneRadius, 0, Math.PI * 2)
-    ctx.strokeStyle = active ? '#fff' : '#888'
-    ctx.lineWidth = 3
-    ctx.stroke()
-    
-    // 绘制停留进度
-    const progress = psZoneProgress.value[i] || 0
-    if (progress > 0 && active) {
-      ctx.beginPath()
-      ctx.arc(pos.x, pos.y, zoneRadius, -Math.PI / 2, -Math.PI / 2 + (Math.PI * 2 * progress / 100))
-      ctx.strokeStyle = '#FFD700'
-      ctx.lineWidth = 8
-      ctx.lineCap = 'round'
-      ctx.stroke()
-    }
-    
-    // 绘制区域编号
-    ctx.font = 'bold 24px Arial'
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    ctx.fillStyle = active ? '#fff' : '#666'
-    ctx.fillText(i + 1, pos.x, pos.y)
-  }
-  
-  // 绘制模块指示
-  const moduleNames = {
-    'go_no_go': '反应控制',
-    'choice_reaction': '选择反应',
-    'serial_reaction': '序列学习'
-  }
-  
-  ctx.font = 'bold 28px Arial'
-  ctx.textAlign = 'center'
-  ctx.fillStyle = '#fff'
-  ctx.fillText(moduleNames[psModule.value] || '处理速度训练', canvasWidth / 2, 30)
-  
-  // 绘制指令
-  if (psStimulus.value?.instruction) {
-    ctx.font = 'bold 36px Arial'
-    ctx.fillStyle = '#FFD700'
-    ctx.fillText(psStimulus.value.instruction, canvasWidth / 2, canvasHeight - 50)
-  }
-  
-  // 绘制反馈
-  if (psFeedback.value) {
-    ctx.font = 'bold 48px Arial'
-    ctx.fillStyle = psFeedback.value.correct ? '#33B555' : '#FF4444'
-    ctx.fillText(psFeedback.value.message, canvasWidth / 2, canvasHeight / 2)
-  }
   
   ctx.restore()
 }
@@ -511,38 +471,28 @@ function draw() {
   updateParticles()
   drawParticles()
   
-  // ⭐ 根据游戏类型选择绘制
-  if (currentGame.value === 'processing_speed') {
-    // 处理速度训练
-    if (gameState.value === 'READY') {
-      drawReadyCircle()
-    } else if (gameState.value === 'PLAYING') {
-      drawProcessingSpeed()
-      drawGameInfo()
-    } else if (gameState.value === 'PAUSED') {
-      drawProcessingSpeed()
-      drawGameInfo()
-      drawPauseOverlay()
-    } else if (gameState.value === 'SETTLING') {
-      drawSettling()
-    }
-  } else {
-    // 打地鼠（默认）
-    if (gameState.value === 'READY') {
-      drawReadyCircle()
-    } else if (gameState.value === 'PLAYING') {
+  // 根据游戏类型和状态选择绘制
+  if (gameState.value === 'READY') {
+    drawReadyCircle()
+  } else if (gameState.value === 'PLAYING') {
+    // 打地鼠游戏在主Canvas绘制
+    if (currentGame.value === 'whack_a_mole') {
       drawMoleHoles()
       drawGameInfo()
-    } else if (gameState.value === 'PAUSED') {
+    }
+    // 注意：处理速度训练在ProcessingSpeedGame.vue组件中绘制
+  } else if (gameState.value === 'PAUSED') {
+    if (currentGame.value === 'whack_a_mole') {
       drawMoleHoles()
       drawGameInfo()
-      drawPauseOverlay()
-    } else if (gameState.value === 'SETTLING') {
-      drawSettling()
     }
+    // 注意：处理速度训练在ProcessingSpeedGame.vue组件中绘制
+    drawPauseOverlay()
+  } else if (gameState.value === 'SETTLING') {
+    drawSettling()
   }
   
-  drawFootPoint()
+  // ⭐ 绿点现在由独立的 footCanvas 绘制，始终在最上层
   
   animationId = requestAnimationFrame(draw)
 }
@@ -585,104 +535,68 @@ function updateReadyState() {
   }
 }
 
-// ==================== PLAYING状态逻辑 ====================
+// ==================== PLAYING状态逻辑 (打地鼠) ====================
 function updatePlayingState() {
   if (gameState.value !== 'PLAYING') return
-  
+
   const now = Date.now()
-  
-  // 处理速度训练的停留检测
-  if (currentGame.value === 'processing_speed') {
-    updateProcessingSpeedState(now)
-    return
-  }
-  
-  // 打地鼠的停留检测
-  holes.forEach((hole, index) => {
-    const feedback = holeFeedback.value[index]
-    const feedbackTime = holeFeedbackTime.value[index]
-    
-    if (feedback) {
-      if (now - feedbackTime > FEEDBACK_DURATION) {
-        holeFeedback.value[index] = null
+
+  // 处理打地鼠游戏的交互
+  if (currentGame.value === 'whack_a_mole') {
+    holes.forEach((hole, index) => {
+      const feedback = holeFeedback.value[index]
+      const feedbackTime = holeFeedbackTime.value[index]
+
+      if (feedback) {
+        if (now - feedbackTime > FEEDBACK_DURATION) {
+          holeFeedback.value[index] = null
+          holeProgress.value[index] = 0
+          holeStartTime.value[index] = 0
+        }
+        return
+      }
+
+      const dx = footPosition.x - hole.x
+      const dy = footPosition.y - hole.y
+      const inHole = footPosition.detected && (dx * dx + dy * dy <= hole.radius * hole.radius)
+
+      if (inHole) {
+        if (holeStartTime.value[index] === 0) {
+          holeStartTime.value[index] = now
+        }
+
+        const elapsed = now - holeStartTime.value[index]
+        const holeDuration = getHoleDuration()
+        holeProgress.value[index] = Math.min(100, (elapsed / holeDuration) * 100)
+
+        if (holeProgress.value[index] >= 100) {
+          const hit = game.value.current_mole === index
+          holeFeedback.value[index] = hit ? 'correct' : 'wrong'
+          holeFeedbackTime.value[index] = now
+
+          if (socket) {
+            socket.emit('game_hit', { hole: index, hit })
+          }
+        }
+      } else {
         holeProgress.value[index] = 0
         holeStartTime.value[index] = 0
       }
-      return
-    }
-    
-    const dx = footPosition.x - hole.x
-    const dy = footPosition.y - hole.y
-    const inHole = footPosition.detected && (dx * dx + dy * dy <= hole.radius * hole.radius)
-    
-    if (inHole) {
-      if (holeStartTime.value[index] === 0) {
-        holeStartTime.value[index] = now
-      }
-      
-      const elapsed = now - holeStartTime.value[index]
-      holeProgress.value[index] = Math.min(100, (elapsed / HOLE_DURATION) * 100)
-      
-      if (holeProgress.value[index] >= 100) {
-        const hit = game.value.current_mole === index
-        holeFeedback.value[index] = hit ? 'correct' : 'wrong'
-        holeFeedbackTime.value[index] = now
-        
-        if (socket) {
-          socket.emit('game_hit', { hole: index, hit })
-        }
-      }
-    } else {
-      holeProgress.value[index] = 0
-      holeStartTime.value[index] = 0
-    }
-  })
+    })
+  }
+
+  // 注意：处理速度训练的交互在ProcessingSpeedGame.vue组件中处理
 }
 
-// ==================== 处理速度训练停留检测 ====================
-function updateProcessingSpeedState(now) {
-  if (!psStimulus.value?.zones) return
-  
-  const zoneRadius = 105 * canvasWidth / 1920
-  
-  // 检查每个区域
-  for (let i = 0; i < 8; i++) {
-    const zone = psZones[i]
-    const pos = projToCanvas(zone.x, zone.y)
-    
-    // 只检测激活的区域
-    const zoneState = psStimulus.value.zones[i + 1]
-    if (!zoneState?.active) continue
-    
-    const dx = footPosition.x - pos.x
-    const dy = footPosition.y - pos.y
-    const inZone = footPosition.detected && (dx * dx + dy * dy <= zoneRadius * zoneRadius)
-    
-    if (inZone) {
-      if (!psZoneStartTime.value[i]) {
-        psZoneStartTime.value[i] = now
-      }
-      
-      const elapsed = now - psZoneStartTime.value[i]
-      psZoneProgress.value[i] = Math.min(100, (elapsed / PS_DWELL_DURATION) * 100)
-      
-      if (psZoneProgress.value[i] >= 100) {
-        // 停留完成，发送事件
-        if (socket) {
-          socket.emit('game_action', {
-            action: 'zone_dwell_completed',
-            zone_id: i + 1,
-            dwell_time: elapsed
-          })
-        }
-        
-        // 重置
-        psZoneProgress.value[i] = 0
-        psZoneStartTime.value[i] = 0
-      }
-    } else {
-      psZoneProgress.value[i] = 0
-      psZoneStartTime.value[i] = 0
+// ==================== 处理游戏组件事件 ====================
+function handleGameAction(action) {
+  if (action.type === 'zone_dwell_completed') {
+    if (socket) {
+      socket.emit('game_action', {
+        action: 'zone_dwell_completed',
+        zone_id: action.zone_id,
+        dwell_time: action.dwell_time
+      })
     }
   }
 }
@@ -717,8 +631,6 @@ watch(() => game.value.status, (newStatus, oldStatus) => {
     holeProgress.value = [0, 0, 0]
     holeStartTime.value = [0, 0, 0]
     holeFeedback.value = [null, null, null]
-    psZoneProgress.value = {}
-    psZoneStartTime.value = {}
     initParticles()
   } else if (newStatus === 'READY') {
     readyProgress.value = 0
@@ -728,8 +640,6 @@ watch(() => game.value.status, (newStatus, oldStatus) => {
     holeProgress.value = [0, 0, 0]
     holeStartTime.value = [0, 0, 0]
     holeFeedback.value = [null, null, null]
-    psZoneProgress.value = {}
-    psZoneStartTime.value = {}
     particles = []
   } else if (newStatus === 'PAUSED') {
     console.log('[投影] 游戏暂停')
@@ -749,19 +659,67 @@ onMounted(() => {
   })
   
   socket.on('game_update', (data) => {
+    console.log('[projection] game_update:', data)
+
     // 更新游戏状态
     game.value.status = data.status || 'IDLE'
     game.value.score = data.score || 0
     game.value.timer = data.timer || 60
-    
-    // ⭐ 根据module判断游戏类型
-    if (data.module) {
+
+    // ⭐ 严格根据 game_id 判断游戏类型
+    const gameId = data.game_id || ''
+    console.log('[projection] game_id:', gameId, 'currentGame:', currentGame.value)
+
+    if (gameId === 'processing_speed') {
       currentGame.value = 'processing_speed'
-      psModule.value = data.module
-    } else {
+      game.value.module = data.module || 'go_no_go'
+      console.log('[projection] 切换到处理速度训练')
+    } else if (gameId === 'whack_a_mole') {
       currentGame.value = 'whack_a_mole'
+      game.value.module = null
+      console.log('[projection] 切换到打地鼠')
     }
-    
+    // 注意：不再使用 data.module 来判断，避免误判
+
+    // ⭐ 更新统一游戏状态
+    if (data.game_id) {
+      setCurrentGame(data.game_id)
+    }
+    if (data.status) {
+      setGameStatus(data.status)
+    }
+    updateGameData({
+      score: data.score,
+      timer: data.timer,
+      difficulty: data.difficulty_level
+    })
+
+    // 更新难度等级
+    if (data.difficulty_level) {
+      game.value.difficulty_level = data.difficulty_level
+    }
+
+    // ⭐ 更新确认时间（关键！）
+    if (data.dwell_time !== undefined) {
+      game.value.dwell_time = data.dwell_time
+      console.log('[projection] 更新确认时间:', data.dwell_time)
+    }
+
+    // 更新间隔状态
+    if (data.in_interval !== undefined) {
+      game.value.in_interval = data.in_interval
+    }
+
+    // 更新题目
+    if (data.question !== undefined) {
+      game.value.question = data.question
+    }
+
+    // 更新剩余时间
+    if (data.remaining_time !== undefined) {
+      game.value.remaining_time = data.remaining_time
+    }
+
     // 打地鼠数据
     if (data.extra) {
       game.value.current_mole = data.extra.current_mole ?? -1
@@ -769,17 +727,8 @@ onMounted(() => {
     if (data.stats) {
       game.value.accuracy = Math.round((data.stats.accuracy || 0) * 100)
     }
-    
-    // 处理速度训练数据
-    if (data.stimulus) {
-      psStimulus.value = data.stimulus
-    }
-    if (data.feedback) {
-      psFeedback.value = data.feedback
-      setTimeout(() => {
-        psFeedback.value = null
-      }, 2000)
-    }
+
+    // 注意：处理速度训练的数据处理在ProcessingSpeedGame.vue组件中进行
   })
   
   socket.on('system_state', (data) => {
@@ -789,6 +738,7 @@ onMounted(() => {
   setTimeout(() => {
     initCanvas()
     draw()
+    drawFootLoop() // ⭐ 启动绿点动画循环
   }, 100)
   
   statusInterval = setInterval(() => {
@@ -802,6 +752,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (animationId) cancelAnimationFrame(animationId)
+  if (footAnimationId) cancelAnimationFrame(footAnimationId)
   if (statusInterval) clearInterval(statusInterval)
   if (socket) socket.disconnect()
   window.removeEventListener('resize', initCanvas)
@@ -821,9 +772,36 @@ onUnmounted(() => {
   background: #000 !important;
 }
 
-.projection-page canvas {
+/* 主Canvas（底层） */
+.main-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
   width: 100% !important;
   height: 100% !important;
   display: block !important;
+  z-index: 1;
+}
+
+/* 游戏层（中层） */
+.game-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100% !important;
+  height: 100% !important;
+  z-index: 2;
+}
+
+/* 绿点Canvas（顶层） */
+.foot-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100% !important;
+  height: 100% !important;
+  display: block !important;
+  z-index: 10;
+  pointer-events: none; /* 让点击事件穿透 */
 }
 </style>

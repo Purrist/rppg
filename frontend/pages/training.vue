@@ -18,80 +18,83 @@
       </div>
     </div>
 
-    <!-- 准备状态 -->
+    <!-- 准备状态 - 只显示提示，不显示规则 -->
     <div v-else-if="game.status === 'READY'" class="ready-view">
-      <div class="center-hint">请在投影区域开始{{ gameTitle }}</div>
-      <div class="hint-sub">站在投影区域的圆圈内即可开始</div>
-      <div class="bottom-bar">
-        <button @click="exitGame" class="big-exit-btn" :disabled="isExiting">
-          {{ isExiting ? '退出中...' : '退出游戏' }}
-        </button>
+      <div class="ready-content">
+        <div class="ready-hint">请在投影区域开始{{ gameTitle }}</div>
+        <div class="ready-sub">站在投影区域的圆圈内即可开始</div>
+        
+        <div class="bottom-bar">
+          <button @click="exitGame" class="big-exit-btn" :disabled="isExiting">
+            {{ isExiting ? '退出中...' : '退出游戏' }}
+          </button>
+        </div>
       </div>
     </div>
 
-    <!-- 游戏中 -->
+    <!-- 游戏中 - 只显示游戏状态，不显示规则 -->
     <div v-else-if="game.status === 'PLAYING'" class="playing-view">
-      <div class="header">
-        <h1>{{ gameIcon }} {{ gameTitle }}</h1>
-        <div class="timer-display">
-          <span class="timer-label">剩余时间</span>
-          <span class="timer-value">{{ game.timer }}s</span>
-        </div>
-      </div>
-
-      <div class="stats-row">
-        <div class="stat-item">
-          <span class="stat-label">得分</span>
-          <span class="stat-value score">{{ game.score }}</span>
-        </div>
-        <div class="stat-item" v-if="game.accuracy > 0">
-          <span class="stat-label">准确率</span>
-          <span class="stat-value">{{ game.accuracy }}%</span>
-        </div>
-        <div class="stat-item" v-if="game.module">
-          <span class="stat-label">当前模块</span>
-          <span class="stat-value">{{ moduleName }}</span>
-        </div>
-        <div class="stat-item" v-if="game.difficultyLevel">
-          <span class="stat-label">难度</span>
-          <span class="stat-value">{{ game.difficultyLevel }}</span>
-        </div>
-      </div>
-
-      <!-- 处理速度训练特有：显示指令 -->
-      <div v-if="game.gameType === 'processing_speed' && stimulus" class="instruction-area">
-        <div class="instruction-box" :class="stimulus.module">
-          <div v-if="stimulus.module === 'go_no_go'" class="instruction-text">
-            {{ stimulus.is_go ? '踩绿色区域！' : '不要踩！' }}
+      <div class="playing-layout">
+        <!-- 游戏状态面板 -->
+        <div class="status-panel full-width">
+          <div class="status-header">
+            <h1>{{ gameIcon }} {{ gameTitle }}</h1>
+            <div class="timer-display">
+              <span class="timer-label">剩余时间</span>
+              <span class="timer-value">{{ game.timer }}s</span>
+            </div>
           </div>
-          <div v-else-if="stimulus.module === 'choice_reaction'" class="instruction-text">
-            {{ stimulus.instruction || '踩指定颜色' }}
+
+          <div class="stats-grid">
+            <div class="stat-card">
+              <span class="stat-label">得分</span>
+              <span class="stat-value score">{{ game.score }}</span>
+            </div>
+            <div class="stat-card" v-if="game.accuracy > 0">
+              <span class="stat-label">准确率</span>
+              <span class="stat-value">{{ game.accuracy }}%</span>
+            </div>
+            <div class="stat-card" v-if="game.module">
+              <span class="stat-label">当前模块</span>
+              <span class="stat-value">{{ moduleName }}</span>
+            </div>
+            <div class="stat-card" v-if="game.difficultyLevel">
+              <span class="stat-label">难度</span>
+              <span class="stat-value">{{ game.difficultyLevel }}/8</span>
+            </div>
           </div>
-          <div v-else-if="stimulus.module === 'serial_reaction'" class="instruction-text">
-            按顺序踩踏 ({{ stimulus.sequence_progress }})
+
+          <!-- 处理速度训练特有：显示当前指令 -->
+          <div v-if="game.gameType === 'processing_speed' && stimulus" class="current-instruction">
+            <div class="instruction-label">当前指令</div>
+            <div class="instruction-display" :class="stimulus.module">
+              <span v-if="stimulus.module === 'go_no_go'">
+                {{ stimulus.is_go ? '踩绿色区域！' : '不要踩！' }}
+              </span>
+              <span v-else-if="stimulus.module === 'choice_reaction'">
+                {{ stimulus.instruction || '踩指定颜色' }}
+              </span>
+              <span v-else-if="stimulus.module === 'serial_reaction'">
+                按顺序踩踏 ({{ stimulus.sequence_progress }})
+              </span>
+            </div>
+          </div>
+
+          <!-- 反馈显示 -->
+          <div v-if="feedback" class="feedback-area" :class="feedback.correct ? 'correct' : 'error'">
+            <div class="feedback-icon">{{ feedback.correct ? '✓' : '✗' }}</div>
+            <div class="feedback-message">{{ feedback.message }}</div>
+            <div class="feedback-rt" v-if="feedback.rt > 0">
+              反应时间: {{ Math.round(feedback.rt) }}ms
+            </div>
+          </div>
+
+          <div class="game-controls">
+            <button @click="pauseGame" class="ctrl-btn pause">⏸ 暂停</button>
+            <button @click="restartGame" class="ctrl-btn restart">🔄 重新开始</button>
+            <button @click="endGame" class="ctrl-btn exit">✖ 结束游戏</button>
           </div>
         </div>
-      </div>
-
-      <!-- 反馈显示 -->
-      <div v-if="feedback" class="feedback-overlay" :class="feedback.correct ? 'correct' : 'error'">
-        <div class="feedback-content">
-          <div class="feedback-icon">{{ feedback.correct ? '✓' : '✗' }}</div>
-          <div class="feedback-message">{{ feedback.message }}</div>
-          <div class="feedback-rt" v-if="feedback.rt > 0">
-            反应时间: {{ Math.round(feedback.rt) }}ms
-          </div>
-        </div>
-      </div>
-
-      <div class="game-hint">
-        💡 {{ gameHint }}
-      </div>
-
-      <div class="game-controls">
-        <button @click="pauseGame" class="ctrl-btn pause">⏸ 暂停</button>
-        <button @click="restartGame" class="ctrl-btn restart">🔄 重新开始</button>
-        <button @click="endGame" class="ctrl-btn exit">✖ 结束游戏</button>
       </div>
     </div>
     
@@ -111,12 +114,14 @@
     
     <!-- 其他状态 -->
     <div v-else class="ready-view">
-      <div class="center-hint">请在投影区域开始{{ gameTitle }}</div>
-      <div class="hint-sub">站在投影区域的圆圈内即可开始</div>
-      <div class="bottom-bar">
-        <button @click="exitGame" class="big-exit-btn" :disabled="isExiting">
-          {{ isExiting ? '退出中...' : '退出游戏' }}
-        </button>
+      <div class="ready-content">
+        <div class="ready-hint">请在投影区域开始{{ gameTitle }}</div>
+        <div class="ready-sub">站在投影区域的圆圈内即可开始</div>
+        <div class="bottom-bar">
+          <button @click="exitGame" class="big-exit-btn" :disabled="isExiting">
+            {{ isExiting ? '退出中...' : '退出游戏' }}
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -126,8 +131,13 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { io } from 'socket.io-client'
 import { useRouter } from 'vue-router'
+import { initGameState, setCurrentGame, setGameStatus, updateGameData } from '../composables/useGameState.js'
 
 const router = useRouter()
+
+// 初始化游戏状态管理
+initGameState()
+
 const game = ref({ 
   status: 'READY', 
   score: 0, 
@@ -153,8 +163,8 @@ const backendUrl = `http://${getBackendHost()}:${FLASK_PORT}`
 
 // 游戏信息
 const gameInfo = {
-  'whack_a_mole': { title: '打地鼠', icon: '🐹', hint: '请在投影区域踩踏地鼠所在的洞' },
-  'processing_speed': { title: '处理速度训练', icon: '⚡', hint: '根据提示踩踏目标区域，停留3秒确认' }
+  'whack_a_mole': { title: '打地鼠', icon: '🐹' },
+  'processing_speed': { title: '处理速度训练', icon: '⚡' }
 }
 
 const moduleNames = {
@@ -165,7 +175,6 @@ const moduleNames = {
 
 const gameTitle = computed(() => gameInfo[game.value.gameType]?.title || '游戏')
 const gameIcon = computed(() => gameInfo[game.value.gameType]?.icon || '🎮')
-const gameHint = computed(() => gameInfo[game.value.gameType]?.hint || '')
 const moduleName = computed(() => moduleNames[game.value.module] || '')
 
 onMounted(() => {
@@ -180,29 +189,41 @@ onMounted(() => {
   })
   
   socket.on('game_update', (data) => {
-    console.log('[训练页] game_update:', data.status)
+    console.log('[训练页] game_update:', data)
     
+    const gameId = data.game_id || ''
+    const isProcessingSpeed = gameId === 'processing_speed' || data.module
+    
+    // 更新本地状态
     game.value = {
       status: data.status || 'READY',
       score: data.score || 0,
       timer: data.timer || 60,
       accuracy: data.stats?.accuracy || 0,
-      gameType: data.module ? 'processing_speed' : 'whack_a_mole',
+      gameType: isProcessingSpeed ? 'processing_speed' : 'whack_a_mole',
       module: data.module || null,
       difficultyLevel: data.difficulty_level || 5
     }
     
-    // 处理速度训练数据
-    if (data.stimulus) {
-      stimulus.value = data.stimulus
+    // ⭐ 更新统一游戏状态
+    if (data.game_id) {
+      setCurrentGame(data.game_id)
     }
+    if (data.status) {
+      setGameStatus(data.status)
+    }
+    updateGameData({
+      score: data.score,
+      timer: data.timer,
+      difficulty: data.difficulty_level
+    })
+    
+    if (data.stimulus) stimulus.value = data.stimulus
     
     if (data.feedback) {
       feedback.value = data.feedback
       if (feedbackTimeout) clearTimeout(feedbackTimeout)
-      feedbackTimeout = setTimeout(() => {
-        feedback.value = null
-      }, 2000)
+      feedbackTimeout = setTimeout(() => feedback.value = null, 2000)
     }
   })
   
@@ -215,9 +236,7 @@ onMounted(() => {
     }
   })
   
-  socket.on('navigate_to', (data) => {
-    router.push(data.page)
-  })
+  socket.on('navigate_to', (data) => router.push(data.page))
 })
 
 onUnmounted(() => {
@@ -225,43 +244,27 @@ onUnmounted(() => {
   if (feedbackTimeout) clearTimeout(feedbackTimeout)
 })
 
-// 游戏控制
 const pauseGame = () => {
-  if (socket && socket.connected) {
-    socket.emit('game_control', { action: 'pause' })
-  }
+  if (socket?.connected) socket.emit('game_control', { action: 'pause' })
 }
 
 const resumeGame = () => {
-  if (socket && socket.connected) {
-    socket.emit('game_control', { action: 'pause' })
-  }
+  if (socket?.connected) socket.emit('game_control', { action: 'pause' })
 }
 
 const restartGame = () => {
-  if (socket && socket.connected) {
-    socket.emit('game_control', { action: 'restart' })
-  }
+  if (socket?.connected) socket.emit('game_control', { action: 'restart' })
 }
 
 const endGame = () => {
-  if (socket && socket.connected) {
-    socket.emit('game_control', { action: 'stop' })
-  }
+  if (socket?.connected) socket.emit('game_control', { action: 'stop' })
 }
 
 const exitGame = () => {
   if (isExiting.value) return
-  
   isExiting.value = true
-  
-  if (socket && socket.connected) {
-    socket.emit('game_control', { action: 'stop' })
-  }
-  
-  setTimeout(() => {
-    router.push('/learning')
-  }, 100)
+  if (socket?.connected) socket.emit('game_control', { action: 'stop' })
+  setTimeout(() => router.push('/learning'), 100)
 }
 </script>
 
@@ -271,13 +274,11 @@ const exitGame = () => {
   width: 100%; 
   background: #FFF; 
   overflow: hidden;
-  display: flex;
-  flex-direction: column;
 }
 
 /* 结算状态 */
 .settling-view {
-  flex: 1;
+  height: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -358,33 +359,43 @@ const exitGame = () => {
   cursor: pointer;
 }
 
-/* 准备状态 */
+/* 准备状态 - 内容居中 */
 .ready-view { 
-  flex: 1;
-  display: flex; 
-  flex-direction: column; 
-  align-items: center; 
-  justify-content: center; 
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;  /* 垂直居中 */
   padding: 40px;
 }
 
-.center-hint { 
-  font-size: 48px; 
+.ready-content {
+  max-width: 1200px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.ready-hint { 
+  font-size: 48px;  /* 增大字体 */
   font-weight: 900; 
   color: #333; 
   text-align: center;
+  margin-bottom: 20px;
 }
 
-.hint-sub {
-  font-size: 24px;
+.ready-sub {
+  font-size: 24px;  /* 增大字体 */
   color: #888;
-  margin-top: 20px;
+  text-align: center;
+  margin-bottom: 60px;  /* 增大间距 */
 }
 
 .bottom-bar { 
-  padding: 30px;
   display: flex; 
   justify-content: center;
+  padding: 20px 0;
 }
 
 .big-exit-btn { 
@@ -392,7 +403,7 @@ const exitGame = () => {
   background: #333; 
   color: #FFF; 
   border-radius: 50px; 
-  font-size: 28px; 
+  font-size: 24px; 
   border: none;
   cursor: pointer;
 }
@@ -402,34 +413,55 @@ const exitGame = () => {
   cursor: not-allowed;
 }
 
-/* 游戏中 */
+/* 游戏中 - 左右布局 */
 .playing-view { 
-  flex: 1;
-  padding: 30px; 
-  display: flex; 
-  flex-direction: column; 
+  height: 100%;
+  padding: 30px;
 }
 
-.header {
+.playing-layout {
+  display: flex;
+  gap: 30px;
+  height: 100%;
+}
+
+/* 左侧规则面板 */
+.rules-panel {
+  width: 40%;
+  min-width: 400px;
+  height: 100%;
+}
+
+/* 右侧状态面板 */
+.status-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.status-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
+  padding-bottom: 20px;
+  border-bottom: 2px solid #EEE;
 }
 
-.header h1 {
-  font-size: 36px;
+.status-header h1 {
+  font-size: 32px;
   color: #333;
+  margin: 0;
 }
 
 .timer-display {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-end;
 }
 
 .timer-label {
-  font-size: 18px;
+  font-size: 16px;
   color: #888;
 }
 
@@ -439,21 +471,26 @@ const exitGame = () => {
   color: #FF7222;
 }
 
-.stats-row {
-  display: flex;
-  justify-content: space-around;
-  margin-bottom: 20px;
+/* 统计卡片 */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
 }
 
-.stat-item {
+.stat-card {
+  background: #F8F8F8;
+  border-radius: 20px;
+  padding: 25px;
   display: flex;
   flex-direction: column;
   align-items: center;
 }
 
 .stat-label {
-  font-size: 18px;
+  font-size: 16px;
   color: #888;
+  margin-bottom: 10px;
 }
 
 .stat-value {
@@ -466,106 +503,94 @@ const exitGame = () => {
   color: #FF7222;
 }
 
-/* 指令区域 */
-.instruction-area {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+/* 当前指令 */
+.current-instruction {
+  background: #F8F8F8;
+  border-radius: 20px;
+  padding: 30px;
+  text-align: center;
 }
 
-.instruction-box {
-  padding: 30px 60px;
+.instruction-label {
+  font-size: 18px;
+  color: #888;
+  margin-bottom: 15px;
+}
+
+.instruction-display {
+  font-size: 36px;
+  font-weight: 900;
+  padding: 25px;
+  border-radius: 15px;
+  color: #fff;
+}
+
+.instruction-display.go_no_go {
+  background: #33B555;
+}
+
+.instruction-display.choice_reaction {
+  background: #2196F3;
+}
+
+.instruction-display.serial_reaction {
+  background: #9C27B0;
+}
+
+/* 反馈区域 */
+.feedback-area {
+  padding: 30px;
   border-radius: 20px;
   text-align: center;
 }
 
-.instruction-box.go_no_go {
-  background: #33B555;
+.feedback-area.correct {
+  background: #E8F5E9;
 }
 
-.instruction-box.choice_reaction {
-  background: #2196F3;
-}
-
-.instruction-box.serial_reaction {
-  background: #9C27B0;
-}
-
-.instruction-text {
-  font-size: 48px;
-  font-weight: 900;
-  color: #fff;
-}
-
-/* 反馈 */
-.feedback-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0,0,0,0.7);
-  z-index: 100;
-  animation: fadeIn 0.2s;
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-.feedback-content {
-  text-align: center;
+.feedback-area.error {
+  background: #FFEBEE;
 }
 
 .feedback-icon {
-  font-size: 80px;
-  margin-bottom: 20px;
+  font-size: 64px;
+  margin-bottom: 10px;
+}
+
+.feedback-area.correct .feedback-icon {
+  color: #33B555;
+}
+
+.feedback-area.error .feedback-icon {
+  color: #FF4444;
 }
 
 .feedback-message {
-  font-size: 32px;
+  font-size: 28px;
   font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.feedback-area.correct .feedback-message {
+  color: #33B555;
+}
+
+.feedback-area.error .feedback-message {
+  color: #FF4444;
 }
 
 .feedback-rt {
   font-size: 18px;
   color: #888;
-  margin-top: 10px;
 }
 
-.feedback-overlay.correct .feedback-icon {
-  color: #33B555;
-}
-
-.feedback-overlay.correct .feedback-message {
-  color: #33B555;
-}
-
-.feedback-overlay.error .feedback-icon {
-  color: #FF4444;
-}
-
-.feedback-overlay.error .feedback-message {
-  color: #FF4444;
-}
-
-.game-hint {
-  text-align: center;
-  font-size: 18px;
-  color: #888;
-  padding: 20px;
-}
-
+/* 游戏控制 */
 .game-controls {
   display: flex;
   justify-content: center;
   gap: 20px;
-  padding: 20px;
+  margin-top: auto;
+  padding-top: 20px;
 }
 
 .ctrl-btn {
@@ -594,12 +619,12 @@ const exitGame = () => {
 
 /* 暂停状态 */
 .paused-view { 
-  flex: 1;
+  height: 100%;
   display: flex; 
   flex-direction: column;
   align-items: center; 
   justify-content: center; 
-  background: rgba(0,0,0,0.1); 
+  background: rgba(0,0,0,0.05); 
 }
 
 .paused-view h1 { 

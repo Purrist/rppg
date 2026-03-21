@@ -21,7 +21,7 @@ class GameManager:
             self._configs[game_id] = config
         print(f"[GameManager] 注册游戏: {game_id}")
     
-    def create_game(self, game_id: str, config: GameConfig = None) -> Optional[GameBase]:
+    def create_game(self, game_id: str, config: GameConfig = None, game_params: dict = None) -> Optional[GameBase]:
         if game_id not in self._registry:
             print(f"[GameManager] 错误: 游戏 {game_id} 未注册")
             return None
@@ -32,25 +32,45 @@ class GameManager:
         game_class = self._registry[game_id]
         game_config = config or self._configs.get(game_id)
         
+        # ⭐ 创建游戏实例
         game = game_class(self.socketio, game_config) if game_config else game_class(self.socketio)
+        
+        # ⭐ 如果有额外参数，更新到游戏实例
+        if game_params:
+            game.update_params(game_params)
         
         self._current_game = game
         self._current_game_id = game_id
-        print(f"[GameManager] 创建游戏: {game_id}")
+        print(f"[GameManager] 创建游戏: {game_id}, 参数: {game_params}")
         return game
     
     # 控制接口
-    def set_ready(self, game_id: str = None):
-        if game_id and game_id != self._current_game_id:
-            self.create_game(game_id)
+    def set_ready(self, game_id: str = None, game_params: dict = None):
+        # ⭐ 如果传入了game_id，必须创建新游戏（或切换到该游戏）
+        if game_id:
+            if game_id != self._current_game_id:
+                self.create_game(game_id, game_params=game_params)
+        
+        # ⭐ 确保有当前游戏实例
+        if not self._current_game and game_id:
+            self.create_game(game_id, game_params=game_params)
+        
+        # ⭐ 如果游戏已存在，更新参数
+        if self._current_game and game_params:
+            self._current_game.update_params(game_params)
+            
         if self._current_game:
             self._current_game.set_ready()
             self._emit_system_state()
     
     def start_game(self):
+        print(f"[GameManager] start_game, current_game_id: {self._current_game_id}")
         if self._current_game:
+            print(f"[GameManager] 启动游戏: {self._current_game_id}")
             self._current_game.start_game()
             self._emit_system_state()
+        else:
+            print("[GameManager] 错误: 没有当前游戏实例")
     
     def toggle_pause(self):
         if self._current_game:

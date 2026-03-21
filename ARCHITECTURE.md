@@ -59,16 +59,16 @@
 
 ## 三、状态流转 ⭐
 
-### 3.1 四个状态
+### 3.1 四个状态（2024-03-19 更新）
 
 | 状态 | 平板 | 投影 | 触发条件 |
 |------|------|------|----------|
-| **IDLE（待机）** | 游戏列表 | 粒子效果 | 初始状态/退出游戏 |
-| **READY（预备）** | "请在投影区域开始游戏" | 粒子+灰圈 | 点击游戏/结算结束 |
-| **PLAYING（游戏中）** | 游戏信息+控制按钮 | 地鼠洞 | 站在圆圈内3秒 |
-| **SETTLING（结算）** | "游戏结束"+成绩 | "游戏结束"+成绩 | 60秒结束/结束游戏 |
+| **IDLE（待机）** | 游戏列表(learning.vue) | **仅粒子效果** | 初始状态/退出游戏 |
+| **READY（预备）** | 游戏名+规则+退出按钮 | 粒子+灰圈 | 点击游戏/再来一次 |
+| **PLAYING（游戏中）** | 游戏信息+**三个控制按钮** | **游戏Component** | 站在圆圈内3秒 |
+| **SETTLING（结算）** | 成绩+再来一次/返回列表 | 成绩界面 | 时间结束/结束游戏 |
 
-### 3.2 状态流转图
+### 3.2 状态流转图（2024-03-19 更新）
 
 ```
                     点击游戏
@@ -76,7 +76,7 @@
     │  待机   │                   │  预备   │
     │  IDLE   │ ←─────────────── │  READY  │
     └─────────┘   退出游戏        └─────────┘
-         ↑              ▲              │
+         ▲              ▲              │
          │              │              │ 站在圆圈内3秒
          │              │              ↓
          │              │        ┌─────────┐
@@ -84,28 +84,69 @@
          │              │        │PLAYING  │
          │              │        └─────────┘
          │              │              │
-         │              │              │ 60秒结束/结束游戏
+         │              │              │ 时间结束/结束游戏
          │              │              ↓
          │              │        ┌─────────┐
-         │              └────────│  结算   │
-         │           5秒后回到预备│SETTLING │
-         │                       └─────────┘
+         │              │        │  结算   │
+         │              └────────│SETTLING │
+         │              再来一次 └─────────┘
          │                             │
-         │                             │ 5秒后
+         │                             │ 返回列表
          │                             ↓
-         │                       ┌─────────┐
-         │                       │  预备   │
-         └───────────────────────│  READY  │
-              （只有退出游戏才回到IDLE）
+         └─────────────────────── ┌─────────┐
+                                 │  待机   │
+                                 │  IDLE   │
+                                 └─────────┘
 ```
 
-### 3.3 按钮功能区分
+### 3.3 按钮功能区分（严格遵守）
 
 | 按钮 | 所在状态 | 目标状态 | 说明 |
 |------|----------|----------|------|
 | 退出游戏 | READY | IDLE | 回到游戏列表 |
-| 结束游戏 | PLAYING | SETTLING | 进入结算，5秒后→READY |
+| 暂停 | PLAYING | PAUSED | 暂停游戏 |
+| 继续 | PAUSED | PLAYING | 继续游戏 |
 | 重新开始 | PLAYING/PAUSED | READY | 回到预备状态 |
+| 结束游戏 | PLAYING | SETTLING | 进入结算 |
+| 再来一次 | SETTLING | READY | 重新开始 |
+| 返回列表 | SETTLING | IDLE | 回到游戏列表 |
+
+### 3.4 游戏Component设计（重要）
+
+每个游戏必须有独立的Component：
+
+```
+frontend/components/
+├── games/
+│   ├── WhackAMoleGame.vue      # 打地鼠游戏组件
+│   ├── ProcessingSpeedGame.vue # 处理速度训练组件
+│   └── ...                     # 其他游戏组件
+├── ParticleEffect.vue          # 粒子效果组件
+├── ReadyCircle.vue             # 预备状态圆圈组件
+└── SettlingView.vue            # 结算界面组件
+```
+
+projection.vue 通过条件渲染显示不同组件：
+
+```vue
+<template>
+  <!-- IDLE: 仅粒子效果 -->
+  <ParticleEffect v-if="gameState === 'IDLE'" />
+  
+  <!-- READY: 粒子 + 灰圈 -->
+  <template v-else-if="gameState === 'READY'">
+    <ParticleEffect />
+    <ReadyCircle />
+  </template>
+  
+  <!-- PLAYING: 根据游戏类型显示不同组件 -->
+  <WhackAMoleGame v-else-if="gameState === 'PLAYING' && currentGame === 'whack_a_mole'" />
+  <ProcessingSpeedGame v-else-if="gameState === 'PLAYING' && currentGame === 'processing_speed'" />
+  
+  <!-- SETTLING: 结算界面 -->
+  <SettlingView v-else-if="gameState === 'SETTLING'" />
+</template>
+```
 
 ---
 
@@ -553,4 +594,4 @@ Ollama (本地LLM) + qwen2.5:3b
 
 ---
 
-*最后更新：2024-03-08*
+*最后更新：2024-03-19*
