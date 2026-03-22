@@ -8,8 +8,8 @@ import threading
 import json
 import os
 
-# 配置文件路径
-CONFIG_FILE = "projection_config.json"
+# 配置文件路径（在perception目录下）
+CONFIG_FILE = os.path.join(os.path.dirname(__file__), "projection_config.json")
 
 # 全局状态
 state = {

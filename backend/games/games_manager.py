@@ -6,10 +6,11 @@ from .games_base import GameBase, GameConfig
 
 
 class GameManager:
-    """游戏管理器"""
+    """游戏管理器 - 通过SystemCore统一广播状态"""
     
-    def __init__(self, socketio):
+    def __init__(self, socketio, system_core=None):
         self.socketio = socketio
+        self._system_core = system_core
         self._registry: Dict[str, Type[GameBase]] = {}
         self._current_game: Optional[GameBase] = None
         self._current_game_id: Optional[str] = None
@@ -32,67 +33,76 @@ class GameManager:
         game_class = self._registry[game_id]
         game_config = config or self._configs.get(game_id)
         
-        # ⭐ 创建游戏实例
+        # 创建游戏实例
         game = game_class(self.socketio, game_config) if game_config else game_class(self.socketio)
         
-        # ⭐ 如果有额外参数，更新到游戏实例
+        # 如果有额外参数，更新到游戏实例
         if game_params:
             game.update_params(game_params)
         
         self._current_game = game
         self._current_game_id = game_id
+        
+        # ⭐ 更新SystemCore
+        if self._system_core:
+            self._system_core.set_current_game(game_id)
+        
         print(f"[GameManager] 创建游戏: {game_id}, 参数: {game_params}")
         return game
     
     # 控制接口
     def set_ready(self, game_id: str = None, game_params: dict = None):
-        # ⭐ 如果传入了game_id，必须创建新游戏（或切换到该游戏）
+        # 如果传入了game_id，必须创建新游戏（或切换到该游戏）
         if game_id:
             if game_id != self._current_game_id:
                 self.create_game(game_id, game_params=game_params)
         
-        # ⭐ 确保有当前游戏实例
+        # 确保有当前游戏实例
         if not self._current_game and game_id:
             self.create_game(game_id, game_params=game_params)
         
-        # ⭐ 如果游戏已存在，更新参数
+        # 如果游戏已存在，更新参数
         if self._current_game and game_params:
             self._current_game.update_params(game_params)
             
         if self._current_game:
             self._current_game.set_ready()
-            self._emit_system_state()
+            # ⭐ 通过SystemCore广播状态
+            self._sync_to_system_core()
     
     def start_game(self):
         print(f"[GameManager] start_game, current_game_id: {self._current_game_id}")
         if self._current_game:
             print(f"[GameManager] 启动游戏: {self._current_game_id}")
             self._current_game.start_game()
-            self._emit_system_state()
+            self._sync_to_system_core()
         else:
             print("[GameManager] 错误: 没有当前游戏实例")
     
     def toggle_pause(self):
         if self._current_game:
             self._current_game.toggle_pause()
-            self._emit_system_state()
+            self._sync_to_system_core()
     
     def stop_game(self):
         if self._current_game:
             self._current_game.stop()
             self._current_game_id = None
-            self._emit_system_state()
+            # ⭐ 更新SystemCore
+            if self._system_core:
+                self._system_core.set_current_game(None)
+                self._system_core.set_game_status('IDLE')
+                self._system_core.reset_game_runtime()
     
-    # ⭐ 新增：重新开始（直接进入READY）
+    # 新增：重新开始（直接进入READY）
     def restart_game(self, game_id: str = None):
         """重新开始游戏 - 直接进入READY状态，不经过IDLE"""
         if game_id and game_id != self._current_game_id:
             self.create_game(game_id)
         if self._current_game:
-            # ⭐ 直接调用 restart，不调用 stop
+            # 直接调用 restart，不调用 stop
             self._current_game.restart()
-            # ⭐ 发送 system_state，但此时 is_game_active() 返回 True（因为 READY 算激活）
-            self._emit_system_state()
+            self._sync_to_system_core()
     
     def handle_action(self, action: str, data: Dict):
         if self._current_game:
@@ -111,7 +121,6 @@ class GameManager:
         if not self._current_game:
             return False
         status = self._current_game.state.status
-        # ⭐ READY 和 PAUSED 也算激活，这样 restart 不会导致平板返回游戏列表
         return status in ["READY", "PLAYING", "PAUSED", "SETTLING"]
     
     def get_current_game_id(self) -> Optional[str]:
@@ -146,16 +155,18 @@ class GameManager:
             return self._current_game.get_config()
         return None
     
-    def _emit_system_state(self):
-        self.socketio.emit("system_state", {
-            "state": {
-                "mode": "game" if self.is_game_active() else "normal",
-                "game": {
-                    "active": self.is_game_active(),
-                    "name": self._current_game_id,
-                    "status": self.get_game_status(),
-                    "score": self._current_game.state.score if self._current_game else 0,
-                    "timer": self._current_game.state.timer if self._current_game else 0,
-                }
-            }
-        })
+    def _sync_to_system_core(self):
+        """⭐ 同步游戏状态到SystemCore，由SystemCore统一广播"""
+        if not self._system_core:
+            return
+        
+        # 更新游戏状态
+        status = self.get_game_status()
+        self._system_core.set_game_status(status)
+        
+        # 更新游戏运行时数据
+        if self._current_game:
+            self._system_core.update_game_runtime({
+                'score': self._current_game.state.score,
+                'timer': self._current_game.state.timer,
+            })

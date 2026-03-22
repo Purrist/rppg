@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-AI具身智能认知训练系统 - 主程序 v2.1
-模块化架构
+AI具身智能认知训练系统 - 主程序 v3.0
+基于SystemCore的统一架构
 """
 
 import os
@@ -58,11 +58,12 @@ socketio = SocketIO(
 # ============================================================================
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# ⭐ 系统数据中心（唯一真相来源）
-from system_center import init_system_center, get_system_center
+# ⭐ 系统核心（唯一数据中心）- 最先初始化
+from core import SystemCore, init_system_core, get_system_core
 
-# 核心模块
-from core import SystemStateManager, ask_akon, think, should_think, get_agent_state, ActionExecutor
+# AI Agent模块
+from core.core_agent import ask_akon, think, should_think, get_agent_state
+from core.core_tools import ActionExecutor
 
 # 游戏系统
 from games import GameManager, GAME_REGISTRY, GAME_CONFIGS
@@ -73,27 +74,24 @@ from perception import PerceptionManager, init_screen_processor, draw_detection_
 # ============================================================================
 # 初始化
 # ============================================================================
-# ⭐ 初始化系统数据中心（必须在其他模块之前）
-system_center = init_system_center(socketio)
+# ⭐ 1. 初始化系统核心（必须在其他模块之前）
+system_core = init_system_core(socketio)
 
-# 投影摄像头处理器
+# 2. 投影摄像头处理器
 screen_proc = init_screen_processor(camera_source=PROJECTION_CAMERA_SOURCE, socketio=socketio)
 
-# 游戏管理器
-game_manager = GameManager(socketio)
+# 3. 游戏管理器（传入system_core用于状态同步）
+game_manager = GameManager(socketio, system_core)
 for game_id, game_class in GAME_REGISTRY.items():
     config = GAME_CONFIGS.get(game_id)
     game_manager.register(game_id, game_class, config)
 print(f"[游戏系统] 已注册游戏: {list(GAME_REGISTRY.keys())}")
 
-# 感知管理器
+# 4. 感知管理器
 perception_manager = PerceptionManager()
 
-# 状态管理器（世界模型）- 用于AI Agent
-state_manager = SystemStateManager(socketio)
-
-# 行动执行器
-action_executor = ActionExecutor(socketio, state_manager)
+# 5. 行动执行器（使用SystemCore作为状态源）
+action_executor = ActionExecutor(socketio, system_core)
 
 # 用户状态（保留用于兼容）
 user_state = {
@@ -112,7 +110,7 @@ _last_perception_time = 0
 PERCEPTION_INTERVAL = 0.5  # 500ms处理一次感知，平衡性能和实时性
 
 def perception_worker():
-    """感知处理线程 - 优化版"""
+    """感知处理线程 - 带指数退避重连机制"""
     import urllib.request
     
     global perception_frame, user_state, _last_perception_time
@@ -120,13 +118,24 @@ def perception_worker():
     
     print(f"[感知线程] 启动，连接: {tablet_url}")
     
+    # ⭐ 指数退避重连参数
+    retry_delay = 1
+    max_retry_delay = 30
+    consecutive_errors = 0
+    
     while True:
         try:
             stream = urllib.request.urlopen(tablet_url, timeout=5)
             bytes_data = bytes()
             
+            # 连接成功，重置重连参数
+            if consecutive_errors > 0:
+                print(f"[感知线程] 连接恢复")
+                retry_delay = 1
+                consecutive_errors = 0
+            
             while True:
-                bytes_data += stream.read(4096)  # 增加读取大小
+                bytes_data += stream.read(4096)
                 a = bytes_data.find(b'\xff\xd8')
                 b = bytes_data.find(b'\xff\xd9')
                 
@@ -136,26 +145,40 @@ def perception_worker():
                     
                     frame = cv2.imdecode(np.frombuffer(jpg, dtype=np.uint8), cv2.IMREAD_COLOR)
                     
-                    # ⭐ 关键修复：检查帧是否为空
                     if frame is None or frame.size == 0:
                         continue
                     
                     now = time.time()
                     
-                    # ⭐ 视频帧始终更新（用于显示）
+                    # 视频帧始终更新（用于显示）
                     with perception_frame_lock:
                         _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
                         perception_frame = jpeg.tobytes()
                     
-                    # ⭐ 感知处理按频率限制
+                    # 感知处理按频率限制
                     if now - _last_perception_time >= PERCEPTION_INTERVAL:
                         _last_perception_time = now
                         user_state = perception_manager.process_frame(frame, "tablet")
-                        state_manager.update_world(user_state)
+                        
+                        # 更新SystemCore的感知数据
+                        system_core.update_perception({
+                            'personDetected': user_state.get('environment', {}).get('person_present', False),
+                            'personCount': user_state.get('environment', {}).get('person_count', 0),
+                            'faceCount': user_state.get('environment', {}).get('person_count', 0),
+                            'bodyDetected': user_state.get('body_state', {}).get('posture') != 'unknown',
+                            'emotion': user_state.get('emotion', {}).get('primary', 'neutral'),
+                            'attention': user_state.get('eye_state', {}).get('attention_score', 0),
+                            'fatigue': user_state.get('overall', {}).get('fatigue_level', 0),
+                            'activity': user_state.get('body_state', {}).get('posture', 'unknown'),
+                        })
                 
         except Exception as e:
-            print(f"[感知线程] 错误: {e}")
-            time.sleep(1)
+            consecutive_errors += 1
+            print(f"[感知线程] 错误 ({consecutive_errors}): {e}")
+            print(f"[感知线程] {retry_delay}秒后重连...")
+            time.sleep(retry_delay)
+            # 指数退避，但不超过最大值
+            retry_delay = min(retry_delay * 2, max_retry_delay)
 
 # ============================================================================
 # Agent循环 - 降低频率
@@ -167,15 +190,15 @@ def agent_loop():
     while True:
         try:
             # ⭐ 基础模式下不运行Agent循环
-            if system_center.is_basic_mode():
+            if system_core.is_basic_mode():
                 time.sleep(2.0)
                 continue
             
-            world_state = state_manager.get_world_state()
+            world_state = system_core.get_state()
             
             if should_think(world_state):
                 print(f"[Agent循环] 触发思考")
-                decision = think(world_state, state_manager)
+                decision = think(world_state, system_core)
                 
                 if decision.get("need_action"):
                     action_executor.execute(decision)
@@ -271,21 +294,11 @@ def api_load_all():
     ok = screen_proc.load_config()
     return jsonify({"ok": ok})
 
+# ⭐ 新的系统状态API - 从SystemCore获取
 @app.route('/api/system/state')
 def api_system_state():
-    return jsonify({
-        "state": {
-            "mode": "game" if game_manager.is_game_active() else "normal",
-            "current_page": state_manager.get_current_page(),
-            "game": {
-                "active": game_manager.is_game_active(),
-                "name": game_manager.get_current_game_id(),
-                "status": game_manager.get_game_status(),
-                "score": game_manager.get_game_state().get("score", 0) if game_manager.get_game_state() else 0,
-                "timer": game_manager.get_game_state().get("timer", 0) if game_manager.get_game_state() else 0,
-            }
-        }
-    })
+    """获取系统全局状态"""
+    return jsonify(system_core.get_state())
 
 @app.route('/api/health')
 def api_health():
@@ -297,7 +310,7 @@ def api_user_state():
 
 @app.route('/api/world_state')
 def api_world_state():
-    return jsonify(state_manager.get_world_state())
+    return jsonify(system_core.get_state())
 
 @app.route('/api/agent_state')
 def api_agent_state():
@@ -327,17 +340,20 @@ def api_akon_chat():
     if not user_input:
         return jsonify({"error": "请输入内容"}), 400
     
-    state_manager.set_user_speaking(True, user_input)
+    system_core.set_user_speaking(True)
     
+    # ⭐ 从SystemCore获取当前状态
+    core_state = system_core.get_state()
     akon_state = {
-        "current_page": state_manager.get_current_page(),
-        "game_active": game_manager.is_game_active(),
-        "game_name": game_manager.get_current_game_id(),
-        "game_score": game_manager.get_game_state().get("score", 0) if game_manager.get_game_state() else 0
+        "current_page": core_state.get('currentPage', '/'),
+        "game_active": system_core.is_game_active(),
+        "game_name": core_state.get('game', {}).get('currentGame'),
+        "game_score": core_state.get('gameRuntime', {}).get('score', 0),
+        "ai_mode": core_state.get('aiMode', 'basic')
     }
     
     response, action = ask_akon(user_input, akon_state)
-    state_manager.set_user_speaking(False)
+    system_core.set_user_speaking(False)
     
     result = {"response": response, "action": action}
     
@@ -347,8 +363,8 @@ def api_akon_chat():
         if action_type == "navigate_and_recommend":
             page = action.get("page", "/")
             content = action.get("content", {})
-            if not game_manager.is_game_active():
-                state_manager.navigate_to(page)
+            if not system_core.is_game_active():
+                system_core.set_page(page)
                 socketio.emit('navigate_to', {"page": page})
             if content:
                 socketio.emit('akon_recommend', {
@@ -358,8 +374,8 @@ def api_akon_chat():
         
         elif action_type == "navigate":
             page = action.get("page", "/")
-            if not game_manager.is_game_active():
-                state_manager.navigate_to(page)
+            if not system_core.is_game_active():
+                system_core.set_page(page)
                 socketio.emit('navigate_to', {"page": page})
         
         elif action_type == "play":
@@ -388,94 +404,95 @@ def handle_game_control(data):
     if action == 'ready':
         # ⭐ 在准备游戏时，传递游戏参数
         game_params = {}
-        # 从请求数据中获取 dwell_time，如果没有则从 system_center 获取当前设置
-        dwell_time = data.get('dwell_time') or data.get('dwellTime') or system_center.get_dwell_time() or 2000
+        # 从SystemCore获取确认时间
+        dwell_time = data.get('dwell_time') or data.get('dwellTime') or system_core.get_dwell_time() or 2000
         game_params['dwell_time'] = dwell_time
         print(f"[游戏控制] {game_id} 确认时间: {dwell_time}ms")
+        
+        # ⭐ 更新SystemCore状态
+        system_core.set_current_game(game_id)
+        system_core.set_game_status('READY')
+        system_core.reset_game_runtime()
+        
         game_manager.set_ready(game_id, game_params=game_params)
         
-        # ⭐ 关键修复：发送导航指令让平板跳转到训练页面
+        # ⭐ 发送导航指令让平板跳转到训练页面
         socketio.emit('navigate_to', {"page": "/training"})
         print(f"[游戏控制] 发送导航指令: /training")
     
     elif action == 'start':
-        # ⭐ 关键修复：start时必须确保使用正确的游戏类型
-        current_game_id = game_manager.get_current_game_id()
-        print(f"[游戏控制] action=start, current_game_id: {current_game_id}")
+        # ⭐ 更新SystemCore状态
+        system_core.set_game_status('PLAYING')
         game_manager.start_game()
     
     elif action == 'pause':
+        current_status = system_core.get_game_status()
+        new_status = 'PAUSED' if current_status == 'PLAYING' else 'PLAYING'
+        system_core.set_game_status(new_status)
         game_manager.toggle_pause()
     
     elif action == 'stop':
+        system_core.set_game_status('IDLE')
+        system_core.set_current_game(None)
         game_manager.stop_game()
+        socketio.emit('navigate_to', {"page": "/learning"})
     
     elif action == 'timeout_stop':
         print("[游戏控制] 超时停止")
+        system_core.set_game_status('IDLE')
+        system_core.set_current_game(None)
         game_manager.stop_game()
         socketio.emit('navigate_to', {"page": "/learning"})
     
     elif action == 'restart':
-        # ⭐ 关键修复：restart时必须使用当前正在玩的游戏类型
-        # 从请求中获取游戏ID，如果没有则使用当前游戏ID
-        restart_game_id = data.get('game') or game_manager.get_current_game_id() or 'whack_a_mole'
-        # 获取确认时间，如果没有则从 system_center 获取当前设置
-        restart_dwell_time = data.get('dwell_time') or data.get('dwellTime') or system_center.get_dwell_time() or 2000
+        # ⭐ 重新开始游戏
+        restart_game_id = data.get('game') or system_core.get_current_game() or 'whack_a_mole'
+        restart_dwell_time = data.get('dwell_time') or data.get('dwellTime') or system_core.get_dwell_time() or 2000
         
         print(f"[游戏控制] 重新开始游戏: {restart_game_id}, 确认时间: {restart_dwell_time}ms")
         
-        # 先停止当前游戏
         game_manager.stop_game()
         
-        # 使用正确的游戏ID和参数重新准备
         game_params = {'dwell_time': restart_dwell_time}
+        system_core.set_current_game(restart_game_id)
+        system_core.set_game_status('READY')
+        system_core.reset_game_runtime()
+        
         game_manager.set_ready(restart_game_id, game_params=game_params)
-        return
     
     elif action == 'update_params':
-        # ⭐ 新增：更新游戏参数（如确认时间）
+        # ⭐ 更新游戏参数（如确认时间）
         dwell_time = data.get('dwell_time')
-        if dwell_time and game_manager.get_current_game():
-            game_manager.get_current_game().update_params({'dwell_time': dwell_time})
-            print(f"[游戏控制] 更新确认时间: {dwell_time}ms")
+        if dwell_time:
+            system_core.set_dwell_time(dwell_time)
+            if game_manager.get_current_game():
+                game_manager.get_current_game().update_params({'dwell_time': dwell_time})
+                print(f"[游戏控制] 更新确认时间: {dwell_time}ms")
     
     elif action == 'switch_module':
-        # ⭐ 新增：切换游戏模块
+        # ⭐ 切换游戏模块
         module = data.get('module')
-        if module and game_manager.get_current_game():
-            game_manager.get_current_game().update_params({'module': module})
-            print(f"[游戏控制] 切换模块: {module}")
-    
-    socketio.emit('system_state', {
-        "state": {
-            "mode": "game" if game_manager.is_game_active() else "normal",
-            "game": {
-                "active": game_manager.is_game_active(),
-                "name": game_manager.get_current_game_id(),
-                "status": game_manager.get_game_status(),
-                "score": game_manager.get_game_state().get("score", 0) if game_manager.get_game_state() else 0,
-                "timer": game_manager.get_game_state().get("timer", 0) if game_manager.get_game_state() else 0,
-            }
-        }
-    })
+        if module:
+            system_core.set_game_module(module)
+            if game_manager.get_current_game():
+                game_manager.get_current_game().update_params({'module': module})
+                print(f"[游戏控制] 切换模块: {module}")
 
 @socketio.on('game_action')
 def handle_game_action(data):
     """处理游戏内动作"""
     action = data.get('action')
     zone = data.get('zone', -1)
-    zone_id = data.get('zone_id', -1)  # 处理速度训练使用 zone_id
+    zone_id = data.get('zone_id', -1)
     success = data.get('success', False)
-    dwell_time = data.get('dwell_time', 0)
     
-    # 优先使用 zone_id（处理速度训练），否则使用 zone
+    # 优先使用 zone_id
     actual_zone = zone_id if zone_id > 0 else zone
     
     game_manager.handle_action(action, {
         "zone": actual_zone,
         "zone_id": zone_id,
-        "success": success,
-        "dwell_time": dwell_time
+        "success": success
     })
 
 @socketio.on('game_hit')
@@ -490,32 +507,76 @@ def handle_game_hit(data):
 # ============================================================================
 @socketio.on('set_ai_mode')
 def handle_set_ai_mode(data):
-    """设置AI模式"""
+    """设置AI模式 - 基础模式/智伴模式"""
+    # ⭐ 数据验证
+    if not isinstance(data, dict):
+        print(f"[Socket] set_ai_mode: 无效数据类型")
+        return
+    
     mode = data.get('mode')
-    if mode:
-        system_center.set_ai_mode(mode)
+    if mode in ['basic', 'companion']:
+        system_core.set_ai_mode(mode)
+    else:
+        print(f"[Socket] set_ai_mode: 无效模式 {mode}")
+
+@socketio.on('toggle_companion')
+def handle_toggle_companion(data):
+    """切换智伴系统开关"""
+    if not isinstance(data, dict):
+        return
+    
+    enabled = data.get('enabled', False)
+    mode = 'companion' if enabled else 'basic'
+    system_core.set_ai_mode(mode)
+    print(f"[系统] 智伴系统: {'开启' if enabled else '关闭'}")
 
 @socketio.on('set_page')
 def handle_set_page(data):
     """设置当前页面"""
+    if not isinstance(data, dict):
+        return
+    
     page = data.get('page')
-    if page:
-        system_center.set_page(page)
+    # ⭐ 验证页面格式（必须以/开头）
+    if page and isinstance(page, str) and page.startswith('/'):
+        system_core.set_page(page)
+    else:
+        print(f"[Socket] set_page: 无效页面 {page}")
 
 @socketio.on('set_dwell_time')
 def handle_set_dwell_time(data):
     """设置确认时间"""
+    if not isinstance(data, dict):
+        return
+    
     dwell_time = data.get('dwellTime') or data.get('dwell_time')
-    if dwell_time:
-        system_center.set_dwell_time(dwell_time)
-        # 同时更新游戏参数
-        if game_manager.get_current_game():
-            game_manager.get_current_game().update_params({'dwell_time': dwell_time})
+    # ⭐ 验证确认时间范围（500ms - 10000ms）
+    if dwell_time and isinstance(dwell_time, (int, float)):
+        dwell_time = int(dwell_time)
+        if 500 <= dwell_time <= 10000:
+            system_core.set_dwell_time(dwell_time)
+            # 同时更新游戏参数
+            if game_manager.get_current_game():
+                game_manager.get_current_game().update_params({'dwell_time': dwell_time})
+        else:
+            print(f"[Socket] set_dwell_time: 确认时间超出范围 {dwell_time}")
+    else:
+        print(f"[Socket] set_dwell_time: 无效确认时间 {dwell_time}")
 
 @socketio.on('get_system_state')
 def handle_get_system_state():
     """获取完整系统状态"""
-    socketio.emit('system_state', system_center.get_state())
+    socketio.emit('system_state', system_core.get_state())
+
+@socketio.on('get_state')
+def handle_get_state(data=None):
+    """获取状态（兼容旧接口）"""
+    if data and data.get('client') == 'tablet' and data.get('first_connect'):
+        if not system_core.is_game_active():
+            socketio.emit('navigate_to', {"page": "/"})
+    
+    # ⭐ 发送 system_state
+    socketio.emit('system_state', system_core.get_state())
 
 # ============================================================================
 # Socket事件 - 导航
@@ -526,46 +587,40 @@ def handle_navigate(data):
     source = data.get('source')
     print(f"[导航] page={page}, source={source}")
     
-    if game_manager.is_game_active():
+    if system_core.is_game_active():
         emit('navigate_error', {"message": "请先退出当前游戏"})
         return
     
-    state_manager.navigate_to(page)
+    system_core.set_page(page)
     socketio.emit('navigate_to', {"page": page})
 
-@socketio.on('get_state')
-def handle_get_state(data=None):
-    if data and data.get('client') == 'tablet' and data.get('first_connect'):
-        if not game_manager.is_game_active():
-            socketio.emit('navigate_to', {"page": "/"})
-    
-    # ⭐ 发送 system_state
-    socketio.emit('system_state', {
-        "state": {
-            "mode": "game" if game_manager.is_game_active() else "normal",
-            "game": {
-                "active": game_manager.is_game_active(),
-                "name": game_manager.get_current_game_id(),
-                "status": game_manager.get_game_status(),
-                "score": game_manager.get_game_state().get("score", 0) if game_manager.get_game_state() else 0,
-                "timer": game_manager.get_game_state().get("timer", 0) if game_manager.get_game_state() else 0,
-            }
-        }
-    })
-    
-    # ⭐ 如果游戏激活，也发送 game_update
-    if game_manager.is_game_active() and game_manager.get_game_state():
-        socketio.emit('game_update', {
-            "game_id": game_manager.get_current_game_id(),
-            **game_manager.get_game_state()
+# ============================================================================
+# 游戏状态同步 - 从GameManager到SystemCore
+# ============================================================================
+def sync_game_state():
+    """同步游戏状态到SystemCore"""
+    if game_manager.is_game_active() and game_manager.get_current_game():
+        game = game_manager.get_current_game()
+        state = game.get_state()
+        
+        # 更新SystemCore的游戏运行时数据
+        system_core.update_game_runtime({
+            'score': state.get('score', 0),
+            'timer': state.get('timer', 60),
+            'accuracy': state.get('stats', {}).get('accuracy', 0) * 100,
         })
 
 # ============================================================================
 # 后台任务
 # ============================================================================
 def main_worker():
+    """游戏主循环 - 30fps"""
     while True:
         game_manager.update()
+        
+        # ⭐ 同步游戏状态到SystemCore
+        sync_game_state()
+        
         socketio.sleep(0.033)  # 33ms = 30fps
 
 # ============================================================================
@@ -577,7 +632,7 @@ if __name__ == '__main__':
     threading.Thread(target=agent_loop, daemon=True).start()
     
     print("=" * 60)
-    print("AI具身智能认知训练系统 - EAOS v2.1")
+    print("AI具身智能认知训练系统 - EAOS v3.0")
     print("=" * 60)
     print()
     print(f"本机IP:     http://{LOCAL_IP}:5000")
@@ -589,9 +644,16 @@ if __name__ == '__main__':
     for game_id in GAME_REGISTRY:
         print(f"  - {game_id}")
     print()
+    print("系统模式:")
+    mode = system_core.get_ai_mode()
+    if mode == 'companion':
+        print("  🟢 智伴模式 - AI主动感知和交互")
+    else:
+        print("  ⚪ 基础模式 - 预设程序运行")
+    print()
     print("模块结构:")
-    print("  core/       - Agent、世界模型、工具")
-    print("  games/      - 游戏系统（可扩展）")
+    print("  core/       - SystemCore（统一状态管理）")
+    print("  games/      - 游戏系统")
     print("  perception/ - 感知系统")
     print("=" * 60)
     
