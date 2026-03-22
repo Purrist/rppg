@@ -58,6 +58,9 @@ socketio = SocketIO(
 # ============================================================================
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# ⭐ 系统数据中心（唯一真相来源）
+from system_center import init_system_center, get_system_center
+
 # 核心模块
 from core import SystemStateManager, ask_akon, think, should_think, get_agent_state, ActionExecutor
 
@@ -70,6 +73,9 @@ from perception import PerceptionManager, init_screen_processor, draw_detection_
 # ============================================================================
 # 初始化
 # ============================================================================
+# ⭐ 初始化系统数据中心（必须在其他模块之前）
+system_center = init_system_center(socketio)
+
 # 投影摄像头处理器
 screen_proc = init_screen_processor(camera_source=PROJECTION_CAMERA_SOURCE, socketio=socketio)
 
@@ -83,13 +89,13 @@ print(f"[游戏系统] 已注册游戏: {list(GAME_REGISTRY.keys())}")
 # 感知管理器
 perception_manager = PerceptionManager()
 
-# 状态管理器（世界模型）
+# 状态管理器（世界模型）- 用于AI Agent
 state_manager = SystemStateManager(socketio)
 
 # 行动执行器
 action_executor = ActionExecutor(socketio, state_manager)
 
-# 用户状态
+# 用户状态（保留用于兼容）
 user_state = {
     "emotion": {"primary": "neutral"},
     "heart_rate": {"bpm": None},
@@ -130,19 +136,22 @@ def perception_worker():
                     
                     frame = cv2.imdecode(np.frombuffer(jpg, dtype=np.uint8), cv2.IMREAD_COLOR)
                     
-                    if frame is not None:
-                        now = time.time()
-                        
-                        # ⭐ 视频帧始终更新（用于显示）
-                        with perception_frame_lock:
-                            _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-                            perception_frame = jpeg.tobytes()
-                        
-                        # ⭐ 感知处理按频率限制
-                        if now - _last_perception_time >= PERCEPTION_INTERVAL:
-                            _last_perception_time = now
-                            user_state = perception_manager.process_frame(frame, "tablet")
-                            state_manager.update_world(user_state)
+                    # ⭐ 关键修复：检查帧是否为空
+                    if frame is None or frame.size == 0:
+                        continue
+                    
+                    now = time.time()
+                    
+                    # ⭐ 视频帧始终更新（用于显示）
+                    with perception_frame_lock:
+                        _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                        perception_frame = jpeg.tobytes()
+                    
+                    # ⭐ 感知处理按频率限制
+                    if now - _last_perception_time >= PERCEPTION_INTERVAL:
+                        _last_perception_time = now
+                        user_state = perception_manager.process_frame(frame, "tablet")
+                        state_manager.update_world(user_state)
                 
         except Exception as e:
             print(f"[感知线程] 错误: {e}")
@@ -157,6 +166,11 @@ def agent_loop():
     
     while True:
         try:
+            # ⭐ 基础模式下不运行Agent循环
+            if system_center.is_basic_mode():
+                time.sleep(2.0)
+                continue
+            
             world_state = state_manager.get_world_state()
             
             if should_think(world_state):
@@ -374,13 +388,20 @@ def handle_game_control(data):
     if action == 'ready':
         # ⭐ 在准备游戏时，传递游戏参数
         game_params = {}
-        # 从请求数据中获取 dwell_time（前端传来）
-        dwell_time = data.get('dwell_time', 2000)
+        # 从请求数据中获取 dwell_time，如果没有则从 system_center 获取当前设置
+        dwell_time = data.get('dwell_time') or data.get('dwellTime') or system_center.get_dwell_time() or 2000
         game_params['dwell_time'] = dwell_time
         print(f"[游戏控制] {game_id} 确认时间: {dwell_time}ms")
         game_manager.set_ready(game_id, game_params=game_params)
+        
+        # ⭐ 关键修复：发送导航指令让平板跳转到训练页面
+        socketio.emit('navigate_to', {"page": "/training"})
+        print(f"[游戏控制] 发送导航指令: /training")
     
     elif action == 'start':
+        # ⭐ 关键修复：start时必须确保使用正确的游戏类型
+        current_game_id = game_manager.get_current_game_id()
+        print(f"[游戏控制] action=start, current_game_id: {current_game_id}")
         game_manager.start_game()
     
     elif action == 'pause':
@@ -395,10 +416,35 @@ def handle_game_control(data):
         socketio.emit('navigate_to', {"page": "/learning"})
     
     elif action == 'restart':
-        # ⭐ 直接重启，进入 READY 状态
-        game_manager.restart_game(game_id)
-        # restart_game 会发送 system_state，其中 active=True（因为 READY 算激活）
+        # ⭐ 关键修复：restart时必须使用当前正在玩的游戏类型
+        # 从请求中获取游戏ID，如果没有则使用当前游戏ID
+        restart_game_id = data.get('game') or game_manager.get_current_game_id() or 'whack_a_mole'
+        # 获取确认时间，如果没有则从 system_center 获取当前设置
+        restart_dwell_time = data.get('dwell_time') or data.get('dwellTime') or system_center.get_dwell_time() or 2000
+        
+        print(f"[游戏控制] 重新开始游戏: {restart_game_id}, 确认时间: {restart_dwell_time}ms")
+        
+        # 先停止当前游戏
+        game_manager.stop_game()
+        
+        # 使用正确的游戏ID和参数重新准备
+        game_params = {'dwell_time': restart_dwell_time}
+        game_manager.set_ready(restart_game_id, game_params=game_params)
         return
+    
+    elif action == 'update_params':
+        # ⭐ 新增：更新游戏参数（如确认时间）
+        dwell_time = data.get('dwell_time')
+        if dwell_time and game_manager.get_current_game():
+            game_manager.get_current_game().update_params({'dwell_time': dwell_time})
+            print(f"[游戏控制] 更新确认时间: {dwell_time}ms")
+    
+    elif action == 'switch_module':
+        # ⭐ 新增：切换游戏模块
+        module = data.get('module')
+        if module and game_manager.get_current_game():
+            game_manager.get_current_game().update_params({'module': module})
+            print(f"[游戏控制] 切换模块: {module}")
     
     socketio.emit('system_state', {
         "state": {
@@ -438,6 +484,38 @@ def handle_game_hit(data):
     hole = data.get('hole', -1)
     hit = data.get('hit', False)
     game_manager.handle_action("hit", {"zone": hole, "success": hit})
+
+# ============================================================================
+# ⭐ Socket事件 - 系统状态控制（前端操作后端状态）
+# ============================================================================
+@socketio.on('set_ai_mode')
+def handle_set_ai_mode(data):
+    """设置AI模式"""
+    mode = data.get('mode')
+    if mode:
+        system_center.set_ai_mode(mode)
+
+@socketio.on('set_page')
+def handle_set_page(data):
+    """设置当前页面"""
+    page = data.get('page')
+    if page:
+        system_center.set_page(page)
+
+@socketio.on('set_dwell_time')
+def handle_set_dwell_time(data):
+    """设置确认时间"""
+    dwell_time = data.get('dwellTime') or data.get('dwell_time')
+    if dwell_time:
+        system_center.set_dwell_time(dwell_time)
+        # 同时更新游戏参数
+        if game_manager.get_current_game():
+            game_manager.get_current_game().update_params({'dwell_time': dwell_time})
+
+@socketio.on('get_system_state')
+def handle_get_system_state():
+    """获取完整系统状态"""
+    socketio.emit('system_state', system_center.get_state())
 
 # ============================================================================
 # Socket事件 - 导航

@@ -117,6 +117,10 @@ class GameManager:
     def get_current_game_id(self) -> Optional[str]:
         return self._current_game_id
     
+    def get_current_game(self) -> Optional[GameBase]:
+        """获取当前游戏实例"""
+        return self._current_game
+    
     def get_game_state(self) -> Optional[Dict]:
         return self._current_game.get_state() if self._current_game else None
     

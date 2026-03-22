@@ -24,11 +24,12 @@
 <script setup>
 import { ref, reactive, onMounted, onUnmounted, watch } from 'vue'
 import { io } from 'socket.io-client'
-import { initGameState, setCurrentGame, setGameStatus, updateGameData, getDwellTime } from '../composables/useGameState.js'
+import { initStore, subscribe, gameControl, gameAction, getState } from '../core/systemStore.js'
 import ProcessingSpeedGame from '../components/ProcessingSpeedGame.vue'
 
-// 初始化游戏状态管理
-initGameState()
+// Socket和订阅
+let socket = null
+let unsubscribe = null
 
 // ==================== 配置 ====================
 const getBackendHost = () => {
@@ -101,9 +102,10 @@ const holeProgress = ref([0, 0, 0])
 const holeStartTime = ref([0, 0, 0])
 const holeFeedback = ref([null, null, null])
 const holeFeedbackTime = ref([0, 0, 0])
-// ⭐ 从统一状态管理读取确认时间
+// ⭐ 从后端状态读取确认时间
 const getHoleDuration = () => {
-  return getDwellTime()
+  const state = getState()
+  return state.value?.settings?.dwellTime || 2000
 }
 const FEEDBACK_DURATION = 1000
 
@@ -113,30 +115,61 @@ const FEEDBACK_DURATION = 1000
 let particles = []
 
 // ==================== Socket ====================
-let socket = null
 let statusInterval = null
 
 // ==================== 初始化Canvas ====================
+// ⭐ 设计尺寸（16:9 比例）
+const DESIGN_WIDTH = 640
+const DESIGN_HEIGHT = 360
+const DESIGN_RATIO = DESIGN_WIDTH / DESIGN_HEIGHT  // 16:9 = 1.777...
+
 function initCanvas() {
   if (!mainCanvas.value || !pageRef.value) return
   
   const container = pageRef.value
-  mainCanvas.value.width = container.clientWidth
-  mainCanvas.value.height = container.clientHeight
+  const containerW = container.clientWidth
+  const containerH = container.clientHeight
+  const containerRatio = containerW / containerH
 
-  // ⭐ 更新容器尺寸
-  containerWidth.value = container.clientWidth
-  containerHeight.value = container.clientHeight
+  // ⭐ 计算等比例缩放的尺寸（保持16:9，添加黑边）
+  let renderWidth, renderHeight
+  if (containerRatio > DESIGN_RATIO) {
+    // 屏幕太宽，以高度为基准，左右加黑边
+    renderHeight = containerH
+    renderWidth = containerH * DESIGN_RATIO
+  } else {
+    // 屏幕太高或正好，以宽度为基准，上下加黑边
+    renderWidth = containerW
+    renderHeight = containerW / DESIGN_RATIO
+  }
 
-  scaleX.value = container.clientWidth / canvasWidth
-  scaleY.value = container.clientHeight / canvasHeight
+  // 设置Canvas尺寸为实际渲染尺寸
+  mainCanvas.value.width = renderWidth
+  mainCanvas.value.height = renderHeight
+
+  // ⭐ 更新容器尺寸（传递给子组件）
+  containerWidth.value = renderWidth
+  containerHeight.value = renderHeight
+
+  // ⭐ 等比例缩放（scaleX === scaleY）
+  const scale = renderWidth / DESIGN_WIDTH
+  scaleX.value = scale
+  scaleY.value = scale
+
+  // ⭐ 居中显示
+  const offsetX = (containerW - renderWidth) / 2
+  const offsetY = (containerH - renderHeight) / 2
+  mainCanvas.value.style.left = offsetX + 'px'
+  mainCanvas.value.style.top = offsetY + 'px'
   
   ctx = mainCanvas.value.getContext('2d')
   
-  // 初始化绿点Canvas
+  // 初始化绿点Canvas（同样居中）
   if (footCanvas.value) {
-    footCanvas.value.width = container.clientWidth
-    footCanvas.value.height = container.clientHeight
+    footCanvas.value.width = renderWidth
+    footCanvas.value.height = renderHeight
+    footCanvas.value.style.left = offsetX + 'px'
+    footCanvas.value.style.top = offsetY + 'px'
     footCtx = footCanvas.value.getContext('2d')
   }
   
@@ -681,18 +714,10 @@ onMounted(() => {
     }
     // 注意：不再使用 data.module 来判断，避免误判
 
-    // ⭐ 更新统一游戏状态
+    // ⭐ 更新游戏状态（通过systemStore发送到后端）
     if (data.game_id) {
-      setCurrentGame(data.game_id)
+      // 使用systemStore更新
     }
-    if (data.status) {
-      setGameStatus(data.status)
-    }
-    updateGameData({
-      score: data.score,
-      timer: data.timer,
-      difficulty: data.difficulty_level
-    })
 
     // 更新难度等级
     if (data.difficulty_level) {
@@ -775,10 +800,7 @@ onUnmounted(() => {
 /* 主Canvas（底层） */
 .main-canvas {
   position: absolute;
-  top: 0;
-  left: 0;
-  width: 100% !important;
-  height: 100% !important;
+  /* top和left由JS动态设置以实现居中 */
   display: block !important;
   z-index: 1;
 }
@@ -796,10 +818,7 @@ onUnmounted(() => {
 /* 绿点Canvas（顶层） */
 .foot-canvas {
   position: absolute;
-  top: 0;
-  left: 0;
-  width: 100% !important;
-  height: 100% !important;
+  /* top和left由JS动态设置以实现居中 */
   display: block !important;
   z-index: 10;
   pointer-events: none; /* 让点击事件穿透 */

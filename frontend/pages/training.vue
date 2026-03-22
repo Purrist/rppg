@@ -130,13 +130,23 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { io } from 'socket.io-client'
-import { useRouter } from 'vue-router'
-import { initGameState, setCurrentGame, setGameStatus, updateGameData } from '../composables/useGameState.js'
+import { useRouter, onBeforeRouteLeave } from 'vue-router'
+import { initStore, subscribe, gameControl } from '../core/systemStore.js'
 
 const router = useRouter()
 
-// 初始化游戏状态管理
-initGameState()
+// ⭐ 路由守卫 - 离开页面时停止游戏
+onBeforeRouteLeave((to, from, next) => {
+  if (game.value.status === 'PLAYING') {
+    console.log('[训练页] 路由离开，停止游戏')
+    gameControl('stop')
+  }
+  next()
+})
+
+// Socket实例
+let socket = null
+let unsubscribe = null
 
 const game = ref({ 
   status: 'READY', 
@@ -150,7 +160,6 @@ const game = ref({
 const stimulus = ref(null)
 const feedback = ref(null)
 const isExiting = ref(false)
-let socket = null
 let feedbackTimeout = null
 
 const getBackendHost = () => {
@@ -176,6 +185,22 @@ const moduleNames = {
 const gameTitle = computed(() => gameInfo[game.value.gameType]?.title || '游戏')
 const gameIcon = computed(() => gameInfo[game.value.gameType]?.icon || '🎮')
 const moduleName = computed(() => moduleNames[game.value.module] || '')
+
+// ==================== 页面离开检测 - 立即停止游戏 ====================
+function handleBeforeUnload(event) {
+  // 页面关闭/刷新时停止游戏
+  if (socket?.connected && game.value.status === 'PLAYING') {
+    socket.emit('game_control', { action: 'stop' })
+  }
+}
+
+function handleVisibilityChange() {
+  // 页面切换/隐藏时停止游戏
+  if (document.hidden && socket?.connected && game.value.status === 'PLAYING') {
+    console.log('[训练页] 页面隐藏，停止游戏')
+    socket.emit('game_control', { action: 'stop' })
+  }
+}
 
 onMounted(() => {
   socket = io(backendUrl, {
@@ -205,19 +230,7 @@ onMounted(() => {
       difficultyLevel: data.difficulty_level || 5
     }
     
-    // ⭐ 更新统一游戏状态
-    if (data.game_id) {
-      setCurrentGame(data.game_id)
-    }
-    if (data.status) {
-      setGameStatus(data.status)
-    }
-    updateGameData({
-      score: data.score,
-      timer: data.timer,
-      difficulty: data.difficulty_level
-    })
-    
+    // 显示刺激和反馈
     if (data.stimulus) stimulus.value = data.stimulus
     
     if (data.feedback) {
@@ -237,11 +250,25 @@ onMounted(() => {
   })
   
   socket.on('navigate_to', (data) => router.push(data.page))
+  
+  // ⭐ 添加页面离开检测
+  window.addEventListener('beforeunload', handleBeforeUnload)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
 })
 
 onUnmounted(() => {
+  // ⭐ 页面卸载时立即停止游戏
+  if (socket?.connected && game.value.status === 'PLAYING') {
+    console.log('[训练页] 页面卸载，停止游戏')
+    socket.emit('game_control', { action: 'stop' })
+  }
+  
   if (socket) socket.disconnect()
   if (feedbackTimeout) clearTimeout(feedbackTimeout)
+  
+  // 移除事件监听
+  window.removeEventListener('beforeunload', handleBeforeUnload)
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 
 const pauseGame = () => {
@@ -253,17 +280,23 @@ const resumeGame = () => {
 }
 
 const restartGame = () => {
-  if (socket?.connected) socket.emit('game_control', { action: 'restart' })
+  if (socket?.connected) {
+    // 重新开始游戏
+    const currentGameId = game.value.gameType
+    console.log('[training] 重新开始游戏:', currentGameId)
+    
+    gameControl('restart', { game: currentGameId })
+  }
 }
 
 const endGame = () => {
-  if (socket?.connected) socket.emit('game_control', { action: 'stop' })
+  gameControl('stop')
 }
 
 const exitGame = () => {
   if (isExiting.value) return
   isExiting.value = true
-  if (socket?.connected) socket.emit('game_control', { action: 'stop' })
+  gameControl('stop')
   setTimeout(() => router.push('/learning'), 100)
 }
 </script>

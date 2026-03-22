@@ -76,13 +76,11 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { io } from 'socket.io-client'
-import { initGameState, setCurrentGame, setGameStatus, setDwellTime, getDwellTime } from '../composables/useGameState.js'
+import { initStore, subscribe, gameControl } from '../core/systemStore.js'
 
 const router = useRouter()
 let socket = null
-
-// 初始化游戏状态管理
-initGameState()
+let unsubscribe = null
 
 const selectedGame = ref(null)
 
@@ -127,6 +125,9 @@ onMounted(() => {
     transports: ['polling', 'websocket'],
     reconnection: true
   })
+  
+  // ⭐ 关键修复：初始化systemStore
+  initStore(socket)
   
   socket.on('connect', () => {
     console.log('[益智] 后端已连接')
@@ -175,19 +176,11 @@ const closeModal = () => {
 
 const confirmStartGame = () => {
   if (selectedGame.value && socket && socket.connected) {
-    // ⭐ 设置当前游戏到统一状态
-    setCurrentGame(selectedGame.value)
-    setGameStatus('READY')
+    const gameId = selectedGame.value
+    console.log('[learning] 开始游戏:', gameId)
     
-    // ⭐ 对于处理速度训练，传递确认时间（dwell_time）
-    const payload = { action: 'ready', game: selectedGame.value }
-    if (selectedGame.value === 'processing_speed') {
-      // 从统一状态管理获取确认时间
-      const dwellTime = getDwellTime()
-      payload.dwell_time = dwellTime
-      console.log('[learning] 发送确认时间:', dwellTime, 'ms')
-    }
-    socket.emit('game_control', payload)
+    // 发送到后端，后端是唯一的真相来源
+    gameControl('ready', { game: gameId })
     selectedGame.value = null
   } else {
     alert('后端未连接，请稍后重试')

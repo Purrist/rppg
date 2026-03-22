@@ -78,6 +78,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { io } from 'socket.io-client'
+import { initStore, setCurrentPage } from './core/systemStore.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -155,7 +156,7 @@ async function handleNavigate(page) {
 
 // ⭐ 点击张爷爷直接跳转设置页
 function goToSettings() {
-  router.push('/settings')
+  handleNavigate('/settings')
 }
 
 // ==================== Socket ====================
@@ -174,6 +175,9 @@ onMounted(() => {
     reconnectionAttempts: 10,
     reconnectionDelay: 1000
   })
+  
+  // ⭐ 初始化系统Store（订阅后端状态）
+  initStore(socket)
   
   socket.on('connect', () => {
     backendConnected.value = true
@@ -227,6 +231,15 @@ onMounted(() => {
   socket.on('navigate_error', (data) => {
     alert(data.message || '请先退出当前游戏')
   })
+  
+  // ⭐ 监听路由变化，同步页面状态
+  watch(() => route.path, (newPath) => {
+    console.log('[App] 页面切换:', newPath)
+    // /developer 和 /projection 不参与管理，不发送页面切换事件
+    if (!isPurePage.value) {
+      setCurrentPage(newPath)
+    }
+  }, { immediate: true })
 })
 
 onUnmounted(() => {

@@ -21,6 +21,14 @@ class TrainingModule(Enum):
     CHOICE_REACTION = "choice_reaction"
 
 
+class GoNoGoType(Enum):
+    """Go/No-Go 四种指令类型"""
+    STEP_ON_GREEN = "step_on_green"      # 踩绿色
+    STEP_ON_RED = "step_on_red"          # 踩红色
+    DONT_STEP_ON_GREEN = "dont_step_on_green"  # 别踩绿色
+    DONT_STEP_ON_RED = "dont_step_on_red"      # 别踩红色
+
+
 @dataclass
 class ProcessingSpeedConfig(GameConfig):
     """处理速度训练配置"""
@@ -37,15 +45,19 @@ class ProcessingSpeedConfig(GameConfig):
     # 作答间隔（两题之间的休息时间）
     interval_time: int = 2000  # 毫秒（增加到2秒，让用户有感知）
 
-    # 颜色配置
+    # 颜色配置 - 基于认知训练文献设计
+    # Go/No-Go只使用红绿两种颜色（符合文献要求）
+    # 选择反应使用高对比度颜色，确保老人能区分
     colors: Dict[str, str] = field(default_factory=lambda: {
-        "go": "#33B555",      # 绿色 - 正确/Go
-        "no_go": "#FF4444",   # 红色 - 错误/No-Go/干扰
-        "blue": "#2196F3",
-        "yellow": "#FFD111",
-        "purple": "#9C27B0",
-        "orange": "#FF7222",
-        "default": "#D9D9D9", # 灰色 - 未激活
+        "green": "#33B555",      # 绿色 - Go/目标
+        "red": "#FF4444",        # 红色 - No-Go/干扰
+        "blue": "#1976D2",       # 深蓝色（高对比度）
+        "yellow": "#FFC107",     # 金黄色（高对比度）
+        "purple": "#7B1FA2",     # 深紫色（高对比度）
+        "orange": "#E65100",     # 深橙色（高对比度）
+        "cyan": "#00838F",       # 深青色（高对比度）
+        "pink": "#C2185B",       # 深粉色（高对比度）
+        "default": "#555555",    # 深灰色 - 未激活
     })
 
 
@@ -70,15 +82,16 @@ class ProcessingSpeedGame(GameBase):
 
     # 难度参数表
     # 作答时间 = 确认时间 + 额外时间（动态难度调整）
+    # zones: 激活的区域数量（根据UI参考：圈半径70px，左右间距15px，上下间距8px）
     DIFFICULTY_LEVELS = {
-        1: {"extra_time": 3.0, "go_ratio": 0.90, "zones": 1},  # 最简单
-        2: {"extra_time": 2.5, "go_ratio": 0.85, "zones": 2},
-        3: {"extra_time": 2.0, "go_ratio": 0.80, "zones": 2},
-        4: {"extra_time": 1.5, "go_ratio": 0.70, "zones": 3},
-        5: {"extra_time": 1.0, "go_ratio": 0.60, "zones": 3},
-        6: {"extra_time": 0.8, "go_ratio": 0.55, "zones": 4},
-        7: {"extra_time": 0.5, "go_ratio": 0.50, "zones": 4},
-        8: {"extra_time": 0.3, "go_ratio": 0.45, "zones": 4},  # 最难
+        1: {"extra_time": 3.0, "zones": 2},  # 最简单：2个区域
+        2: {"extra_time": 2.5, "zones": 3},
+        3: {"extra_time": 2.0, "zones": 4},
+        4: {"extra_time": 1.5, "zones": 5},
+        5: {"extra_time": 1.0, "zones": 6},
+        6: {"extra_time": 0.8, "zones": 6},
+        7: {"extra_time": 0.5, "zones": 7},
+        8: {"extra_time": 0.3, "zones": 8},  # 最难：8个区域
     }
 
     def __init__(self, socketio, config: ProcessingSpeedConfig = None):
@@ -116,6 +129,10 @@ class ProcessingSpeedGame(GameBase):
         # 确认时间（从配置读取）
         self.dwell_time_ms = self.config.dwell_time
         self.dwell_time_s = self.dwell_time_ms / 1000
+        
+        # ⭐ 自动切换模块计数器
+        self.module_switch_counter = 0
+        self.questions_per_module = 10  # 每10题切换一次模块
 
     def get_difficulty_params(self) -> Dict:
         """获取当前难度参数"""
@@ -210,6 +227,18 @@ class ProcessingSpeedGame(GameBase):
             self.dwell_time_s = self.dwell_time_ms / 1000
             self._dwell_time_custom = True  # 标记为已自定义
             print(f"[ProcessingSpeedGame] 更新确认时间: {self.dwell_time_ms}ms ({self.dwell_time_s}s)")
+        
+        # ⭐ 支持切换游戏模块
+        if 'module' in params:
+            module_name = params['module']
+            if module_name == 'choice_reaction':
+                self.current_module = TrainingModule.CHOICE_REACTION
+                print(f"[ProcessingSpeedGame] 切换到选择反应模块")
+            elif module_name == 'go_no_go':
+                self.current_module = TrainingModule.GO_NO_GO
+                print(f"[ProcessingSpeedGame] 切换到Go/No-Go模块")
+            else:
+                print(f"[ProcessingSpeedGame] 未知模块: {module_name}")
 
     def _on_settling(self):
         """结算回调"""
@@ -236,6 +265,17 @@ class ProcessingSpeedGame(GameBase):
         """开始新题目"""
         self.in_interval = False
         self.trial_id += 1
+        
+        # ⭐ 自动切换模块
+        self.module_switch_counter += 1
+        if self.module_switch_counter >= self.questions_per_module:
+            self.module_switch_counter = 0
+            if self.current_module == TrainingModule.GO_NO_GO:
+                self.current_module = TrainingModule.CHOICE_REACTION
+                print(f"[ProcessingSpeedGame] 自动切换到选择反应模块")
+            else:
+                self.current_module = TrainingModule.GO_NO_GO
+                print(f"[ProcessingSpeedGame] 自动切换到Go/No-Go模块")
         self.question_answered = False
         self.question_start_time = time.time()
 
@@ -249,81 +289,168 @@ class ProcessingSpeedGame(GameBase):
         self._emit_question()
 
     def _generate_go_no_go_question(self):
-        """生成Go/No-Go题目"""
+        """生成Go/No-Go题目 - 四种指令类型"""
         params = self.get_difficulty_params()
 
-        # 根据Go比例决定是Go还是No-Go
-        is_go = random.random() < params["go_ratio"]
+        # 随机选择四种指令类型之一
+        go_no_go_type = random.choice(list(GoNoGoType))
 
         # 选择激活的区域数
         num_zones = params["zones"]
         active_zones = random.sample(range(1, 9), num_zones)
 
-        # 选择目标区域（如果是Go）
-        target_zone = random.choice(active_zones) if is_go else None
+        # Go/No-Go只有红绿两个颜色
+        # 根据指令类型设置目标颜色
+        if go_no_go_type == GoNoGoType.STEP_ON_GREEN:
+            # 踩绿色：必须踩绿色，踩红色扣分
+            target_color = "green"
+            other_color = "red"
+            instruction = "踩绿色！"
+            correct_action = "step_on_target"
+        elif go_no_go_type == GoNoGoType.STEP_ON_RED:
+            # 踩红色：必须踩红色，踩绿色扣分
+            target_color = "red"
+            other_color = "green"
+            instruction = "踩红色！"
+            correct_action = "step_on_target"
+        elif go_no_go_type == GoNoGoType.DONT_STEP_ON_GREEN:
+            # 别踩绿色：只有绿色区域，没有红色
+            target_color = "green"
+            other_color = None  # 没有其他颜色
+            instruction = "别踩绿色！"
+            correct_action = "avoid_target"
+        else:  # DONT_STEP_ON_RED
+            # 别踩红色：只有红色区域，没有绿色
+            target_color = "red"
+            other_color = None  # 没有其他颜色
+            instruction = "别踩红色！"
+            correct_action = "avoid_target"
+
+        # 确保至少有一个目标颜色区域
+        target_zone = random.choice(active_zones)
+        other_zones = [z for z in active_zones if z != target_zone]
 
         # 构建区域状态
         zones = {}
         for z in range(1, 9):
-            if z in active_zones:
-                if is_go and z == target_zone:
-                    # Go目标 - 绿色
-                    zones[z] = {"active": True, "color": self.config.colors["go"], "is_target": True}
-                elif not is_go and z == random.choice(active_zones):
-                    # No-Go干扰项 - 红色（只有一个红色）
-                    zones[z] = {"active": True, "color": self.config.colors["no_go"], "is_target": False}
-                    target_zone = z  # 记录这个干扰项位置
+            if z == target_zone:
+                # 目标颜色区域（要避开或要踩的）
+                zones[z] = {
+                    "active": True,
+                    "color": self.config.colors[target_color],
+                    "color_name": target_color,
+                    "is_target": True
+                }
+            elif z in other_zones:
+                # 其他激活区域
+                if other_color:
+                    # "踩X"类型：分配另一个颜色
+                    zones[z] = {
+                        "active": True,
+                        "color": self.config.colors[other_color],
+                        "color_name": other_color,
+                        "is_target": False
+                    }
                 else:
-                    # 其他激活区域 - 灰色
-                    zones[z] = {"active": True, "color": self.config.colors["default"], "is_target": False}
+                    # "别踩X"类型：其他区域也用目标颜色（全是目标颜色）
+                    zones[z] = {
+                        "active": True,
+                        "color": self.config.colors[target_color],
+                        "color_name": target_color,
+                        "is_target": True
+                    }
             else:
                 # 未激活区域
-                zones[z] = {"active": False, "color": self.config.colors["default"], "is_target": False}
+                zones[z] = {
+                    "active": False,
+                    "color": self.config.colors["default"],
+                    "color_name": "default",
+                    "is_target": False
+                }
 
         self.current_question = {
             "trial_id": self.trial_id,
             "module": "go_no_go",
-            "is_go": is_go,
-            "target_zone": target_zone,  # Go时需要踩，No-Go时不能踩
+            "go_no_go_type": go_no_go_type.value,
+            "target_color": target_color,
+            "target_zone": target_zone,
+            "correct_action": correct_action,
             "zones": zones,
-            "instruction": "踩绿色！" if is_go else "不要踩红色！",
+            "instruction": instruction,
             "answer_time": self.get_answer_time(),
             "dwell_time": self.dwell_time_s,
         }
 
     def _generate_choice_reaction_question(self):
-        """生成选择反应题目"""
+        """生成选择反应题目 - 基于认知训练文献设计"""
         params = self.get_difficulty_params()
 
-        # 颜色列表
-        colors = ["blue", "yellow", "purple", "orange"]
-        num_colors = min(params["zones"], len(colors))
+        # 颜色列表 - 8种颜色，根据难度选择使用数量
+        # 基于Hick's Law：选择数量影响反应时间
+        all_colors = ["red", "green", "blue", "yellow", "purple", "orange", "cyan", "pink"]
+        
+        # 根据难度决定使用多少种颜色
+        # 难度1-2：2-3种颜色
+        # 难度3-5：4-5种颜色
+        # 难度6-8：6-8种颜色
+        if self.difficulty_level <= 2:
+            num_colors = min(3, len(all_colors))
+        elif self.difficulty_level <= 5:
+            num_colors = min(5, len(all_colors))
+        else:
+            num_colors = min(8, len(all_colors))
+        
+        colors = all_colors[:num_colors]
 
-        # 选择激活的区域数和颜色
+        # 选择激活的区域数
         num_zones = params["zones"]
         active_zones = random.sample(range(1, 9), num_zones)
-        zone_colors = random.sample(colors[:num_colors], num_zones)
 
-        # 随机选择一个作为目标
-        target_idx = random.randint(0, num_zones - 1)
-        target_zone = active_zones[target_idx]
-        target_color = zone_colors[target_idx]
+        # 随机选择目标颜色
+        target_color = random.choice(colors)
+
+        # 为每个激活区域分配颜色
+        # 确保至少有一个目标颜色区域
+        target_zone = random.choice(active_zones)
+
+        other_zones = [z for z in active_zones if z != target_zone]
+        other_colors = [c for c in colors if c != target_color]
+        random.shuffle(other_colors)
 
         # 构建区域状态
         zones = {}
         for z in range(1, 9):
-            if z in active_zones:
-                idx = active_zones.index(z)
-                color = zone_colors[idx]
+            if z == target_zone:
+                # 目标颜色区域
                 zones[z] = {
                     "active": True,
-                    "color": self.config.colors[color],
-                    "is_target": (z == target_zone)
+                    "color": self.config.colors[target_color],
+                    "color_name": target_color,
+                    "is_target": True
+                }
+            elif z in other_zones:
+                # 其他激活区域 - 分配其他颜色
+                color_idx = other_zones.index(z) % len(other_colors)
+                color_name = other_colors[color_idx]
+                zones[z] = {
+                    "active": True,
+                    "color": self.config.colors[color_name],
+                    "color_name": color_name,
+                    "is_target": False
                 }
             else:
-                zones[z] = {"active": False, "color": self.config.colors["default"], "is_target": False}
+                # 未激活区域
+                zones[z] = {
+                    "active": False,
+                    "color": self.config.colors["default"],
+                    "color_name": "default",
+                    "is_target": False
+                }
 
-        color_names = {"blue": "蓝色", "yellow": "黄色", "purple": "紫色", "orange": "橙色"}
+        color_names = {
+            "red": "红色", "green": "绿色", "blue": "蓝色", "yellow": "黄色",
+            "purple": "紫色", "orange": "橙色", "cyan": "青色", "pink": "粉色"
+        }
 
         self.current_question = {
             "trial_id": self.trial_id,
@@ -361,7 +488,9 @@ class ProcessingSpeedGame(GameBase):
 
         # Go/No-Go统计
         if self.current_question["module"] == "go_no_go":
-            is_go = self.current_question["is_go"]
+            # ⭐ 修复：使用 correct_action 判断是 Go 还是 No-Go
+            correct_action = self.current_question.get("correct_action", "step_on_target")
+            is_go = correct_action == "step_on_target"
             if is_go:
                 self.stats["go_total"] += 1
                 if correct:
@@ -371,16 +500,16 @@ class ProcessingSpeedGame(GameBase):
                 if correct:
                     self.stats["no_go_correct"] += 1
 
-        # 计分
+        # 计分 - 新规则：错了扣5分，对了根据剩余时间加分（剩余时间/100，四舍五入）
         if correct:
-            # 基础分100，根据难度和速度加分
-            base_score = 100
-            difficulty_bonus = self.difficulty_level * 10
-            speed_bonus = int((answer_time - elapsed) * 10)  # 剩余时间奖励
-            self.state.score += base_score + difficulty_bonus + max(0, speed_bonus)
+            # 计算剩余时间（毫秒转秒）
+            remaining_time_ms = (answer_time - elapsed) * 1000
+            # 加分 = 剩余时间(毫秒) / 100，四舍五入
+            points = round(remaining_time_ms / 100)
+            self.state.score += max(0, points)
         else:
-            # 错误扣分
-            self.state.score = max(0, self.state.score - 50)
+            # 错误扣5分
+            self.state.score = max(0, self.state.score - 5)
 
         # 记录最近表现
         self.recent_trials.append({"correct": correct})
@@ -409,22 +538,23 @@ class ProcessingSpeedGame(GameBase):
 
         # Go/No-Go统计
         if self.current_question["module"] == "go_no_go":
-            if self.current_question["is_go"]:
-                # Go试次超时 = 错误
+            correct_action = self.current_question.get("correct_action")
+            if correct_action == "step_on_target":
+                # "踩X"试次超时 = 错误（没有踩到目标）
                 self.stats["go_total"] += 1
             else:
-                # No-Go试次超时 = 正确（忍住了）
+                # "别踩X"试次超时 = 正确（成功避开了）
                 self.stats["no_go_total"] += 1
                 self.stats["no_go_correct"] += 1
                 self.stats["correct"] += 1
-                # No-Go正确加分
-                self.state.score += 150
+                # 正确加分（超时情况下剩余时间为0，只给基础分）
+                self.state.score += 5  # 基础分5分
                 self._emit_feedback(correct=True, zone_id=None, is_timeout=True)
                 self._start_interval()
                 return
 
-        # 扣分
-        self.state.score = max(0, self.state.score - 30)
+        # 超时扣分（与错误一致，扣5分）
+        self.state.score = max(0, self.state.score - 5)
 
         # 记录
         self.recent_trials.append({"correct": False})
@@ -442,26 +572,33 @@ class ProcessingSpeedGame(GameBase):
         self._start_interval()
 
     def _evaluate_answer(self, zone_id: int) -> bool:
-        """评估答案是否正确"""
+        """评估答案是否正确 - 支持四种Go/No-Go指令类型"""
         if not self.current_question:
             return False
 
         target_zone = self.current_question.get("target_zone")
+        target_color = self.current_question.get("target_color")
+        zones = self.current_question.get("zones", {})
+        zone_state = zones.get(zone_id, {})
 
         if self.current_question["module"] == "go_no_go":
-            is_go = self.current_question["is_go"]
-            if is_go:
-                # Go试次：必须踩目标区域
-                return zone_id == target_zone
-            else:
-                # No-Go试次：不能踩任何区域（但玩家已经踩了，所以是错误）
-                return False
+            correct_action = self.current_question.get("correct_action")
+            zone_color = zone_state.get("color_name", "")
+
+            if correct_action == "step_on_target":
+                # "踩绿色"或"踩红色"：必须踩目标颜色区域
+                return zone_id == target_zone and zone_color == target_color
+            else:  # "avoid_target"
+                # "别踩绿色"或"别踩红色"：只有踩目标颜色才错误，其他都正确
+                # 踩了目标颜色 = 错误，踩非目标颜色或不踩 = 正确
+                return zone_color != target_color
         else:
-            # 选择反应：踩目标区域
-            return zone_id == target_zone
+            # 选择反应：踩目标颜色区域
+            zone_color = zone_state.get("color_name", "")
+            return zone_color == target_color
 
     def _adjust_difficulty(self):
-        """动态难度调整"""
+        """动态难度调整 - 基于答题情况调整区域数量"""
         if len(self.recent_trials) < 5:
             return
 
@@ -470,11 +607,15 @@ class ProcessingSpeedGame(GameBase):
 
         # 调整规则
         if accuracy < 0.5:
-            # 正确率过低，降低难度
-            self.difficulty_level = max(1, self.difficulty_level - 1)
+            # 正确率过低，降低难度（减少区域数量）
+            if self.difficulty_level > 1:
+                self.difficulty_level -= 1
+                print(f"[ProcessingSpeed] 难度降低至 {self.difficulty_level} 级")
         elif accuracy > 0.85:
-            # 正确率过高，提高难度
-            self.difficulty_level = min(8, self.difficulty_level + 1)
+            # 正确率过高，提高难度（增加区域数量）
+            if self.difficulty_level < 8:
+                self.difficulty_level += 1
+                print(f"[ProcessingSpeed] 难度提高至 {self.difficulty_level} 级")
 
     # ==================== 状态发送 ====================
     def _emit_state(self):
@@ -517,10 +658,10 @@ class ProcessingSpeedGame(GameBase):
         elif not correct:
             message = "错误！"
 
-        # 如果是No-Go正确（忍住了）
+        # 如果是"别踩X"正确（成功抑制）
         if (self.current_question and
             self.current_question["module"] == "go_no_go" and
-            not self.current_question["is_go"] and
+            self.current_question.get("correct_action") == "avoid_target" and
             correct):
             message = "很好，忍住了！"
 

@@ -1,12 +1,11 @@
-<!--
-  ProcessingSpeedGame.vue - 处理速度训练游戏组件
-  使用Canvas绘制，与打地鼠游戏架构一致
-  640x360 坐标系统，通过scaleX/scaleY缩放
--->
-
 <template>
   <div class="processing-speed-game">
-    <canvas ref="gameCanvas" class="game-canvas"></canvas>
+    <canvas 
+      ref="gameCanvas" 
+      class="game-canvas"
+      :width="canvasWidth"
+      :height="canvasHeight"
+    ></canvas>
   </div>
 </template>
 
@@ -17,8 +16,8 @@ import { ref, onMounted, onUnmounted, watch } from 'vue'
 const props = defineProps({
   gameState: { type: Object, required: true },
   footPosition: { type: Object, required: true },
-  canvasWidth: { type: Number, default: 1920 },
-  canvasHeight: { type: Number, default: 1080 },
+  canvasWidth: { type: Number, default: 640 },
+  canvasHeight: { type: Number, default: 360 },
   scaleX: { type: Number, default: 1 },
   scaleY: { type: Number, default: 1 }
 })
@@ -30,19 +29,20 @@ const gameCanvas = ref(null)
 let ctx = null
 let animationId = null
 
-// ==================== 8个区域配置 (640x360坐标系) ====================
-// 2行4列布局，与打地鼠一致
-const zones = [
-  // 第一行（y = 140）
-  { id: 1, x: 80, y: 140, radius: 45 },
-  { id: 2, x: 226, y: 140, radius: 45 },
-  { id: 3, x: 372, y: 140, radius: 45 },
-  { id: 4, x: 518, y: 140, radius: 45 },
-  // 第二行（y = 250）
-  { id: 5, x: 80, y: 250, radius: 45 },
-  { id: 6, x: 226, y: 250, radius: 45 },
-  { id: 7, x: 372, y: 250, radius: 45 },
-  { id: 8, x: 518, y: 250, radius: 45 },
+// ==================== 8个区域配置（按照UI参考）====================
+// 画布尺寸: 640x360
+// 圆形直径: 140px, 半径: 70px
+// 第一行: y=62+70=132 (圆心)
+// 第二行: y=210+70=280 (圆心)
+const ZONES = [
+  { id: 1, x: 86, y: 132, radius: 70 },   // 第一行第1个 (left: 16+70=86)
+  { id: 2, x: 242, y: 132, radius: 70 },  // 第一行第2个 (left: 172+70=242)
+  { id: 3, x: 398, y: 132, radius: 70 },  // 第一行第3个 (left: 328+70=398)
+  { id: 4, x: 554, y: 132, radius: 70 },  // 第一行第4个 (left: 484+70=554)
+  { id: 5, x: 86, y: 280, radius: 70 },   // 第二行第1个
+  { id: 6, x: 242, y: 280, radius: 70 },  // 第二行第2个
+  { id: 7, x: 398, y: 280, radius: 70 },  // 第二行第3个
+  { id: 8, x: 554, y: 280, radius: 70 },  // 第二行第4个
 ]
 
 // ==================== 游戏状态 ====================
@@ -51,36 +51,162 @@ const zoneStartTime = ref([0, 0, 0, 0, 0, 0, 0, 0])
 const zoneFeedback = ref([null, null, null, null, null, null, null, null])
 const zoneFeedbackTime = ref([0, 0, 0, 0, 0, 0, 0, 0])
 
-const currentQuestion = ref(null)
-const inInterval = ref(true)
-const remainingTime = ref(0)
-const answerTime = ref(5)
-
-// ==================== 确认时间 ====================
 const FEEDBACK_DURATION = 1000
 
+// ==================== 获取确认时间 ====================
 function getDwellDuration() {
+  // 从props获取，后端传来的确认时间（秒）转换为毫秒
   if (props.gameState && props.gameState.dwell_time) {
-    return props.gameState.dwell_time * 1000 // 转换为毫秒
+    return props.gameState.dwell_time * 1000
   }
-  const saved = localStorage.getItem('dwellTime')
-  return saved ? parseInt(saved) : 3000
+  return 2000 // 默认2秒
 }
 
 // ==================== 初始化Canvas ====================
 function initCanvas() {
   if (!gameCanvas.value) return
-  
-  gameCanvas.value.width = props.canvasWidth
-  gameCanvas.value.height = props.canvasHeight
   ctx = gameCanvas.value.getContext('2d')
 }
 
-// ==================== 更新游戏状态 ====================
+// ==================== 绘制游戏 ====================
+function draw() {
+  if (!ctx) return
+
+  // 清空画布（黑色背景）
+  ctx.fillStyle = '#000000'
+  ctx.fillRect(0, 0, props.canvasWidth, props.canvasHeight)
+
+  // ⭐ 应用缩放
+  ctx.save()
+  ctx.scale(props.scaleX, props.scaleY)
+
+  // 获取游戏数据
+  const question = props.gameState?.question
+  const zones = question?.zones || {}
+  const instruction = question?.instruction || ''
+  const score = props.gameState?.score || 0
+  const inInterval = props.gameState?.in_interval || false
+
+  // 绘制UI（按照UI参考）
+  drawUI(instruction, score, inInterval)
+
+  // 绘制8个区域
+  drawZones(zones)
+
+  ctx.restore()
+
+  animationId = requestAnimationFrame(draw)
+}
+
+// ==================== 绘制UI（上方信息栏）====================
+function drawUI(instruction, score, inInterval) {
+  // 绘制顶部信息栏背景
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.8)'
+  ctx.fillRect(0, 0, props.canvasWidth, 55)
+
+  // 左侧：指令（如"踩紫色"）
+  if (instruction && !inInterval) {
+    // 绘制图标背景（灰色圆角矩形）
+    ctx.fillStyle = '#505050'
+    ctx.beginPath()
+    ctx.roundRect(11, 11, 42, 42, 8)
+    ctx.fill()
+
+    // 绘制指令文字
+    ctx.font = 'bold 24px "Alibaba PuHuiTi", sans-serif'
+    ctx.fillStyle = '#ffffff'
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(instruction, 65, 32)
+  }
+
+  // 中间：单题进度条（灰色背景+绿色进度）
+  const answerTime = props.gameState?.answer_time || 5
+  const remainingTime = props.gameState?.remaining_time || answerTime
+  const progress = Math.max(0, Math.min(1, remainingTime / answerTime))
+  
+  // 进度条背景
+  ctx.fillStyle = '#505050'
+  ctx.beginPath()
+  ctx.roundRect(337, 24, 141, 15, 8)
+  ctx.fill()
+  
+  // 进度条填充（绿色）
+  if (!inInterval && remainingTime > 0) {
+    ctx.fillStyle = '#46cc41'
+    ctx.beginPath()
+    ctx.roundRect(337, 24, 141 * progress, 15, 8)
+    ctx.fill()
+  }
+
+  // 右侧：总分
+  ctx.font = 'bold 26px "Alibaba PuHuiTi", sans-serif'
+  ctx.fillStyle = '#ffffff'
+  ctx.textAlign = 'right'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(`总分：${score}`, 625, 32)
+}
+
+// ==================== 绘制8个区域 ====================
+function drawZones(questionZones) {
+  const now = Date.now()
+  const dwellMs = getDwellDuration()
+
+  ZONES.forEach((zone, index) => {
+    const zoneData = questionZones[zone.id] || { active: false, color: '#222222' }
+    const progress = zoneProgress.value[index]
+    const feedback = zoneFeedback.value[index]
+
+    // 确定区域颜色
+    let fillColor = zoneData.color || '#222222'
+    let borderColor = '#454545'
+
+    // 如果有反馈（正确/错误）
+    if (feedback === 'correct') {
+      fillColor = '#33B555' // 绿色
+      borderColor = '#33B555'
+    } else if (feedback === 'wrong') {
+      fillColor = '#ff4444' // 红色
+      borderColor = '#ff4444'
+    }
+
+    // 绘制区域圆形
+    ctx.beginPath()
+    ctx.arc(zone.x, zone.y, zone.radius, 0, Math.PI * 2)
+    ctx.fillStyle = fillColor
+    ctx.fill()
+
+    // 绘制边框
+    ctx.beginPath()
+    ctx.arc(zone.x, zone.y, zone.radius, 0, Math.PI * 2)
+    ctx.strokeStyle = borderColor
+    ctx.lineWidth = 5
+    ctx.stroke()
+
+    // 绘制进度圈（白色圆弧）- 与打地鼠一致，画在区域边缘
+    if (progress > 0 && !feedback) {
+      ctx.beginPath()
+      // 进度环画在区域边缘，与打地鼠一致
+      ctx.arc(zone.x, zone.y, zone.radius, -Math.PI / 2, -Math.PI / 2 + (Math.PI * 2 * progress / 100))
+      ctx.strokeStyle = '#ffffff'
+      ctx.lineWidth = 8
+      ctx.lineCap = 'round'
+      ctx.stroke()
+    }
+
+    // 清除过期反馈
+    if (feedback && now - zoneFeedbackTime.value[index] > FEEDBACK_DURATION) {
+      zoneFeedback.value[index] = null
+      zoneProgress.value[index] = 0
+      zoneStartTime.value[index] = 0
+    }
+  })
+}
+
+// ==================== 更新游戏状态（检测脚部位置）====================
 function updateGame() {
-  // 只有在有题目且不在间隔期时才检测
-  if (!props.footPosition.detected || !currentQuestion.value || inInterval.value) {
-    // 清空所有进度
+  if (!props.footPosition.detected) {
+    // 没有检测到脚部，清空所有进度
     for (let i = 0; i < 8; i++) {
       zoneProgress.value[i] = 0
       zoneStartTime.value[i] = 0
@@ -90,23 +216,15 @@ function updateGame() {
 
   const now = Date.now()
   const dwellMs = getDwellDuration()
+  const inInterval = props.gameState?.in_interval || false
 
   // 检查所有8个区域
-  zones.forEach((zone, index) => {
+  ZONES.forEach((zone, index) => {
     const feedback = zoneFeedback.value[index]
-    const feedbackTime = zoneFeedbackTime.value[index]
+    if (feedback) return // 有反馈时不处理
 
-    // 清除过期的反馈
-    if (feedback === 'correct' || feedback === 'wrong') {
-      if (now - feedbackTime > FEEDBACK_DURATION) {
-        zoneFeedback.value[index] = null
-        zoneProgress.value[index] = 0
-        zoneStartTime.value[index] = 0
-      }
-      return
-    }
-
-    // 检测玩家是否在区域内
+    // ⭐ 检测玩家是否在区域内
+    // footPosition 已经是设计坐标（640x360），直接使用
     const dx = props.footPosition.x - zone.x
     const dy = props.footPosition.y - zone.y
     const inZone = (dx * dx + dy * dy) <= (zone.radius * zone.radius)
@@ -119,11 +237,15 @@ function updateGame() {
 
       zoneProgress.value[index] = progress
 
-      // 停留完成（进度达到100%）
-      if (progress >= 100) {
+      // 停留完成且不在间隔期时才发送动作
+      if (progress >= 100 && !inInterval) {
         zoneFeedback.value[index] = 'pending'
         zoneFeedbackTime.value[index] = now
-        emit('action', { type: 'zone_dwell_completed', zone_id: zone.id, dwell_time: elapsed })
+        emit('action', { 
+          type: 'zone_dwell_completed', 
+          zone_id: zone.id, 
+          dwell_time: elapsed 
+        })
       }
     } else {
       // 玩家离开区域，重置进度
@@ -133,186 +255,40 @@ function updateGame() {
   })
 }
 
-// ==================== 绘制游戏 ====================
-function draw() {
-  if (!ctx) return
-
-  // 清空画布
-  ctx.clearRect(0, 0, gameCanvas.value.width, gameCanvas.value.height)
-
-  ctx.save()
-  ctx.scale(props.scaleX, props.scaleY)
-
-  // 绘制8个区域
-  const questionZones = currentQuestion.value?.zones || {}
-
-  zones.forEach((zone, index) => {
-    const zoneState = questionZones[zone.id] || { active: false, color: '#d9d9d9', is_target: false }
-    const progress = zoneProgress.value[index]
-    const feedback = zoneFeedback.value[index]
-
-    // 确定区域颜色
-    let zoneColor = zoneState.color || '#d9d9d9'
-    let glowColor = null
-    if (feedback === 'correct') {
-      zoneColor = '#33B555'
-      glowColor = 'rgba(51, 181, 85, 0.5)'
-    } else if (feedback === 'wrong') {
-      zoneColor = '#FF4444'
-      glowColor = 'rgba(255, 68, 68, 0.5)'
-    }
-
-    // 绘制发光效果（与打地鼠一致）
-    if (glowColor) {
-      ctx.beginPath()
-      ctx.arc(zone.x, zone.y, zone.radius + 20, 0, Math.PI * 2)
-      ctx.fillStyle = glowColor
-      ctx.fill()
-    }
-
-    // 绘制区域（圆形）
-    ctx.beginPath()
-    ctx.arc(zone.x, zone.y, zone.radius, 0, Math.PI * 2)
-    ctx.fillStyle = zoneColor
-    ctx.fill()
-
-    // 绘制边框
-    ctx.beginPath()
-    ctx.arc(zone.x, zone.y, zone.radius, 0, Math.PI * 2)
-    ctx.strokeStyle = zoneState.active ? '#FFFFFF' : '#666666'
-    ctx.lineWidth = zoneState.active ? 4 : 2
-    ctx.stroke()
-
-    // 绘制进度圈（与打地鼠一致）
-    if (progress > 0 && feedback !== 'correct' && feedback !== 'wrong') {
-      ctx.beginPath()
-      ctx.arc(zone.x, zone.y, zone.radius, -Math.PI / 2, -Math.PI / 2 + (Math.PI * 2 * progress / 100))
-      ctx.strokeStyle = '#FFFFFF'
-      ctx.lineWidth = 8
-      ctx.lineCap = 'round'
-      ctx.stroke()
-    }
-  })
-
-  // 绘制UI信息
-  drawUI()
-
-  ctx.restore()
-
-  animationId = requestAnimationFrame(draw)
-}
-
-// ==================== 绘制UI ====================
-function drawUI() {
-  // 绘制倒计时
-  ctx.font = 'bold 30px Arial'
-  ctx.fillStyle = '#FFFFFF'
-  ctx.textAlign = 'left'
-  ctx.fillText(`倒计时: ${Math.floor(props.gameState.timer || 0)}s`, 20, 40)
-
-  // 绘制得分
-  ctx.textAlign = 'right'
-  ctx.fillText(`得分: ${props.gameState.score || 0}`, 620, 40)
-
-  // 绘制指令（如"踩绿色"）
-  if (currentQuestion.value && currentQuestion.value.instruction && !inInterval.value) {
-    ctx.textAlign = 'center'
-    ctx.font = 'bold 35px Arial'
-
-    const instruction = currentQuestion.value.instruction
-    const textWidth = ctx.measureText(instruction).width
-
-    // 绘制背景框
-    ctx.fillStyle = 'rgba(255, 114, 34, 0.8)'
-    ctx.fillRect(320 - textWidth / 2 - 20, 60, textWidth + 40, 50)
-
-    // 绘制文字
-    ctx.fillStyle = '#FFFFFF'
-    ctx.fillText(instruction, 320, 95)
-  }
-
-  // 绘制作答时间进度条
-  if (!inInterval.value) {
-    const progressRatio = Math.max(0, Math.min(1, remainingTime.value / answerTime.value))
-
-    // 进度条背景
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.2)'
-    ctx.fillRect(420, 20, 180, 20)
-
-    // 进度条填充
-    let progressColor = '#33B555'
-    if (progressRatio < 0.3) progressColor = '#FF4444'
-    else if (progressRatio < 0.6) progressColor = '#FFD111'
-
-    ctx.fillStyle = progressColor
-    ctx.fillRect(420, 20, 180 * progressRatio, 20)
-  }
-}
-
-// ==================== 监听游戏状态变化 ====================
-watch(() => props.gameState, (newState) => {
-  // 更新题目状态
-  if (newState.question !== undefined) {
-    currentQuestion.value = newState.question
-  }
-
-  if (newState.in_interval !== undefined) {
-    inInterval.value = newState.in_interval
-
-    // 进入间隔期，清除反馈
-    if (newState.in_interval) {
-      zoneFeedback.value = [null, null, null, null, null, null, null, null]
-      zoneProgress.value = [0, 0, 0, 0, 0, 0, 0, 0]
-      zoneStartTime.value = [0, 0, 0, 0, 0, 0, 0, 0]
-    }
-  }
-
-  if (newState.remaining_time !== undefined) {
-    remainingTime.value = newState.remaining_time
-  }
-
-  if (newState.question && newState.question.answer_time) {
-    answerTime.value = newState.question.answer_time
-  }
-
-  // 反馈处理
-  if (newState.feedback) {
-    const fb = newState.feedback
-
-    // 显示区域反馈（正确/错误）
-    if (fb.zone_id && fb.zone_id >= 1 && fb.zone_id <= 8) {
-      const zoneIndex = fb.zone_id - 1
-      zoneFeedback.value[zoneIndex] = fb.correct ? 'correct' : 'wrong'
+// ==================== 监听反馈 ====================
+watch(() => props.gameState?.feedback, (newFeedback) => {
+  if (!newFeedback) return
+  
+  // 如果有 zone_id，显示区域反馈
+  if (newFeedback.zone_id) {
+    const zoneIndex = newFeedback.zone_id - 1
+    if (zoneIndex >= 0 && zoneIndex < 8) {
+      zoneFeedback.value[zoneIndex] = newFeedback.correct ? 'correct' : 'wrong'
       zoneFeedbackTime.value[zoneIndex] = Date.now()
       zoneProgress.value[zoneIndex] = 0
       zoneStartTime.value[zoneIndex] = 0
     }
-
-    // 超时反馈，清除所有pending状态
-    if (fb.is_timeout) {
-      for (let i = 0; i < 8; i++) {
-        if (zoneFeedback.value[i] === 'pending') {
-          zoneFeedback.value[i] = null
-          zoneProgress.value[i] = 0
-          zoneStartTime.value[i] = 0
-        }
-      }
+  } else if (newFeedback.is_timeout && newFeedback.correct) {
+    // ⭐ "别踩X"超时正确（成功抑制）- 清除所有区域进度
+    for (let i = 0; i < 8; i++) {
+      zoneProgress.value[i] = 0
+      zoneStartTime.value[i] = 0
     }
   }
-}, { deep: true, immediate: true })
+}, { deep: true })
 
 // ==================== 生命周期 ====================
-let updateInterval = null
-
 onMounted(() => {
   initCanvas()
   draw()
-  updateInterval = setInterval(updateGame, 50) // 每50ms更新一次
-})
-
-onUnmounted(() => {
-  if (animationId) cancelAnimationFrame(animationId)
-  if (updateInterval) clearInterval(updateInterval)
+  
+  // 启动更新循环
+  const updateInterval = setInterval(updateGame, 50) // 50ms更新一次
+  
+  onUnmounted(() => {
+    clearInterval(updateInterval)
+    if (animationId) cancelAnimationFrame(animationId)
+  })
 })
 </script>
 
@@ -323,12 +299,12 @@ onUnmounted(() => {
   left: 0;
   width: 100%;
   height: 100%;
-  z-index: 2;
+  background: #000000;
 }
 
 .game-canvas {
+  display: block;
   width: 100%;
   height: 100%;
-  display: block;
 }
 </style>

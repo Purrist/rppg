@@ -14,7 +14,7 @@
     },    
     {
       "name": "前端 (Nuxt)",
-      "type": "pwa-node",           // 改为 pwa-node
+      "type": "node",           // 改为 pwa-node
       "request": "launch",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
@@ -27,7 +27,7 @@
   ],
   "compounds": [
     {
-      "name": "一键启动 (后端+前端)",
+      "name": "一键启动",
       "configurations": ["后端 (Flask)", "前端 (Nuxt)"]
     }
   ]

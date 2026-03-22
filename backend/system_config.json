@@ -1,0 +1,8 @@
+{
+  "aiMode": "basic",
+  "settings": {
+    "dwellTime": 2000,
+    "soundEnabled": true,
+    "projectionEnabled": true
+  }
+}

@@ -8,6 +8,68 @@
       </div>
     </header>
     
+    <!-- ⭐ 系统全局状态卡片 -->
+    <section class="system-status-section">
+      <h3>🖥️ 系统全局状态</h3>
+      <div class="system-status-grid">
+        <!-- AI模式 -->
+        <div class="sys-card" :class="systemState.aiMode">
+          <div class="sys-label">AI模式</div>
+          <div class="sys-value">{{ systemState.aiMode === 'companion' ? '智伴模式' : '基础模式' }}</div>
+          <div class="sys-desc">{{ systemState.aiMode === 'companion' ? 'AI主动交互' : '预设程序运行' }}</div>
+        </div>
+        
+        <!-- 当前页面 -->
+        <div class="sys-card">
+          <div class="sys-label">当前页面</div>
+          <div class="sys-value">{{ currentPageText }}</div>
+          <div class="sys-desc">{{ systemState.currentPage }}</div>
+        </div>
+        
+        <!-- 游戏状态 -->
+        <div class="sys-card" :class="'game-' + systemState.gameState.status.toLowerCase()">
+          <div class="sys-label">游戏状态</div>
+          <div class="sys-value">{{ gameStatusText }}</div>
+          <div class="sys-desc">{{ systemState.gameState.currentGame || '无' }}</div>
+        </div>
+        
+        <!-- 当前游戏 -->
+        <div class="sys-card">
+          <div class="sys-label">当前游戏</div>
+          <div class="sys-value">{{ currentGameText }}</div>
+          <div class="sys-desc">{{ systemState.gameState.module || '-' }}</div>
+        </div>
+        
+        <!-- 游戏难度 -->
+        <div class="sys-card">
+          <div class="sys-label">游戏难度</div>
+          <div class="sys-value">{{ systemState.gameState.difficulty }}/8</div>
+          <div class="sys-desc">难度等级</div>
+        </div>
+        
+        <!-- 确认时间 -->
+        <div class="sys-card">
+          <div class="sys-label">确认时间</div>
+          <div class="sys-value">{{ (systemState.gameState.dwellTime / 1000).toFixed(1) }}s</div>
+          <div class="sys-desc">进度圈填充时间</div>
+        </div>
+        
+        <!-- 游戏得分 -->
+        <div class="sys-card" v-if="systemState.gameState.status !== 'IDLE'">
+          <div class="sys-label">当前得分</div>
+          <div class="sys-value">{{ systemState.gameState.score }}</div>
+          <div class="sys-desc">游戏得分</div>
+        </div>
+        
+        <!-- 剩余时间 -->
+        <div class="sys-card" v-if="systemState.gameState.status !== 'IDLE'">
+          <div class="sys-label">剩余时间</div>
+          <div class="sys-value">{{ systemState.gameState.timer }}s</div>
+          <div class="sys-desc">游戏倒计时</div>
+        </div>
+      </div>
+    </section>
+
     <!-- ⭐ 核心状态卡片 -->
     <section class="core-status">
       <!-- 有人/无人 -->
@@ -200,6 +262,11 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { io } from 'socket.io-client'
+import { 
+  subscribe,
+  getState
+} from '../core/systemStore.js'
 
 const getHost = () => {
   if (typeof window === 'undefined') return 'localhost'
@@ -211,6 +278,30 @@ const baseUrl = `http://${getHost()}:${PORT}`
 const videoUrl = `${baseUrl}/video_feed`
 const correctedUrl = `${baseUrl}/corrected_feed`
 const tabletVideoUrl = `${baseUrl}/tablet_video_feed`
+
+// Socket.IO 连接
+let socket = null
+let unsubscribe = null
+
+// ⭐ 系统全局状态（从后端同步）
+const systemState = reactive({
+  aiMode: 'basic',
+  currentPage: '/',
+  gameState: {
+    status: 'IDLE',
+    currentGame: null,
+    difficulty: 3,
+    score: 0,
+    timer: 60,
+    accuracy: 0,
+    module: null,
+    dwellTime: 2000
+  },
+  settings: {
+    dwellTime: 2000
+  },
+  timestamp: Date.now()
+})
 
 const lightText = { 'dark': '暗', 'normal': '正常', 'bright': '亮' }
 const summaryText = { 'normal': '正常', 'fatigued': '疲劳', 'engaged': '专注', 'struggling': '困难' }
@@ -254,6 +345,34 @@ const gameState = reactive({
 const gameStateText = computed(() => {
   const t = { 'IDLE': '待机', 'READY': '等待', 'PLAYING': '进行中', 'PAUSED': '暂停', 'SETTLING': '结算' }
   return t[gameState.status] || '未知'
+})
+
+// ⭐ 系统状态计算属性
+const currentPageText = computed(() => {
+  const pageMap = {
+    '/': '首页',
+    '/health': '健康监测',
+    '/learning': '益智训练',
+    '/training': '游戏训练',
+    '/entertainment': '娱乐',
+    '/settings': '设置',
+    '/developer': '开发者',
+    '/projection': '投影'
+  }
+  return pageMap[systemState.currentPage] || systemState.currentPage
+})
+
+const gameStatusText = computed(() => {
+  const t = { 'IDLE': '待机', 'READY': '预备', 'PLAYING': '游戏中', 'PAUSED': '暂停', 'SETTLING': '结算' }
+  return t[systemState.gameState.status] || '未知'
+})
+
+const currentGameText = computed(() => {
+  const gameMap = {
+    'whack_a_mole': '打地鼠',
+    'processing_speed': '处理速度训练'
+  }
+  return gameMap[systemState.gameState.currentGame] || (systemState.gameState.currentGame || '无')
 })
 
 const toast = reactive({ show: false, msg: '' })
@@ -544,6 +663,36 @@ onMounted(async () => {
     await loadCorners()
   }
   
+  // ⭐ 建立 Socket.IO 连接
+  socket = io(baseUrl, {
+    transports: ['polling', 'websocket'],
+    reconnection: true
+  })
+  
+  socket.on('connect', () => {
+    console.log('[developer] Socket.IO已连接')
+    connected.value = true
+    // 请求系统状态
+    socket.emit('get_system_state')
+  })
+  
+  socket.on('disconnect', () => {
+    connected.value = false
+  })
+  
+  // ⭐ 订阅系统全局状态
+  unsubscribe = subscribe((key, value, state) => {
+    // 更新本地状态
+    if (state) {
+      systemState.aiMode = state.aiMode || 'basic'
+      systemState.currentPage = state.currentPage || '/'
+      systemState.gameState = { ...systemState.gameState, ...(state.gameState || {}) }
+      systemState.settings = { ...systemState.settings, ...(state.settings || {}) }
+      systemState.timestamp = state.timestamp || Date.now()
+    }
+    console.log('[developer] 系统状态更新:', key)
+  })
+  
   resize()
   requestAnimationFrame(draw)
   interval = setInterval(updateStatus, 200)  // 200ms更新一次
@@ -553,6 +702,8 @@ onMounted(async () => {
 onUnmounted(() => {
   if (interval) clearInterval(interval)
   window.removeEventListener('resize', resize)
+  if (unsubscribe) unsubscribe()
+  if (socket) socket.disconnect()
 })
 </script>
 
@@ -565,6 +716,98 @@ onUnmounted(() => {
   padding: 20px;
   padding-bottom: 60px;
   box-sizing: border-box;
+}
+
+/* ⭐ 系统全局状态卡片 */
+.system-status-section {
+  margin-bottom: 25px;
+}
+
+.system-status-section h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: #888;
+  margin-bottom: 15px;
+}
+
+.system-status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.sys-card {
+  background: rgba(255,255,255,0.05);
+  border-radius: 12px;
+  padding: 16px 12px;
+  text-align: center;
+  border: 2px solid transparent;
+  transition: all 0.3s;
+}
+
+.sys-card:hover {
+  transform: translateY(-2px);
+  background: rgba(255,255,255,0.08);
+}
+
+/* AI模式样式 */
+.sys-card.companion {
+  border-color: #33B555;
+  background: rgba(51, 181, 85, 0.1);
+}
+
+.sys-card.basic {
+  border-color: #666;
+}
+
+/* 游戏状态样式 */
+.sys-card.game-idle {
+  border-color: #666;
+}
+
+.sys-card.game-ready {
+  border-color: #FF7222;
+}
+
+.sys-card.game-playing {
+  border-color: #33B555;
+  background: rgba(51, 181, 85, 0.1);
+}
+
+.sys-card.game-paused {
+  border-color: #FFD111;
+}
+
+.sys-card.game-settling {
+  border-color: #9C27B0;
+}
+
+.sys-label {
+  font-size: 11px;
+  color: #888;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.sys-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 4px;
+}
+
+.sys-card.companion .sys-value {
+  color: #33B555;
+}
+
+.sys-card.game-playing .sys-value {
+  color: #33B555;
+}
+
+.sys-desc {
+  font-size: 11px;
+  color: #666;
 }
 
 .dev-header {

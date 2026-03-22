@@ -14,6 +14,34 @@
       </div>
     </div>
     
+    <!-- ⭐ AI模式设置 -->
+    <div class="settings-section">
+      <h2>智伴系统</h2>
+      <div class="setting-item">
+        <span class="label">
+          <div class="label-main">智伴模式</div>
+          <div class="label-sub">
+            <template v-if="aiCompanionEnabled">
+              AI会基于数据实现主动式交互，提供健康监测、认知训练和情感陪伴
+            </template>
+            <template v-else>
+              基础模式：AI不参与游戏难度调整，不会主动交互，仅支持页面切换和问答功能
+            </template>
+          </div>
+        </span>
+        <div class="toggle-switch" @click="aiCompanionEnabled = !aiCompanionEnabled; toggleAIMode()">
+          <div class="toggle-track" :class="{ active: aiCompanionEnabled }">
+            <div class="toggle-thumb" :class="{ active: aiCompanionEnabled }"></div>
+          </div>
+          <span class="toggle-label">{{ aiCompanionEnabled ? '已开启' : '已关闭' }}</span>
+        </div>
+      </div>
+      <div class="setting-hint">
+        <p>💡 <strong>基础模式</strong>：系统按预设程序运行，AI仅提供基础问答和页面切换功能</p>
+        <p>💡 <strong>智伴模式</strong>：AI主动分析数据，动态调整游戏难度，提供个性化健康建议和情感陪伴</p>
+      </div>
+    </div>
+
     <div class="settings-section">
       <h2>投影交互设置</h2>
       <div class="setting-item">
@@ -56,21 +84,66 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { initGameState, setDwellTime, getDwellTime } from '../composables/useGameState.js'
+import { io } from 'socket.io-client'
+import { initStore, subscribe, setAIMode, setDwellTime } from '../core/systemStore.js'
 
 const router = useRouter()
+
+// Socket.IO 连接
+let socket = null
+let unsubscribe = null
 
 // 确认时间（毫秒），范围1500-4000ms，默认2000ms
 const dwellTime = ref(2000)
 
-// 初始化游戏状态管理
-initGameState()
+// AI模式开关
+const aiCompanionEnabled = ref(false)
 
-// 从统一状态管理读取保存的设置
+const getBackendHost = () => {
+  if (typeof window === 'undefined') return 'localhost'
+  return window.location.hostname || 'localhost'
+}
+
+const FLASK_PORT = 5000
+const backendUrl = `http://${getBackendHost()}:${FLASK_PORT}`
+
 onMounted(() => {
-  dwellTime.value = getDwellTime()
+  // 建立 Socket.IO 连接
+  socket = io(backendUrl, {
+    transports: ['polling', 'websocket'],
+    reconnection: true
+  })
+  
+  // ⭐ 初始化系统Store
+  initStore(socket)
+  
+  socket.on('connect', () => {
+    console.log('[settings] 后端已连接')
+    // 请求当前状态
+    socket.emit('get_system_state')
+  })
+  
+  // ⭐ 订阅后端状态更新
+  unsubscribe = subscribe((key, value, state) => {
+    if (key === 'init' || key === 'state') {
+      // 初始化或完整状态更新
+      dwellTime.value = state.settings?.dwellTime || 2000
+      aiCompanionEnabled.value = state.aiMode === 'companion'
+    }
+    if (key === 'dwellTime' || key === 'settings') {
+      dwellTime.value = state.settings?.dwellTime || 2000
+    }
+    if (key === 'aiMode') {
+      aiCompanionEnabled.value = value === 'companion'
+    }
+  })
+})
+
+onUnmounted(() => {
+  if (unsubscribe) unsubscribe()
+  if (socket) socket.disconnect()
 })
 
 // 减少确认时间
@@ -89,9 +162,18 @@ const increaseDwellTime = () => {
   }
 }
 
-// 保存设置（使用统一状态管理）
+// 保存设置 - 发送到后端
 const saveDwellTime = () => {
+  // ⭐ 发送到后端，后端是唯一的真相来源
   setDwellTime(dwellTime.value)
+  console.log('[settings] 确认时间已发送到后端:', dwellTime.value, 'ms')
+}
+
+// 切换AI模式 - 发送到后端
+const toggleAIMode = () => {
+  const newMode = aiCompanionEnabled.value ? 'companion' : 'basic'
+  setAIMode(newMode)
+  console.log('[settings] AI模式发送到后端:', newMode)
 }
 
 const goToDeveloper = () => {
@@ -236,5 +318,49 @@ const goToProjection = () => {
 .setting-item .arrow {
   font-size: 24px;
   color: #CCC;
+}
+
+/* ⭐ 切换开关样式 */
+.toggle-switch {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.toggle-track {
+  width: 60px;
+  height: 32px;
+  background: #CCC;
+  border-radius: 16px;
+  position: relative;
+  transition: background 0.3s;
+}
+
+.toggle-track.active {
+  background: #33B555;
+}
+
+.toggle-thumb {
+  width: 28px;
+  height: 28px;
+  background: #FFF;
+  border-radius: 50%;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  transition: transform 0.3s;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.toggle-thumb.active {
+  transform: translateX(28px);
+}
+
+.toggle-label {
+  font-size: 18px;
+  font-weight: 600;
+  color: #333;
+  min-width: 60px;
 }
 </style>
