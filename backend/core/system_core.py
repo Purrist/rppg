@@ -156,6 +156,15 @@ class SystemCore:
         # 内部计时
         self._last_activity_time = time.time()
         self._last_perception_time = 0
+        self._last_game_runtime_time = 0
+        self._last_full_broadcast_time = 0
+        
+        # 广播频率配置
+        self._broadcast_config = {
+            'perception': 0.5,  # 500ms
+            'game_runtime': 0.1,  # 100ms
+            'full': 1.0,  # 1000ms
+        }
         
         # ⭐ 加载数据（带错误恢复）
         self._load_config()
@@ -219,8 +228,14 @@ class SystemCore:
     
     # ==================== 状态广播（线程安全）====================
     
-    def _broadcast(self):
-        """广播状态到所有前端（线程安全）"""
+    def _broadcast(self, force=False):
+        """广播状态到所有前端（线程安全，带频率限制）"""
+        now = time.time()
+        
+        # 检查是否需要广播
+        if not force and (now - self._last_full_broadcast_time < self._broadcast_config['full']):
+            return
+        
         with self._lock:
             self._state['timestamp'] = int(time.time() * 1000)
             self._state['timeInfo'] = {
@@ -229,6 +244,9 @@ class SystemCore:
                 'weekday': ['一','二','三','四','五','六','日'][datetime.now().weekday()],
             }
             state_copy = self._state.copy()
+            
+            # 更新最后广播时间
+            self._last_full_broadcast_time = now
         
         # ⭐ 复制监听器列表避免并发修改
         with self._listeners_lock:
@@ -349,6 +367,13 @@ class SystemCore:
         with self._lock:
             self._state['game']['difficulty'] = max(1, min(8, difficulty))
         self._broadcast()
+
+    def set_game_module(self, module: str):
+        """设置游戏模块"""
+        with self._lock:
+            self._state['game']['module'] = module
+        self._broadcast()
+        print(f'[SystemCore] 游戏模块: {module}')
     
     def get_game_difficulty(self) -> int:
         with self._lock:
@@ -375,10 +400,29 @@ class SystemCore:
     # ==================== 游戏运行时数据 ====================
     
     def update_game_runtime(self, updates: Dict[str, Any]):
-        """更新游戏运行时数据"""
+        """更新游戏运行时数据（按频率限制广播）"""
+        now = time.time()
+        
         with self._lock:
             self._state['gameRuntime'].update(updates)
-        self._broadcast()
+            
+            # 检查是否需要广播
+            should_broadcast = (now - self._last_game_runtime_time >= self._broadcast_config['game_runtime'])
+            if should_broadcast:
+                self._last_game_runtime_time = now
+                # 在锁内复制数据
+                game_runtime_copy = self._state['gameRuntime'].copy()
+                game_status_copy = self._state['game'].copy()
+        
+        # 按频率限制广播
+        if should_broadcast and self.socketio:
+            try:
+                self.socketio.emit('game_runtime_update', {
+                    'gameRuntime': game_runtime_copy,
+                    'gameStatus': game_status_copy
+                })
+            except Exception as e:
+                print(f'[SystemCore] 游戏运行时广播错误: {e}')
     
     def reset_game_runtime(self):
         """重置游戏运行时数据"""
@@ -452,17 +496,20 @@ class SystemCore:
                 data.get('personDetected') != old_person_detected or
                 data.get('activity') != old_activity
             )
+            
+            # ⭐ 在锁内更新_last_perception_time，避免竞态条件
+            should_broadcast = critical_change or (now - self._last_perception_time >= 0.5)
+            if should_broadcast:
+                self._last_perception_time = now
+                # 在锁内复制数据
+                perception_copy = self._state['perception'].copy()
         
         # ⭐ 关键变化立即广播，其他按频率限制
-        if critical_change or (now - self._last_perception_time >= 0.5):
-            self._last_perception_time = now
-            if self.socketio:
-                try:
-                    with self._lock:
-                        perception_copy = self._state['perception'].copy()
-                    self.socketio.emit('perception_update', perception_copy)
-                except Exception as e:
-                    print(f'[SystemCore] 感知广播错误: {e}')
+        if should_broadcast and self.socketio:
+            try:
+                self.socketio.emit('perception_update', perception_copy)
+            except Exception as e:
+                print(f'[SystemCore] 感知广播错误: {e}')
     
     def set_foot_position(self, x: float, y: float, detected: bool):
         """设置脚部位置"""

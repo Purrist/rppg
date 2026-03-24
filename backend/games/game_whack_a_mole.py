@@ -99,9 +99,13 @@ class WhackAMoleGame(GameBase):
     
     def _on_difficulty_change(self, difficulty: str):
         params = self._difficulty_params.get(difficulty, self._difficulty_params["normal"])
-        self.mole_stay = params["mole_stay"]
         self.mole_interval = params["mole_interval"]
-        print(f"[打地鼠] 难度设置为: {difficulty}")
+        # 根据地鼠停留时间 = 确认时间 + 额外时间
+        extra_times = {"easy": 4.0, "normal": 3.0, "hard": 2.0}
+        extra_time = extra_times.get(difficulty, 3.0)
+        dwell_time_s = getattr(self, '_dwell_time_s', 2.0)
+        self.mole_stay = dwell_time_s + extra_time
+        print(f"[打地鼠] 难度设置为: {difficulty}, 地鼠停留时间: {self.mole_stay}s")
     
     def update_params(self, params: Dict):
         """更新游戏参数 - 接收统一的确认时间"""
@@ -109,7 +113,13 @@ class WhackAMoleGame(GameBase):
             # 打地鼠使用确认时间作为停留判定时间
             self._dwell_time_ms = params['dwell_time']
             self._dwell_time_s = self._dwell_time_ms / 1000
-            print(f"[打地鼠] 更新确认时间: {self._dwell_time_ms}ms ({self._dwell_time_s}s)")
+            # 更新地鼠停留时间，使其与确认时间相关
+            # 地鼠停留时间 = 确认时间 + 额外时间（根据难度）
+            difficulty = self.state.difficulty
+            extra_times = {"easy": 4.0, "normal": 3.0, "hard": 2.0}
+            extra_time = extra_times.get(difficulty, 3.0)
+            self.mole_stay = self._dwell_time_s + extra_time
+            print(f"[打地鼠] 更新确认时间: {self._dwell_time_ms}ms, 地鼠停留时间: {self.mole_stay}s")
     
     def get_dwell_time(self) -> int:
         """获取确认时间（毫秒）"""
@@ -133,8 +143,12 @@ class WhackAMoleGame(GameBase):
     
     def _handle_hit(self, zone: int, success: bool):
         """处理踩踏 - 立即发送状态（用户交互需要即时反馈）"""
+        # 防止重复处理同一个地鼠
+        if zone != self.current_mole:
+            return
+        
         self.total_hits += 1
-        if success and zone == self.current_mole:
+        if success:
             self.state.score += 10
             self.success_hits += 1
             self.current_mole = -1

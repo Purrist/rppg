@@ -10,15 +10,37 @@ import time
 import threading
 import socket
 
+# 抑制TensorFlow等库的警告信息
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+
 from flask import Flask, Response, request, jsonify, send_from_directory
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 import cv2
 import numpy as np
 
-# ============================================================================
-# 配置
-# ============================================================================
+# ============================================================================# 配置# ============================================================================
+
+def check_port(port):
+    """检查端口是否被占用"""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    result = sock.connect_ex(('localhost', port))
+    sock.close()
+    return result == 0
+
+def find_available_port(start_port=5000, max_attempts=10):
+    """查找可用端口"""
+    port = start_port
+    attempts = 0
+    while attempts < max_attempts:
+        if not check_port(port):
+            return port
+        print(f"[端口检查] 端口 {port} 已被占用，尝试下一个端口...")
+        port += 1
+        attempts += 1
+    return None
+
 LOCAL_IP = "192.168.3.91"
 try:
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -41,6 +63,15 @@ if len(sys.argv) >= 3:
         pass
     print(f"[配置] 投影摄像头源: {PROJECTION_CAMERA_SOURCE}")
 
+# 检查并选择可用端口
+DEFAULT_PORT = 5000
+PORT = find_available_port(DEFAULT_PORT)
+if not PORT:
+    print("[端口检查] 无法找到可用端口，使用默认端口")
+    PORT = DEFAULT_PORT
+else:
+    print(f"[端口检查] 使用端口: {PORT}")
+
 app = Flask(__name__, static_folder='../frontend/.output/public', static_url_path='')
 CORS(app)
 socketio = SocketIO(
@@ -57,6 +88,14 @@ socketio = SocketIO(
 # 导入模块
 # ============================================================================
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# ⭐ 依赖项检查
+print("[系统] 检查依赖项...")
+try:
+    from core.check_dependencies import check_and_install_dependencies
+    check_and_install_dependencies()
+except Exception as e:
+    print(f"[系统] 依赖项检查失败: {e}")
 
 # ⭐ 系统核心（唯一数据中心）- 最先初始化
 from core import SystemCore, init_system_core, get_system_core
@@ -92,6 +131,93 @@ perception_manager = PerceptionManager()
 
 # 5. 行动执行器（使用SystemCore作为状态源）
 action_executor = ActionExecutor(socketio, system_core)
+
+# 6. 语音管理器（后端语音处理）- 使用 sherpa-onnx
+# ⭐ 首先尝试下载模型
+import os
+import subprocess
+models_dir = os.path.join(os.path.dirname(__file__), "core", "models")
+if not os.path.exists(models_dir) or not os.listdir(models_dir):
+    print("[语音系统] 模型不存在，正在自动下载...")
+    try:
+        # 运行下载脚本
+        download_script = os.path.join(os.path.dirname(__file__), "core", "download_models.py")
+        subprocess.run([sys.executable, download_script], check=True)
+        print("[语音系统] 模型下载完成")
+    except Exception as e:
+        print(f"[语音系统] 模型下载失败: {e}")
+        print("[语音系统] 跳过语音功能初始化")
+        voice_manager = None
+    else:
+        try:
+            from core.voice_manager_sherpa import init_voice_manager, get_voice_manager
+            voice_manager = init_voice_manager(socketio, system_core)
+            print("[语音系统] sherpa-onnx 语音管理器已初始化")
+            
+            # ⭐ 设置语音识别回调 - 识别到用户语音后自动发送给AI
+            voice_manager.set_speech_recognized_callback(lambda text: handle_voice_command(text))
+            
+            # ⭐ 启动语音监听（后端持续监听麦克风）
+            voice_manager.start_listening()
+            print("[语音系统] 已开始监听麦克风，等待唤醒词'阿康阿康'")
+        except Exception as e:
+            print(f"[语音系统] 初始化失败: {e}")
+            voice_manager = None
+else:
+    try:
+        from core.voice_manager_sherpa import init_voice_manager, get_voice_manager
+        voice_manager = init_voice_manager(socketio, system_core)
+        print("[语音系统] sherpa-onnx 语音管理器已初始化")
+        
+        # ⭐ 设置语音识别回调 - 识别到用户语音后自动发送给AI
+        voice_manager.set_speech_recognized_callback(lambda text: handle_voice_command(text))
+        
+        # ⭐ 启动语音监听（后端持续监听麦克风）
+        voice_manager.start_listening()
+        print("[语音系统] 已开始监听麦克风，等待唤醒词'阿康阿康'")
+    except Exception as e:
+        print(f"[语音系统] 初始化失败: {e}")
+        voice_manager = None
+
+# 7. 训练分析器
+from core.training_analytics import init_training_analytics, get_training_analytics
+# ⭐ 使用绝对路径确保文件保存到正确位置
+core_data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "core")
+training_analytics = init_training_analytics(data_dir=core_data_dir)
+print(f"[训练系统] 训练分析器已初始化，数据目录: {core_data_dir}")
+
+# 语音命令处理函数
+def handle_voice_command(text: str):
+    """处理语音命令 - 将用户语音发送给AI Agent"""
+    print(f"[语音命令] 收到: {text}")
+
+    try:
+        # 获取当前系统上下文
+        context = system_core.get_state()
+        
+        # 调用AI Agent
+        response, action = ask_akon(text, context)
+        
+        print(f"[语音命令] AI回复: {response}")
+        
+        # 语音播报回复
+        if voice_manager:
+            voice_manager.speak(response)
+        
+        # 通知前端显示对话
+        socketio.emit('voice_ai_response', {
+            'user_text': text,
+            'ai_response': response
+        })
+        
+        # 处理页面跳转
+        if action and action.get('type') == 'navigate':
+            socketio.emit('navigate_to', {'page': action.get('page')})
+        
+    except Exception as e:
+        print(f"[语音命令] 处理错误: {e}")
+        if voice_manager:
+            voice_manager.speak('抱歉，我遇到了一点问题。')
 
 # 用户状态（保留用于兼容）
 user_state = {
@@ -353,43 +479,70 @@ def api_akon_chat():
     }
     
     response, action = ask_akon(user_input, akon_state)
+    
     system_core.set_user_speaking(False)
     
-    result = {"response": response, "action": action}
+    return jsonify({"response": response, "action": action})
+
+
+# ⭐ 训练统计 API
+@app.route('/api/training/stats', methods=['GET'])
+def api_training_stats():
+    """获取训练统计数据"""
+    analytics = get_training_analytics()
     
-    if action:
-        action_type = action.get("type", "none")
-        
-        if action_type == "navigate_and_recommend":
-            page = action.get("page", "/")
-            content = action.get("content", {})
-            if not system_core.is_game_active():
-                system_core.set_page(page)
-                socketio.emit('navigate_to', {"page": page})
-            if content:
-                socketio.emit('akon_recommend', {
-                    "type": content.get("type"),
-                    "items": content.get("items", [])
-                })
-        
-        elif action_type == "navigate":
-            page = action.get("page", "/")
-            if not system_core.is_game_active():
-                system_core.set_page(page)
-                socketio.emit('navigate_to', {"page": page})
-        
-        elif action_type == "play":
-            content = action.get("content", {})
-            socketio.emit('akon_play', {
-                "type": content.get("type"),
-                "items": content.get("items", [])
-            })
-        
-        elif action_type == "game":
-            game_name = action.get("game_name", "whack_a_mole")
-            socketio.emit('akon_start_game', {"game": game_name})
+    return jsonify({
+        "daily": analytics.get_daily_stats(),
+        "weekly": analytics.get_weekly_stats(),
+        "monthly": analytics.get_monthly_stats(),
+        "trend": analytics.get_accuracy_trend(days=7)
+    })
+
+
+@app.route('/api/training/history', methods=['GET'])
+def api_training_history():
+    """获取训练历史记录"""
+    analytics = get_training_analytics()
+
+    # 返回最近10次训练记录
+    sessions = analytics.sessions[-10:] if analytics.sessions else []
+
+    return jsonify({
+        "sessions": [
+            {
+                "session_id": s.session_id,
+                "start_time": s.start_time,
+                "game_type": s.game_type,
+                "module": s.module,
+                "final_score": s.final_score,
+                "final_accuracy": round(s.final_accuracy * 100, 1),
+                "total_trials": s.total_trials,
+                "correct_trials": s.correct_trials,
+                "avg_reaction_time_ms": round(s.avg_reaction_time_ms, 0),
+                "difficulty_range": f"{s.min_difficulty}-{s.max_difficulty}",
+                "duration": analytics._calc_duration(s)
+            }
+            for s in reversed(sessions)
+        ]
+    })
+
+
+@app.route('/api/training/delete', methods=['POST'])
+def api_training_delete():
+    """删除训练记录"""
+    data = request.json
+    session_id = data.get('session_id')
     
-    return jsonify(result)
+    if not session_id:
+        return jsonify({"success": False, "message": "缺少session_id参数"}), 400
+    
+    analytics = get_training_analytics()
+    success = analytics.delete_record(session_id)
+    
+    if success:
+        return jsonify({"success": True, "message": "删除成功"})
+    else:
+        return jsonify({"success": False, "message": "删除失败"}), 500
 
 # ============================================================================
 # Socket事件 - 游戏控制
@@ -445,14 +598,17 @@ def handle_game_control(data):
         socketio.emit('navigate_to', {"page": "/learning"})
     
     elif action == 'restart':
-        # ⭐ 重新开始游戏
+        # ⭐ 重新开始游戏 - 直接回到READY状态，不经过IDLE
         restart_game_id = data.get('game') or system_core.get_current_game() or 'whack_a_mole'
         restart_dwell_time = data.get('dwell_time') or data.get('dwellTime') or system_core.get_dwell_time() or 2000
         
         print(f"[游戏控制] 重新开始游戏: {restart_game_id}, 确认时间: {restart_dwell_time}ms")
         
-        game_manager.stop_game()
+        # 停止当前游戏但不发送IDLE状态（避免前端跳转）
+        if game_manager._current_game:
+            game_manager._current_game.stop()
         
+        # 直接设置为READY状态
         game_params = {'dwell_time': restart_dwell_time}
         system_core.set_current_game(restart_game_id)
         system_core.set_game_status('READY')
@@ -599,16 +755,28 @@ def handle_navigate(data):
 # ============================================================================
 def sync_game_state():
     """同步游戏状态到SystemCore"""
-    if game_manager.is_game_active() and game_manager.get_current_game():
+    if game_manager.get_current_game():
         game = game_manager.get_current_game()
         state = game.get_state()
         
+        # ⭐ 同步游戏状态（关键！确保SystemCore知道状态变化）
+        current_status = state.get('status')
+        if current_status:
+            system_core_status = system_core.get_game_status()
+            if system_core_status != current_status:
+                print(f'[sync_game_state] 状态同步: {system_core_status} -> {current_status}')
+                system_core.set_game_status(current_status)
+        
         # 更新SystemCore的游戏运行时数据
-        system_core.update_game_runtime({
-            'score': state.get('score', 0),
-            'timer': state.get('timer', 60),
-            'accuracy': state.get('stats', {}).get('accuracy', 0) * 100,
-        })
+        if game_manager.is_game_active():
+            # ⭐ 准确率已经是 0-1 的小数，转换为整数百分比（0.89 -> 89）
+            raw_accuracy = state.get('stats', {}).get('accuracy', 0)
+            accuracy_percent = round(raw_accuracy * 100) if raw_accuracy <= 1 else round(raw_accuracy)
+            system_core.update_game_runtime({
+                'score': state.get('score', 0),
+                'timer': state.get('timer', 60),
+                'accuracy': accuracy_percent,
+            })
 
 # ============================================================================
 # 后台任务
@@ -635,7 +803,7 @@ if __name__ == '__main__':
     print("AI具身智能认知训练系统 - EAOS v3.0")
     print("=" * 60)
     print()
-    print(f"本机IP:     http://{LOCAL_IP}:5000")
+    print(f"本机IP:     http://{LOCAL_IP}:{PORT}")
     print(f"平板访问:   http://{LOCAL_IP}:3000")
     print(f"投影页面:   http://{LOCAL_IP}:3000/projection")
     print(f"开发后台:   http://{LOCAL_IP}:3000/developer")
@@ -657,4 +825,4 @@ if __name__ == '__main__':
     print("  perception/ - 感知系统")
     print("=" * 60)
     
-    socketio.run(app, host='0.0.0.0', port=5000, debug=False)
+    socketio.run(app, host='0.0.0.0', port=PORT, debug=False)

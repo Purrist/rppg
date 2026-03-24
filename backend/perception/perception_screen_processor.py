@@ -117,19 +117,47 @@ class ScreenProcessor:
     def __init__(self, camera_source=1, socketio=None):
         self.socketio = socketio
         
-        # 打开摄像头
-        self.cap = cv2.VideoCapture(camera_source)
-        if not self.cap.isOpened():
-            self.cap = cv2.VideoCapture(0)
+        # 尝试打开摄像头
+        self.cap = None
         
-        # 摄像头设置
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        self.cap.set(cv2.CAP_PROP_FPS, 30)
+        # 尝试多个可能的摄像头源
+        camera_sources = [camera_source, 0, 2, 3]
+        for src in camera_sources:
+            try:
+                self.cap = cv2.VideoCapture(src)
+                if self.cap.isOpened():
+                    # 测试读取一帧
+                    ret, _ = self.cap.read()
+                    if ret:
+                        print(f"[ScreenProcessor] 成功打开摄像头: {src}")
+                        break
+                    else:
+                        print(f"[ScreenProcessor] 摄像头 {src} 打开失败: 无法读取帧")
+                        self.cap.release()
+                        self.cap = None
+                else:
+                    print(f"[ScreenProcessor] 摄像头 {src} 打开失败")
+                    self.cap = None
+            except Exception as e:
+                print(f"[ScreenProcessor] 尝试打开摄像头 {src} 时出错: {e}")
+                self.cap = None
         
-        self.frame_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        self.frame_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        if not self.cap:
+            print("[ScreenProcessor] 所有摄像头都无法打开，使用虚拟摄像头")
+            # 创建一个虚拟摄像头（黑色画面）
+            self.cap = None
+            self.frame_w = 640
+            self.frame_h = 480
+        else:
+            # 摄像头设置
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            self.cap.set(cv2.CAP_PROP_FPS, 30)
+            
+            self.frame_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            self.frame_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            print(f"[ScreenProcessor] 摄像头分辨率: {self.frame_w}x{self.frame_h}")
         
         # MediaPipe Pose
         import mediapipe as mp
@@ -151,13 +179,17 @@ class ScreenProcessor:
     def _loop(self):
         import mediapipe as mp
         while self.running:
-            ret, frame = self.cap.read()
-            if not ret:
-                time.sleep(0.005)
-                continue
-            
-            frame = cv2.flip(frame, 0)
-            frame = cv2.flip(frame, 1)
+            if self.cap:
+                ret, frame = self.cap.read()
+                if not ret:
+                    time.sleep(0.005)
+                    continue
+                
+                frame = cv2.flip(frame, 0)
+                frame = cv2.flip(frame, 1)
+            else:
+                # 使用虚拟摄像头（黑色画面）
+                frame = np.zeros((480, 640, 3), dtype=np.uint8)
             
             h, w = frame.shape[:2]
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)

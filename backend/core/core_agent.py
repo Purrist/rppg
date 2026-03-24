@@ -25,11 +25,11 @@ def should_think(world_state: dict) -> bool:
     if agent_state.thinking:
         return False
     
-    elder = world_state.get("elder", {})
+    perception = world_state.get("perception", {})
     triggers = [
-        elder.get("speaking", False),
-        elder.get("activity_changed", False),
-        elder.get("idle_minutes", 0) > 15,
+        perception.get("speaking", False),
+        perception.get("activity_changed", False),
+        perception.get("idleMinutes", 0) > 15,
         world_state.get("user_request"),
     ]
     return any(triggers)
@@ -65,16 +65,32 @@ def think(world_state: dict, state_manager=None) -> dict:
 
 
 def ask_akon(user_input: str, system_state: dict) -> Tuple[str, dict]:
-    """对话接口"""
-    prompt = f"""你是阿康，一个温暖的陪伴助手。用户说：{user_input}
+    """对话接口 - 返回纯文本回复和可选的action"""
+    
+    # ⭐ 简化prompt，要求直接返回纯文本，只在需要跳转时附加JSON
+    prompt = f"""你是阿康，一个温暖的陪伴助手。用户说："{user_input}"
 
-当前状态：页面{system_state.get('current_page', '/')}
-{'正在玩' + system_state.get('game_name') if system_state.get('game_active') else ''}
+当前页面：{system_state.get('current_page', '/')}
+游戏状态：{'正在玩' + system_state.get('game_name') if system_state.get('game_active') else '未开始'}
 
-请用简短温暖的话回复（不超过50字），如果需要执行动作，用JSON格式：
-{{"response": "回复内容", "action": {{"type": "navigate/play/game", ...}}}}
+请直接回复用户的话，用温暖简短的语气。不要返回JSON格式，只返回纯文本。
 
-动作类型：navigate(跳转页面), play(播放), game(开始游戏)"""
+如果用户想跳转页面，在回复后另起一行加上：[ACTION:页面路径]
+例如：
+"好的，我带你去看电影。
+[ACTION:/entertainment]"
+
+可用页面：
+- /entertainment (娱乐视频)
+- /learning (益智游戏)
+- /health (健康监测)
+- /settings (设置)
+
+跳转规则：
+- 看电影/视频/娱乐 → [ACTION:/entertainment]
+- 玩游戏/训练/益智 → [ACTION:/learning]
+- 看健康/血压/心率 → [ACTION:/health]
+- 闲聊/问候/天气/时间 → 不跳转，直接回复"""
 
     try:
         response = requests.post(
@@ -85,7 +101,7 @@ def ask_akon(user_input: str, system_state: dict) -> Tuple[str, dict]:
         
         if response.status_code == 200:
             result = response.json().get("response", "")
-            return _parse_response(result)
+            return _parse_simple_response(result)
         
         return "我听到了，让我想想...", None
     
@@ -123,9 +139,9 @@ def _build_think_prompt(world_state: dict, state_manager) -> str:
 
 
 def _select_model(world_state: dict) -> str:
-    if world_state.get("elder", {}).get("speaking"):
+    if world_state.get("perception", {}).get("speaking"):
         return "qwen2.5:3b"
-    if world_state.get("elder", {}).get("idle_minutes", 0) > 30:
+    if world_state.get("perception", {}).get("idleMinutes", 0) > 30:
         return "qwen3.5:4b"
     return "qwen2.5:3b"
 
@@ -142,12 +158,52 @@ def _parse_decision(response: str) -> dict:
 
 
 def _parse_response(response: str) -> Tuple[str, dict]:
+    """解析LLM响应，提取JSON中的response和action"""
     import re
-    json_match = re.search(r'\{[^{}]*\}', response, re.DOTALL)
-    if json_match:
+    
+    # 尝试匹配JSON对象（支持嵌套）
+    # 查找第一个 { 和最后一个匹配的 }
+    start = response.find('{')
+    end = response.rfind('}')
+    
+    if start != -1 and end != -1 and start < end:
         try:
-            data = json.loads(json_match.group())
-            return data.get("response", response), data.get("action")
-        except:
+            json_str = response[start:end+1]
+            data = json.loads(json_str)
+            
+            # 只返回response字段的内容，去掉多余空白
+            resp_text = data.get("response", "").strip()
+            action = data.get("action")
+            
+            # 如果response为空，返回原始响应（去掉JSON部分）
+            if not resp_text:
+                resp_text = response[:start].strip() + response[end+1:].strip()
+                resp_text = resp_text.strip('`"\' \n\r')
+            
+            return resp_text, action
+        except json.JSONDecodeError:
             pass
-    return response, None
+    
+    # 没有JSON或解析失败，返回清理后的原始响应
+    clean_response = response.strip('`"\' \n\r')
+    return clean_response, None
+
+
+def _parse_simple_response(response: str) -> Tuple[str, dict]:
+    """⭐ 简化版响应解析 - 提取纯文本和[ACTION:路径]"""
+    import re
+    
+    # 查找 [ACTION:页面路径] 标记
+    action_match = re.search(r'\[ACTION:([^\]]+)\]', response)
+    action = None
+    
+    if action_match:
+        page = action_match.group(1).strip()
+        action = {"type": "navigate", "page": page}
+        # 移除 ACTION 标记，保留前面的文本
+        response = response[:action_match.start()].strip()
+    
+    # 清理响应文本
+    clean_response = response.strip('`"\' \n\r')
+    
+    return clean_response, action

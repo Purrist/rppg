@@ -284,10 +284,12 @@ function setupSocket() {
   })
   
   socket.on('system_state', (data) => {
-    if (data.state?.game) {
-      gameState.status = data.state.game.status || 'IDLE'
-      gameState.score = data.state.game.score || 0
-      gameState.timer = data.state.game.timer || 60
+    if (data.game) {
+      gameState.status = data.game.status || 'IDLE'
+    }
+    if (data.gameRuntime) {
+      gameState.score = data.gameRuntime.score || 0
+      gameState.timer = data.gameRuntime.timer || 60
     }
   })
 }

@@ -265,7 +265,8 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { io } from 'socket.io-client'
 import { 
   subscribe,
-  getState
+  getState,
+  initStore
 } from '../core/systemStore.js'
 
 const getHost = () => {
@@ -680,17 +681,29 @@ onMounted(async () => {
     connected.value = false
   })
   
+  // ⭐ 初始化SystemStore
+  initStore(socket)
+  
   // ⭐ 订阅系统全局状态
-  unsubscribe = subscribe((key, value, state) => {
+  unsubscribe = subscribe((state) => {
     // 更新本地状态
     if (state) {
       systemState.aiMode = state.aiMode || 'basic'
       systemState.currentPage = state.currentPage || '/'
-      systemState.gameState = { ...systemState.gameState, ...(state.gameState || {}) }
+      systemState.gameState = {
+        status: state.game?.status || 'IDLE',
+        currentGame: state.game?.currentGame || null,
+        difficulty: state.game?.difficulty || 3,
+        score: state.gameRuntime?.score || 0,
+        timer: state.gameRuntime?.timer || 60,
+        accuracy: state.gameRuntime?.accuracy || 0,
+        module: state.game?.module || null,
+        dwellTime: state.game?.dwellTime || 2000
+      }
       systemState.settings = { ...systemState.settings, ...(state.settings || {}) }
       systemState.timestamp = state.timestamp || Date.now()
     }
-    console.log('[developer] 系统状态更新:', key)
+    console.log('[developer] 系统状态更新')
   })
   
   resize()

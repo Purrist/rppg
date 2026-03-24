@@ -7,22 +7,28 @@
       "request": "launch",
       "program": "app.py",
       "cwd": "${workspaceFolder}/backend",
+      "python": "D:/anaconda/envs/rppg/python.exe",
       "args": [
         "http://192.168.3.94:8080/video",
         "1"
-      ]
-    },    
+      ],
+      "env": {
+        "CONDA_DEFAULT_ENV": "rppg",
+        "PYTHONPATH": "${workspaceFolder}/backend"
+      },
+      "console": "integratedTerminal"
+    },
     {
       "name": "前端 (Nuxt)",
-      "type": "node",           // 改为 pwa-node
+      "type": "node",
       "request": "launch",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
       "cwd": "${workspaceFolder}/frontend",
       "console": "integratedTerminal",
-      "internalConsoleOptions": "neverOpen",  // 不自动打开控制台
-      "restart": true,                         // 自动重启
-      "autoAttachChildProcesses": true         // 附加子进程
+      "internalConsoleOptions": "neverOpen",
+      "restart": true,
+      "autoAttachChildProcesses": true
     }
   ],
   "compounds": [

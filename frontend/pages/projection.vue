@@ -2,10 +2,11 @@
   <div class="projection-page" ref="pageRef">
     <!-- 底层：主Canvas（背景、粒子、绿点等） -->
     <canvas ref="mainCanvas" class="main-canvas"></canvas>
-    
+
     <!-- 中层：游戏内容（处理速度训练的8个区域） -->
+    <!-- ⭐ 在 PLAYING 和 SETTLING 状态下都保持组件存活，避免销毁重建导致闪烁 -->
     <ProcessingSpeedGame
-      v-if="gameState === 'PLAYING' && currentGame === 'processing_speed'"
+      v-if="(gameState === 'PLAYING' || gameState === 'SETTLING') && currentGame === 'processing_speed'"
       :game-state="game"
       :foot-position="footPosition"
       :canvas-width="containerWidth"
@@ -15,16 +16,32 @@
       @action="handleGameAction"
       class="game-layer"
     />
-    
+
+    <!-- 结算画面 -->
+    <div v-if="showSettlement" class="settlement-overlay">
+      <div class="settlement-card">
+        <div class="settlement-title">🎉 游戏结束</div>
+        <div class="settlement-score">
+          <div class="score-label">最终得分</div>
+          <div class="score-value">{{ game.score }}</div>
+        </div>
+        <div class="settlement-accuracy">
+          <div class="accuracy-label">准确率</div>
+          <div class="accuracy-value">{{ game.accuracy }}%</div>
+        </div>
+        <div class="settlement-encouragement">{{ encouragementMessage }}</div>
+      </div>
+    </div>
+
     <!-- 顶层：绿点（始终显示在最上层） -->
     <canvas ref="footCanvas" class="foot-canvas"></canvas>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onUnmounted, watch } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, watch, computed } from 'vue'
 import { io } from 'socket.io-client'
-import { initStore, subscribe, gameControl, gameAction, getState } from '../core/systemStore.js'
+import { initStore, subscribe, gameControl, getState } from '../core/systemStore.js'
 import ProcessingSpeedGame from '../components/ProcessingSpeedGame.vue'
 
 // Socket和订阅
@@ -60,10 +77,11 @@ const containerWidth = ref(1920)
 const containerHeight = ref(1080)
 
 // ==================== 游戏状态 ====================
+// ⭐ 统一使用gameState作为状态源，删除重复的game.value.status
 const gameState = ref('IDLE')
 const currentGame = ref(null)  // ⭐ 初始为 null，等待后端确认
 const game = ref({
-  status: 'IDLE',
+  // status字段已移除，统一使用gameState
   score: 0,
   timer: 60,
   current_mole: -1,
@@ -76,6 +94,30 @@ const game = ref({
   in_interval: true,  // ⭐ 是否在间隔期
   question: null,  // ⭐ 当前题目
   remaining_time: 0  // ⭐ 剩余作答时间
+})
+
+// ==================== 结算画面状态 ====================
+const showSettlement = ref(false)
+const settlementTimer = ref(null)
+const settlementShown = ref(false)  // ⭐ 标记结算画面是否已显示，防止重复触发
+
+// 多样化的鼓励语
+const ENCOURAGEMENT_MESSAGES = [
+  '太棒啦！继续加油！',
+  '表现真不错！',
+  '厉害厉害！',
+  '做得很好！',
+  '真厉害！',
+  '好样的！',
+  '继续保持！',
+  '反应很快！',
+  '太厉害了！',
+  '真棒！'
+]
+
+const encouragementMessage = computed(() => {
+  const index = Math.floor(Math.random() * ENCOURAGEMENT_MESSAGES.length)
+  return ENCOURAGEMENT_MESSAGES[index]
 })
 
 // ==================== 处理速度训练状态（通过组件处理）====================
@@ -521,9 +563,8 @@ function draw() {
     }
     // 注意：处理速度训练在ProcessingSpeedGame.vue组件中绘制
     drawPauseOverlay()
-  } else if (gameState.value === 'SETTLING') {
-    drawSettling()
   }
+  // 注意：SETTLING 状态的结算画面由 Vue 组件 settlement-overlay 显示
   
   // ⭐ 绿点现在由独立的 footCanvas 绘制，始终在最上层
   
@@ -558,7 +599,6 @@ function updateReadyState() {
   if (readyEnterTime.value > 0 && Date.now() - readyEnterTime.value > READY_TIMEOUT) {
     console.log('[投影] 准备超时，回到待机状态')
     gameState.value = 'IDLE'
-    game.value.status = 'IDLE'
     readyEnterTime.value = 0
     readyProgress.value = 0
     readyStartTime.value = 0
@@ -652,11 +692,10 @@ async function updateStatus() {
 }
 
 // ==================== 监听游戏状态变化 ====================
-watch(() => game.value.status, (newStatus, oldStatus) => {
-  console.log('[投影] 状态变化:', oldStatus, '->', newStatus)
-  
-  gameState.value = newStatus
-  
+// ⭐ 注意：gameState 已经在 game_update 事件中更新，这里只处理副作用
+watch(() => gameState.value, (newStatus, oldStatus) => {
+  console.log('[投影] watch 状态变化:', oldStatus, '->', newStatus)
+
   if (newStatus === 'IDLE') {
     readyEnterTime.value = 0
     readyProgress.value = 0
@@ -676,6 +715,8 @@ watch(() => game.value.status, (newStatus, oldStatus) => {
     particles = []
   } else if (newStatus === 'PAUSED') {
     console.log('[投影] 游戏暂停')
+  } else if (newStatus === 'SETTLING') {
+    console.log('[投影] 进入结算状态')
   }
 })
 
@@ -694,12 +735,7 @@ onMounted(() => {
   socket.on('game_update', (data) => {
     console.log('[projection] game_update:', data)
 
-    // 更新游戏状态
-    game.value.status = data.status || 'IDLE'
-    game.value.score = data.score || 0
-    game.value.timer = data.timer || 60
-
-    // ⭐ 严格根据 game_id 判断游戏类型
+    // ⭐ 严格根据 game_id 判断游戏类型（必须在状态更新前判断）
     const gameId = data.game_id || ''
     console.log('[projection] game_id:', gameId, 'currentGame:', currentGame.value)
 
@@ -712,12 +748,64 @@ onMounted(() => {
       game.value.module = null
       console.log('[projection] 切换到打地鼠')
     }
-    // 注意：不再使用 data.module 来判断，避免误判
 
-    // ⭐ 更新游戏状态（通过systemStore发送到后端）
-    if (data.game_id) {
-      // 使用systemStore更新
+    // ⭐ 关键：立即更新 gameState，确保 Canvas 绘制正确
+    if (data.status) {
+      const oldStatus = gameState.value
+      const newStatus = data.status
+
+      // ⭐ 立即更新 gameState
+      gameState.value = newStatus
+
+      console.log('[projection] 状态变化:', oldStatus, '->', newStatus)
+
+      // 游戏结束（SETTLING），显示结算画面
+      if (newStatus === 'SETTLING') {
+        // ⭐ 确保准确率数据已更新（优先使用 data.stats）
+        // data.stats.accuracy 是 0-1 之间的小数，转换为百分比显示
+        if (data.stats && data.stats.accuracy !== undefined) {
+          const rawAccuracy = data.stats.accuracy
+          // 如果已经是大于1的值（如90），说明已经是百分比，直接显示
+          // 如果是0-1之间的小数，乘以100转换为百分比
+          game.value.accuracy = rawAccuracy > 1 ? Math.round(rawAccuracy) : Math.round(rawAccuracy * 100)
+          console.log('[projection] 结算准确率:', game.value.accuracy, '% (原始值:', rawAccuracy, ')')
+        } else {
+          console.log('[projection] 警告: stats 不存在或 accuracy 未定义')
+        }
+        showSettlement.value = true
+        settlementShown.value = true
+        console.log('[projection] 显示结算画面')
+      }
+
+      // 回到READY状态（预备状态，准备下一轮）
+      if (newStatus === 'READY') {
+        showSettlement.value = false
+        settlementShown.value = false
+        if (settlementTimer.value) clearTimeout(settlementTimer.value)
+        // ⭐ 保留游戏数据用于显示，只清理反馈
+        game.value.feedback = null
+        console.log('[projection] 进入预备状态，准备下一轮')
+      }
+
+      // 回到IDLE状态（用户主动退出，回到待机）
+      if (newStatus === 'IDLE') {
+        showSettlement.value = false
+        settlementShown.value = false
+        if (settlementTimer.value) clearTimeout(settlementTimer.value)
+        // ⭐ 重置所有游戏数据，回到待机状态
+        game.value.score = 0
+        game.value.accuracy = 0
+        game.value.current_mole = -1
+        game.value.feedback = null
+        game.value.module = null
+        currentGame.value = null
+        console.log('[projection] 回到待机状态')
+      }
     }
+
+    // 更新游戏数据（在状态处理之后）
+    game.value.score = data.score || 0
+    game.value.timer = data.timer || 60
 
     // 更新难度等级
     if (data.difficulty_level) {
@@ -749,15 +837,31 @@ onMounted(() => {
     if (data.extra) {
       game.value.current_mole = data.extra.current_mole ?? -1
     }
-    if (data.stats) {
-      game.value.accuracy = Math.round((data.stats.accuracy || 0) * 100)
+    
+    // ⭐ 更新准确率（只在非结算状态下更新，避免覆盖结算时的准确率）
+    if (data.status !== 'SETTLING' && data.stats && data.stats.accuracy !== undefined) {
+      const rawAccuracy = data.stats.accuracy
+      // 如果已经是大于1的值，说明已经是百分比，直接显示
+      // 如果是0-1之间的小数，乘以100转换为百分比
+      game.value.accuracy = rawAccuracy > 1 ? Math.round(rawAccuracy) : Math.round(rawAccuracy * 100)
+      console.log('[projection] 更新准确率:', game.value.accuracy, '% (原始值:', rawAccuracy, ')')
+    }
+
+    // ⭐ 关键：传递反馈数据给ProcessingSpeedGame组件
+    if (data.feedback) {
+      game.value.feedback = data.feedback
+      console.log('[projection] 反馈:', data.feedback)
     }
 
     // 注意：处理速度训练的数据处理在ProcessingSpeedGame.vue组件中进行
   })
-  
+
   socket.on('system_state', (data) => {
-    // 不做处理
+    // ⭐ 处理系统状态更新（备用）
+    if (data.game?.status) {
+      console.log('[projection] system_state:', data.game.status)
+      gameState.value = data.game.status
+    }
   })
   
   setTimeout(() => {
@@ -779,6 +883,7 @@ onUnmounted(() => {
   if (animationId) cancelAnimationFrame(animationId)
   if (footAnimationId) cancelAnimationFrame(footAnimationId)
   if (statusInterval) clearInterval(statusInterval)
+  if (settlementTimer.value) clearTimeout(settlementTimer.value)
   if (socket) socket.disconnect()
   window.removeEventListener('resize', initCanvas)
 })
@@ -822,5 +927,110 @@ onUnmounted(() => {
   display: block !important;
   z-index: 10;
   pointer-events: none; /* 让点击事件穿透 */
+}
+
+/* 结算画面样式 */
+.settlement-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.7);
+  z-index: 5;
+  animation: fadeIn 0.5s ease-out;
+}
+
+.settlement-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 60px 80px;
+  border-radius: 30px;
+  background: rgba(40, 40, 60, 0.95);
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.settlement-title {
+  font-size: 48px;
+  font-weight: bold;
+  color: #fff;
+  margin-bottom: 40px;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+
+.settlement-score {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 30px;
+}
+
+.score-label {
+  font-size: 24px;
+  color: rgba(255, 255, 255, 0.8);
+  margin-bottom: 10px;
+}
+
+.score-value {
+  font-size: 72px;
+  font-weight: bold;
+  color: #FFD700;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+
+.settlement-accuracy {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 40px;
+}
+
+.accuracy-label {
+  font-size: 24px;
+  color: rgba(255, 255, 255, 0.8);
+  margin-bottom: 10px;
+}
+
+.accuracy-value {
+  font-size: 56px;
+  font-weight: bold;
+  color: #33B555;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+
+.settlement-encouragement {
+  font-size: 36px;
+  font-weight: 600;
+  color: #fff;
+  text-align: center;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  padding: 20px 40px;
+  border-radius: 20px;
+  background: rgba(255, 114, 34, 0.3);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes cardSlideIn {
+  from {
+    transform: translateY(50px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 </style>

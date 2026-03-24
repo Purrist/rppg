@@ -10,6 +10,7 @@ backend/__pycache__/
 backend/perception/__pycache__/
 backend/games/__pycache__/
 backend/core/__pycache__/
+backend/core/models/
 backend/*.pyc
 backend/.env
 backend/.venv

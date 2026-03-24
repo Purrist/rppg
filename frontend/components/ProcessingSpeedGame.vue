@@ -1,11 +1,16 @@
 <template>
   <div class="processing-speed-game">
-    <canvas 
-      ref="gameCanvas" 
+    <canvas
+      ref="gameCanvas"
       class="game-canvas"
       :width="canvasWidth"
       :height="canvasHeight"
     ></canvas>
+    <!-- 间隔期反馈显示（磨砂玻璃卡片） -->
+    <div v-if="intervalFeedback" class="interval-feedback-card" :class="intervalFeedback.type">
+      <div class="interval-icon">{{ intervalFeedback.icon }}</div>
+      <div class="interval-message">{{ intervalFeedback.message }}</div>
+    </div>
   </div>
 </template>
 
@@ -51,7 +56,44 @@ const zoneStartTime = ref([0, 0, 0, 0, 0, 0, 0, 0])
 const zoneFeedback = ref([null, null, null, null, null, null, null, null])
 const zoneFeedbackTime = ref([0, 0, 0, 0, 0, 0, 0, 0])
 
+// 间隔期反馈
+const intervalFeedback = ref(null)
+let intervalFeedbackTimeout = null
+
 const FEEDBACK_DURATION = 1000
+const INTERVAL_FEEDBACK_DURATION = 2000
+
+// 多样化的间隔期反馈消息 - 答对
+const CORRECT_MESSAGES = [
+  { icon: '🌟', message: '做得不错！' },
+  { icon: '🎉', message: '太棒了！' },
+  { icon: '👏', message: '好样的！' },
+  { icon: '✨', message: '继续保持！' },
+  { icon: '🚀', message: '反应很快！' },
+  { icon: '🎯', message: '真准！' },
+  { icon: '💪', message: '厉害！' },
+  { icon: '😊', message: '答对啦！' },
+  { icon: '🔥', message: '状态火热！' },
+  { icon: '⭐', message: '真厉害！' },
+  { icon: '🌈', message: '漂亮！' },
+  { icon: '💯', message: '完美！' }
+]
+
+// 多样化的间隔期反馈消息 - 答错
+const WRONG_MESSAGES = [
+  { icon: '💪', message: '别灰心，再来！' },
+  { icon: '🌱', message: '失误了，继续加油！' },
+  { icon: '😅', message: '哎呀，下次注意！' },
+  { icon: '💫', message: '没关系，还有机会！' },
+  { icon: '🎯', message: '差一点就中了！' },
+  { icon: '🌈', message: '调整一下，再来！' },
+  { icon: '🤔', message: '再想想看~' },
+  { icon: '👍', message: '没事，继续挑战！' },
+  { icon: '🌸', message: '没关系，下次更好！' },
+  { icon: '💪', message: '加油，你能行！' },
+  { icon: '🌟', message: '别气馁！' },
+  { icon: '😊', message: '慢慢来，不着急！' }
+]
 
 // ==================== 获取确认时间 ====================
 function getDwellDuration() {
@@ -205,6 +247,19 @@ function drawZones(questionZones) {
 
 // ==================== 更新游戏状态（检测脚部位置）====================
 function updateGame() {
+  const now = Date.now()
+  const dwellMs = getDwellDuration()
+  const inInterval = props.gameState?.in_interval || false
+
+  // ⭐ 如果在间隔期，清空所有进度并停止检测
+  if (inInterval) {
+    for (let i = 0; i < 8; i++) {
+      zoneProgress.value[i] = 0
+      zoneStartTime.value[i] = 0
+    }
+    return
+  }
+
   if (!props.footPosition.detected) {
     // 没有检测到脚部，清空所有进度
     for (let i = 0; i < 8; i++) {
@@ -213,10 +268,6 @@ function updateGame() {
     }
     return
   }
-
-  const now = Date.now()
-  const dwellMs = getDwellDuration()
-  const inInterval = props.gameState?.in_interval || false
 
   // 检查所有8个区域
   ZONES.forEach((zone, index) => {
@@ -237,8 +288,8 @@ function updateGame() {
 
       zoneProgress.value[index] = progress
 
-      // 停留完成且不在间隔期时才发送动作
-      if (progress >= 100 && !inInterval) {
+      // 停留完成时发送动作
+      if (progress >= 100) {
         zoneFeedback.value[index] = 'pending'
         zoneFeedbackTime.value[index] = now
         emit('action', { 
@@ -275,6 +326,23 @@ watch(() => props.gameState?.feedback, (newFeedback) => {
       zoneStartTime.value[i] = 0
     }
   }
+  
+  // ⭐ 显示间隔期反馈（磨砂玻璃卡片）
+  const isCorrect = newFeedback.correct
+  const messages = isCorrect ? CORRECT_MESSAGES : WRONG_MESSAGES
+  const randomMsg = messages[Math.floor(Math.random() * messages.length)]
+  intervalFeedback.value = {
+    icon: randomMsg.icon,
+    message: randomMsg.message,
+    type: isCorrect ? 'correct' : 'error'
+  }
+
+  // 清除之前的间隔期反馈定时器
+  if (intervalFeedbackTimeout) clearTimeout(intervalFeedbackTimeout)
+  // 设置新的定时器清除间隔期反馈
+  intervalFeedbackTimeout = setTimeout(() => {
+    intervalFeedback.value = null
+  }, INTERVAL_FEEDBACK_DURATION)
 }, { deep: true })
 
 // ==================== 生命周期 ====================
@@ -306,5 +374,73 @@ onMounted(() => {
   display: block;
   width: 100%;
   height: 100%;
+}
+
+/* 间隔期反馈卡片样式（磨砂玻璃效果） */
+.interval-feedback-card {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 50px 70px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  animation: cardPop 0.4s ease-out;
+  z-index: 90;
+}
+
+.interval-feedback-card.correct {
+  border-color: rgba(51, 181, 85, 0.6);
+  background: rgba(51, 181, 85, 0.1);
+}
+
+.interval-feedback-card.error {
+  border-color: rgba(255, 68, 68, 0.6);
+  background: rgba(255, 68, 68, 0.1);
+}
+
+.interval-icon {
+  font-size: 72px;
+  margin-bottom: 20px;
+  animation: iconBounce 0.5s ease-out;
+}
+
+.interval-message {
+  font-size: 32px;
+  font-weight: bold;
+  color: #fff;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  text-align: center;
+}
+
+@keyframes cardPop {
+  0% {
+    transform: translate(-50%, -50%) scale(0.3);
+    opacity: 0;
+  }
+  60% {
+    transform: translate(-50%, -50%) scale(1.05);
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes iconBounce {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.2);
+  }
 }
 </style>

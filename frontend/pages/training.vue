@@ -21,7 +21,7 @@
     <!-- 准备状态 - 只显示提示，不显示规则 -->
     <div v-else-if="game.status === 'READY'" class="ready-view">
       <div class="ready-content">
-        <div class="ready-hint">请在投影区域开始{{ gameTitle }}</div>
+        <div class="ready-hint">请站在区域开始游戏</div>
         <div class="ready-sub">站在投影区域的圆圈内即可开始</div>
         
         <div class="bottom-bar">
@@ -80,14 +80,7 @@
             </div>
           </div>
 
-          <!-- 反馈显示 -->
-          <div v-if="feedback" class="feedback-area" :class="feedback.correct ? 'correct' : 'error'">
-            <div class="feedback-icon">{{ feedback.correct ? '✓' : '✗' }}</div>
-            <div class="feedback-message">{{ feedback.message }}</div>
-            <div class="feedback-rt" v-if="feedback.rt > 0">
-              反应时间: {{ Math.round(feedback.rt) }}ms
-            </div>
-          </div>
+
 
           <div class="game-controls">
             <button @click="pauseGame" class="ctrl-btn pause">⏸ 暂停</button>
@@ -208,6 +201,9 @@ onMounted(() => {
     reconnection: true
   })
   
+  // ⭐ 初始化系统Store，让gameControl可以工作
+  initStore(socket)
+  
   socket.on('connect', () => {
     console.log('[训练页] 后端已连接')
     socket.emit('get_state', { client: 'training' })
@@ -220,11 +216,26 @@ onMounted(() => {
     const isProcessingSpeed = gameId === 'processing_speed' || data.module
     
     // 更新本地状态
+    // ⭐ 准确率转换为整数百分比（0.89 -> 89）
+    // 打地鼠游戏后端已经返回百分比值，不需要再乘以100
+    let accuracyPercent = 0
+    if (data.stats?.accuracy !== undefined) {
+      if (isProcessingSpeed) {
+        // 处理速度训练返回的是0-1的值，需要乘以100
+        accuracyPercent = Math.round(data.stats.accuracy * 100)
+      } else {
+        // 打地鼠游戏已经返回百分比值，但可能会有异常值
+        const rawAccuracy = data.stats.accuracy
+        // 确保准确率在合理范围内（0-100）
+        accuracyPercent = Math.max(0, Math.min(100, Math.round(rawAccuracy)))
+      }
+    }
+    
     game.value = {
       status: data.status || 'READY',
       score: data.score || 0,
       timer: data.timer || 60,
-      accuracy: data.stats?.accuracy || 0,
+      accuracy: accuracyPercent,
       gameType: isProcessingSpeed ? 'processing_speed' : 'whack_a_mole',
       module: data.module || null,
       difficultyLevel: data.difficulty_level || 5
@@ -241,11 +252,20 @@ onMounted(() => {
   })
   
   socket.on('system_state', (data) => {
-    if (data.state?.game) {
-      if (data.state.game.active === false && data.state.game.status === 'IDLE') {
-        console.log('[训练页] 游戏已停止，返回游戏列表')
-        router.push('/learning')
-      }
+    // 使用新的数据结构
+    // ⭐ 只有当游戏从PLAYING/SETTLING变为IDLE时才跳转（用户主动退出）
+    // 游戏正常结束会进入READY状态，不应该跳转
+    const oldStatus = game.value.status
+    const newStatus = data.game?.status
+    
+    if (newStatus === 'IDLE' && (oldStatus === 'PLAYING' || oldStatus === 'SETTLING' || oldStatus === 'PAUSED')) {
+      console.log('[训练页] 游戏已停止（用户退出），返回游戏列表')
+      router.push('/learning')
+    }
+    
+    // ⭐ 更新本地游戏状态
+    if (newStatus) {
+      game.value.status = newStatus
     }
   })
   

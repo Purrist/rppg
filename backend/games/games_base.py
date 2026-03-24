@@ -67,6 +67,10 @@ class GameBase(ABC):
         self._paused_time = 0
         self._total_paused = 0
         self._settling_start_time = 0
+        
+        # ⭐ 状态更新节流（每秒最多10次）
+        self._last_emit_time = 0
+        self._emit_interval = 0.1  # 100ms = 10fps
     
     # 生命周期
     def set_ready(self):
@@ -124,6 +128,11 @@ class GameBase(ABC):
             elapsed = time.time() - self._settling_start_time
             if elapsed >= self.config.settling_duration:
                 self.set_ready()
+            else:
+                # ⭐ 结算期间降低发送频率（每秒2次）
+                now = time.time()
+                if now - self._last_emit_time >= 0.5:
+                    self._emit_state()
             return
         
         if self.state.status == "PLAYING":
@@ -136,8 +145,10 @@ class GameBase(ABC):
             
             self._on_update(perception_data)
             
-            # ⭐ 每次update都广播状态，确保前端实时同步
-            self._emit_state()
+            # ⭐ 节流：限制状态更新频率（每秒10次）
+            now = time.time()
+            if now - self._last_emit_time >= self._emit_interval:
+                self._emit_state()
     
     # 交互
     def handle_action(self, action: str, data: Dict):
@@ -166,6 +177,8 @@ class GameBase(ABC):
     
     # 工具
     def _emit_state(self):
+        """发送游戏状态（带节流）"""
+        self._last_emit_time = time.time()
         self.socketio.emit("game_update", {
             "game_id": self.config.game_id,
             **self.state.to_dict()

@@ -33,6 +33,13 @@ class GameManager:
         game_class = self._registry[game_id]
         game_config = config or self._configs.get(game_id)
         
+        # ⭐ 从SystemCore获取最新的确认时间并更新配置
+        if self._system_core and game_config:
+            from copy import copy
+            game_config = copy(game_config)
+            game_config.dwell_time = self._system_core.get_dwell_time()
+            print(f"[GameManager] 使用SystemCore确认时间: {game_config.dwell_time}ms")
+        
         # 创建游戏实例
         game = game_class(self.socketio, game_config) if game_config else game_class(self.socketio)
         
@@ -110,7 +117,17 @@ class GameManager:
     
     def update(self, perception_data: Dict = None):
         if self._current_game:
+            # ⭐ 记录更新前的状态
+            old_status = self._current_game.state.status
+            
+            # 更新游戏
             self._current_game.update(perception_data)
+            
+            # ⭐ 检查状态是否发生变化，如果是则立即同步到SystemCore
+            new_status = self._current_game.state.status
+            if old_status != new_status:
+                print(f'[GameManager] 游戏状态变化: {old_status} -> {new_status}')
+                self._sync_to_system_core()
     
     # 状态查询
     def get_game_status(self) -> str:
@@ -166,7 +183,18 @@ class GameManager:
         
         # 更新游戏运行时数据
         if self._current_game:
+            # 获取游戏状态
+            game_state = self._current_game.get_state()
+            stats = game_state.get('stats', {})
+            
+            # 计算准确率百分比
+            raw_accuracy = stats.get('accuracy', 0)
+            accuracy_percent = round(raw_accuracy * 100) if raw_accuracy <= 1 else round(raw_accuracy)
+            
             self._system_core.update_game_runtime({
                 'score': self._current_game.state.score,
                 'timer': self._current_game.state.timer,
+                'accuracy': accuracy_percent,
+                'trialCount': stats.get('total_trials', 0),
+                'correctCount': stats.get('total_correct', 0),
             })

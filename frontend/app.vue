@@ -65,7 +65,16 @@
           </div>
           <!-- 输入区域 -->
           <div class="akon-input-row">
-            <input v-model="akonInput" class="akon-input" placeholder="请输入..." @keyup.enter="sendAkonMessage" ref="akonInputRef" />
+            <button 
+              class="akon-voice-btn" 
+              :class="{ 'is-recording': isListening }"
+              @click="toggleVoiceInput"
+              :disabled="akonLoading"
+              title="语音输入"
+            >
+              {{ isListening ? '🔴' : '🎤' }}
+            </button>
+            <input v-model="akonInput" class="akon-input" placeholder="请输入或点击麦克风语音输入..." @keyup.enter="sendAkonMessage" ref="akonInputRef" />
             <button class="akon-send-btn" @click="sendAkonMessage" :disabled="!akonInput.trim() || akonLoading">发送</button>
           </div>
         </div>
@@ -78,7 +87,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { io } from 'socket.io-client'
-import { initStore, setCurrentPage } from './core/systemStore.js'
+import { initStore, setCurrentPage, isGameActive } from './core/systemStore.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -103,7 +112,6 @@ const currentPath = computed(() => route.path)
 
 // 后端连接状态
 const backendConnected = ref(false)
-const gameActive = ref(false)
 // 标记是否已经初始化过（用于重启后回到首页）
 const hasInitialized = ref(false)
 // ⭐ 标记是否正在重新开始
@@ -117,11 +125,110 @@ const ball = reactive({
 })
 
 // 阿康对话状态
-const akonMessages = ref([])
+import { getState, addChatMessage } from './core/systemStore'
+const systemState = getState()
+const akonMessages = computed(() => systemState.value.chatMessages)  // ⭐ 使用全局聊天记录
 const akonInput = ref('')
 const akonLoading = ref(false)
 const messagesRef = ref(null)
 const akonInputRef = ref(null)
+
+// ==================== 语音功能（后端处理） ====================
+const isListening = ref(false)  // 后端监听状态
+const isSpeaking = ref(false)   // 语音播报状态
+let synth = null
+
+// 初始化语音合成（仅用于播报）
+function initVoice() {
+  // 初始化语音合成（浏览器内置）
+  if ('speechSynthesis' in window) {
+    synth = window.speechSynthesis
+    console.log('[语音] 语音合成已初始化')
+  }
+}
+
+// ⭐ 接收后端语音指令
+function setupVoiceSocketHandlers() {
+  // 语音状态更新
+  socket.on('voice_status', (data) => {
+    console.log('[语音] 状态:', data.status, data.message)
+    if (data.status === 'listening') {
+      isListening.value = true
+    } else {
+      isListening.value = false
+    }
+  })
+  
+  // ⭐ 唤醒成功
+  socket.on('voice_wake_up', (data) => {
+    console.log('[语音] 唤醒成功:', data.response)
+    // 打开对话框
+    ui.akon = true
+    ball.status = 'full'
+    // 显示用户说的话
+    if (data.user_text) {
+      akonMessages.value.push({ role: 'user', content: data.user_text })
+    }
+  })
+  
+  // ⭐ 用户说话识别结果
+  socket.on('voice_user_speak', (data) => {
+    console.log('[语音] 用户说:', data.text)
+    // 添加到消息列表
+    akonMessages.value.push({ role: 'user', content: data.text })
+    // 自动发送
+    akonInput.value = data.text
+    sendAkonMessage()
+  })
+  
+  // ⭐ 语音播报指令（后端让前端播报）
+  socket.on('voice_speaking', (data) => {
+    if (data.status === 'start') {
+      console.log('[语音] 开始播报:', data.text)
+      isSpeaking.value = true
+      // 前端播报（使用浏览器语音合成）
+      speak(data.text)
+    } else if (data.status === 'end') {
+      console.log('[语音] 播报结束')
+      isSpeaking.value = false
+    }
+  })
+  
+  // 唤醒超时
+  socket.on('voice_sleep', (data) => {
+    console.log('[语音] 唤醒超时:', data.message)
+  })
+}
+
+// 语音合成（前端播报）
+function speak(text) {
+  if (!synth || !text) return
+  
+  // 取消之前的语音
+  synth.cancel()
+  
+  const utterance = new SpeechSynthesisUtterance(text)
+  utterance.lang = 'zh-CN'
+  utterance.rate = 1.0
+  utterance.pitch = 1.0
+  
+  utterance.onstart = () => {
+    isSpeaking.value = true
+  }
+  
+  utterance.onend = () => {
+    isSpeaking.value = false
+  }
+  
+  synth.speak(utterance)
+}
+
+// ⭐ 语音输入按钮（仅作为指示器，实际识别在后端）
+function toggleVoiceInput() {
+  // 由于语音识别在后端，这里只是显示状态
+  // 用户可以直接说话，后端会自动识别
+  console.log('[语音] 请直接说话，后端正在监听...')
+}
 
 let socket = null
 
@@ -141,7 +248,7 @@ watch(isDevPage, (dev) => {
 // ==================== 导航 ====================
 async function handleNavigate(page) {
   // 如果游戏活跃，先停止游戏
-  if (gameActive.value && socket && socket.connected) {
+  if (isGameActive() && socket && socket.connected) {
     console.log('[App] 游戏活跃，先停止游戏')
     socket.emit('game_control', { action: 'stop' })
     await new Promise(resolve => setTimeout(resolve, 100))
@@ -168,6 +275,9 @@ onMounted(() => {
   window.addEventListener('mouseup', handleDragEnd)
   window.addEventListener('touchmove', handleDragging, { passive: false })
   window.addEventListener('touchend', handleDragEnd)
+  
+  // ⭐ 初始化语音功能（仅初始化语音合成，语音识别由后端处理）
+  initVoice()
   
   socket = io(backendUrl, {
     transports: ['polling', 'websocket'],
@@ -202,22 +312,18 @@ onMounted(() => {
   
   // 收到系统状态时，检查是否需要导航
   socket.on('system_state', (data) => {
-    if (data.state && data.state.game) {
-      gameActive.value = data.state.game.active
-      
-      // ⭐ 如果收到 READY 状态，重置重新开始标记
-      if (data.state.game.status === 'READY') {
-        isRestarting.value = false
-      }
-      
-      // 如果游戏状态是IDLE且不活跃，检查当前页面
-      // ⭐ 但如果正在重新开始，忽略这个状态
-      if (data.state.game.status === 'IDLE' && data.state.game.active === false && !isRestarting.value) {
-        // 如果当前在训练页面，返回游戏列表
-        if (route.path === '/training') {
-          console.log('[App] 游戏已停止，返回游戏列表')
-          router.push('/learning')
-        }
+    // ⭐ 如果收到 READY 状态，重置重新开始标记
+    if (data.game?.status === 'READY') {
+      isRestarting.value = false
+    }
+    
+    // 如果游戏状态是IDLE，检查当前页面
+    // ⭐ 但如果正在重新开始，忽略这个状态
+    if (data.game?.status === 'IDLE' && !isRestarting.value) {
+      // 如果当前在训练页面，返回游戏列表
+      if (route.path === '/training') {
+        console.log('[App] 游戏已停止，返回游戏列表')
+        router.push('/learning')
       }
     }
   })
@@ -231,6 +337,9 @@ onMounted(() => {
   socket.on('navigate_error', (data) => {
     alert(data.message || '请先退出当前游戏')
   })
+  
+  // ⭐ 设置语音Socket事件处理
+  setupVoiceSocketHandlers()
   
   // ⭐ 监听路由变化，同步页面状态
   watch(() => route.path, (newPath) => {
@@ -299,8 +408,8 @@ async function sendAkonMessage() {
   const text = akonInput.value.trim()
   if (!text || akonLoading.value) return
   
-  // 添加用户消息
-  akonMessages.value.push({ role: 'user', content: text })
+  // 添加用户消息到全局聊天记录
+  addChatMessage({ role: 'user', content: text })
   akonInput.value = ''
   akonLoading.value = true
   
@@ -318,11 +427,15 @@ async function sendAkonMessage() {
     
     const data = await response.json()
     
-    // 添加回复
-    akonMessages.value.push({ role: 'assistant', content: data.response })
+    // 添加回复到全局聊天记录
+    addChatMessage({ role: 'assistant', content: data.response })
+    
+    // ⭐ 语音播报回复（后端也会播报，这里是为了确保前端也播报）
+    speak(data.response)
     
   } catch (error) {
-    akonMessages.value.push({ role: 'assistant', content: '抱歉，网络出了点问题。' })
+    addChatMessage({ role: 'assistant', content: '抱歉，网络出了点问题。' })
+    speak('抱歉，网络出了点问题。')
   }
   
   akonLoading.value = false
@@ -435,7 +548,15 @@ html, body {
 .shortcut-btn { padding: 10px 16px; background: #FFF3E0; border: 2px solid #FFD6B3; border-radius: 20px; font-size: 18px; color: #FF7222; cursor: pointer; }
 
 /* 输入区域 */
-.akon-input-row { display: flex; gap: 10px; }
+.akon-input-row { display: flex; gap: 10px; align-items: center; }
+.akon-voice-btn { width: 50px; height: 50px; background: #F5F5F5; border: 2px solid #E0E0E0; border-radius: 50%; font-size: 24px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.3s; }
+.akon-voice-btn:hover { background: #FFF3E0; border-color: #FF7222; }
+.akon-voice-btn.is-recording { background: #FF4444; border-color: #FF4444; animation: pulse 1s infinite; }
+.akon-voice-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+@keyframes pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+}
 .akon-input { flex: 1; padding: 14px 18px; border: 2px solid #E0E0E0; border-radius: 24px; font-size: 20px; outline: none; }
 .akon-input:focus { border-color: #FF7222; }
 .akon-send-btn { padding: 14px 28px; background: #FF7222; color: #FFF; border: none; border-radius: 24px; font-size: 20px; font-weight: bold; cursor: pointer; }

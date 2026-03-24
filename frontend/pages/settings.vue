@@ -126,17 +126,14 @@ onMounted(() => {
   })
   
   // ⭐ 订阅后端状态更新
-  unsubscribe = subscribe((key, value, state) => {
-    if (key === 'init' || key === 'state') {
-      // 初始化或完整状态更新
-      dwellTime.value = state.settings?.dwellTime || 2000
+  unsubscribe = subscribe((state) => {
+    // 更新确认时间
+    if (state.settings?.dwellTime !== undefined) {
+      dwellTime.value = state.settings.dwellTime
+    }
+    // 更新AI模式
+    if (state.aiMode !== undefined) {
       aiCompanionEnabled.value = state.aiMode === 'companion'
-    }
-    if (key === 'dwellTime' || key === 'settings') {
-      dwellTime.value = state.settings?.dwellTime || 2000
-    }
-    if (key === 'aiMode') {
-      aiCompanionEnabled.value = value === 'companion'
     }
   })
 })

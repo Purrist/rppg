@@ -3,8 +3,9 @@
 # 基于文献调研的动态难度调整系统
 # 参考: Csikszentmihalyi (1990), Shute (2008), Hunicke (2005)
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import time
+from collections import deque
 
 
 class DifficultyAdjuster:
@@ -22,8 +23,11 @@ class DifficultyAdjuster:
     - 基于 IRT 项目反应理论 (Hambleton et al., 1991)
     
     调整策略:
-    - 批次调整: 每5次操作后评估
-    - 调整幅度: ±1-3级
+    - 单题调整: 每答题后评估
+    - 单次训练调整: 每训练结束后评估
+    - 短期趋势调整: 基于最近5次训练
+    - 长期趋势调整: 基于最近30次训练
+    - 调整幅度: ±1级
     - 老年人限制: 最高8级
     """
     
@@ -145,13 +149,77 @@ class DifficultyAdjuster:
         self.min_level = 1
         
         # 调整间隔 (每N次操作调整一次)
-        # 参考: Loh et al. (2015), Andrade et al. (2016)
         self.adjustment_interval = 5
         self.action_count = 0
         
         # 历史记录
         self.adjustment_history = []
         self.last_adjustment_time = time.time()
+        
+        # 单题历史记录（最近50题）
+        self.trial_history = deque(maxlen=50)
+        
+        # 单次训练历史记录（最近30次训练）
+        self.session_history = deque(maxlen=30)
+        
+        # 难度表现记录（每个难度等级的准确率）
+        self.difficulty_performance = {}
+        for level in range(1, max_level + 1):
+            self.difficulty_performance[level] = {
+                'total': 0,
+                'correct': 0,
+                'accuracy': 0
+            }
+        
+        # 最佳难度记录
+        self.best_difficulty = initial_level
+        self.best_accuracy = 0
+    
+    def record_trial(self, difficulty: int, correct: bool, reaction_time: float):
+        """
+        记录单题数据
+        
+        参数:
+            difficulty: 难度等级
+            correct: 是否正确
+            reaction_time: 反应时间 (ms)
+        """
+        # 记录单题历史
+        self.trial_history.append({
+            'time': time.time(),
+            'difficulty': difficulty,
+            'correct': correct,
+            'reaction_time': reaction_time
+        })
+        
+        # 更新难度表现记录
+        if difficulty in self.difficulty_performance:
+            perf = self.difficulty_performance[difficulty]
+            perf['total'] += 1
+            if correct:
+                perf['correct'] += 1
+            perf['accuracy'] = perf['correct'] / perf['total'] if perf['total'] > 0 else 0
+            
+            # 更新最佳难度
+            if perf['accuracy'] > self.best_accuracy and perf['total'] >= 10:
+                self.best_accuracy = perf['accuracy']
+                self.best_difficulty = difficulty
+    
+    def record_session(self, final_difficulty: int, accuracy: float, duration: int):
+        """
+        记录单次训练数据
+        
+        参数:
+            final_difficulty: 最终难度等级
+            accuracy: 准确率
+            duration: 训练时长 (秒)
+        """
+        self.session_history.append({
+            'time': time.time(),
+            'final_difficulty': final_difficulty,
+            'accuracy': accuracy,
+            'duration': duration
+        })
     
     def should_adjust(self) -> bool:
         """
@@ -185,21 +253,21 @@ class DifficultyAdjuster:
         # ========== 身体负荷判断 ==========
         # 身体负荷过高 -> 降低难度
         if physical_load > 0.7:
-            adjustment -= 2
-        elif physical_load > 0.5:
             adjustment -= 1
+        elif physical_load > 0.5:
+            adjustment -= 0.5
         
         # ========== 认知负荷判断 ==========
         # 认知负荷过高 -> 降低难度
         if cognitive_load > 0.7:
-            adjustment -= 2
-        elif cognitive_load > 0.5:
             adjustment -= 1
+        elif cognitive_load > 0.5:
+            adjustment -= 0.5
         
         # ========== 参与意愿判断 ==========
         # 参与意愿过低 -> 可能需要调整
         if engagement < 0.3:
-            adjustment -= 1
+            adjustment -= 0.5
         
         # ========== 最佳状态判断 ==========
         # 心流状态: 身体负荷适中 + 认知负荷适中 + 参与意愿高
@@ -207,7 +275,7 @@ class DifficultyAdjuster:
             adjustment += 1
         
         # 限制调整幅度
-        adjustment = max(-3, min(2, adjustment))
+        adjustment = max(-1, min(1, int(round(adjustment))))
         
         return adjustment
     
