@@ -47,6 +47,8 @@ const state = ref({
     dwellTime: 2000,
     soundEnabled: true,
     projectionEnabled: true,
+    voiceWakeup: true,
+    voiceSpeaking: true,
   },
   timeInfo: {
     time: '',
@@ -98,6 +100,7 @@ export function initStore(socketInstance) {
   socket.on('game_runtime_update', (data) => {
     if (data.gameRuntime) Object.assign(state.value.gameRuntime, data.gameRuntime)
     if (data.gameStatus) Object.assign(state.value.game, data.gameStatus)
+    if (data.gameDifficulty !== undefined) state.value.game.difficulty = data.gameDifficulty
     listeners.forEach(cb => cb(state.value))
   })
   
@@ -187,6 +190,7 @@ export function getState() {
 export const setAIMode = (mode) => socket?.emit('set_ai_mode', { mode })
 export const setCurrentPage = (page) => socket?.emit('set_page', { page })
 export const setDwellTime = (ms) => socket?.emit('set_dwell_time', { dwellTime: ms })
+export const setVoiceSetting = (type, enabled) => socket?.emit('set_voice_setting', { type, enabled })
 export const gameControl = (action, data = {}) => socket?.emit('game_control', { action, ...data })
 export const gameAction = (action, data = {}) => socket?.emit('game_action', { action, ...data })
 export const requestSystemState = () => socket?.emit('get_system_state')

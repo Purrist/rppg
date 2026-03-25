@@ -68,8 +68,6 @@ class VoiceManager:
         
     def _init_models(self):
         """初始化语音识别和唤醒词模型"""
-        print("[VoiceManager] 正在初始化 sherpa-onnx 模型...")
-
         # 确保模型目录存在
         if not self.models_dir.exists():
             print(f"[VoiceManager] 模型目录不存在: {self.models_dir}")
@@ -100,14 +98,11 @@ class VoiceManager:
                     break
 
             if not model_dir:
-                print(f"[VoiceManager] 警告：ASR 模型不存在，尝试从下载脚本创建的目录加载")
                 # 尝试直接在models目录下查找
                 model_files = list(self.models_dir.glob("**/model.int8.onnx"))
                 if model_files:
                     model_dir = model_files[0].parent
-                    print(f"[VoiceManager] 找到模型目录: {model_dir}")
                 else:
-                    print(f"[VoiceManager] 警告：ASR 模型不存在")
                     return
 
             # 查找模型文件（优先使用int8版本，兼容性更好）
@@ -118,17 +113,10 @@ class VoiceManager:
             token_files = list(model_dir.glob("tokens.txt"))
 
             if not model_files or not token_files:
-                print(f"[VoiceManager] 警告：ASR 模型文件不完整")
-                print(f"  模型文件: {model_files}")
-                print(f"  词表文件: {token_files}")
                 return
 
             model_path = str(model_files[0])
             tokens_path = str(token_files[0])
-
-            print(f"[VoiceManager] 加载 ASR 模型: {Path(model_path).name}")
-            print(f"  模型路径: {model_path}")
-            print(f"  词表路径: {tokens_path}")
 
             # 创建识别器
             self.asr_recognizer = sherpa_onnx.OfflineRecognizer.from_paraformer(
@@ -141,12 +129,7 @@ class VoiceManager:
                 debug=False,
             )
 
-            print("[VoiceManager] ASR 模型加载完成")
-
         except Exception as e:
-            print(f"[VoiceManager] ASR 模型加载失败: {e}")
-            import traceback
-            traceback.print_exc()
             self.asr_recognizer = None
     
     def _init_kws(self):
@@ -165,14 +148,11 @@ class VoiceManager:
                     break
 
             if not model_dir:
-                print(f"[VoiceManager] 警告：KWS 模型不存在，尝试从下载脚本创建的目录加载")
                 # 尝试直接在models目录下查找
                 encoder_files = list(self.models_dir.glob("**/encoder-epoch-12-avg-2-chunk-16-left-64.onnx"))
                 if encoder_files:
                     model_dir = encoder_files[0].parent
-                    print(f"[VoiceManager] 找到模型目录: {model_dir}")
                 else:
-                    print(f"[VoiceManager] 警告：KWS 模型不存在")
                     self._init_google_kws()
                     return
 
@@ -184,11 +164,6 @@ class VoiceManager:
             token_files = list(model_dir.glob("tokens.txt"))
 
             if not encoder_files or not decoder_files or not joiner_files or not token_files:
-                print(f"[VoiceManager] 警告：KWS 模型文件不完整")
-                print(f"  encoder: {encoder_files}")
-                print(f"  decoder: {decoder_files}")
-                print(f"  joiner: {joiner_files}")
-                print(f"  tokens: {token_files}")
                 self._init_google_kws()
                 return
 
@@ -203,14 +178,6 @@ class VoiceManager:
                 # 如果关键词文件不存在，创建一个
                 with open(keywords_file, 'w', encoding='utf-8') as f:
                     f.write("阿康 /1.0/\n阿康阿康 /1.0/\nakon /1.0/\n你好阿康 /1.0/\n阿康你好 /1.0/\n小康 /1.0/\n小康小康 /1.0/")
-                print(f"[VoiceManager] 创建关键词文件: {keywords_file}")
-            print(f"[VoiceManager] 使用关键词文件: {keywords_file}")
-
-            print(f"[VoiceManager] 加载 KWS 模型")
-            print(f"  encoder: {encoder_path}")
-            print(f"  decoder: {decoder_path}")
-            print(f"  joiner: {joiner_path}")
-            print(f"  tokens: {tokens_path}")
 
             # 创建唤醒词识别器
             self.kws_recognizer = sherpa_onnx.KeywordSpotter(
@@ -229,13 +196,7 @@ class VoiceManager:
                 provider='cpu',
             )
 
-            print("[VoiceManager] KWS 模型加载完成")
-
         except Exception as e:
-            print(f"[VoiceManager] KWS 模型加载失败: {e}")
-            import traceback
-            traceback.print_exc()
-            print("[VoiceManager] 尝试使用Google Speech Recognition作为备用唤醒方案...")
             self._init_google_kws()
 
     def _init_google_kws(self):
@@ -301,13 +262,11 @@ class VoiceManager:
                     break
 
             if not model_dir:
-                print(f"[VoiceManager] TTS: 使用 edge-tts")
                 return
 
             # 查找模型文件
             model_files = list(model_dir.glob("*.onnx"))
             if not model_files:
-                print(f"[VoiceManager] TTS: 使用 edge-tts")
                 return
 
             model_path = str(model_files[0])
@@ -318,10 +277,7 @@ class VoiceManager:
                 'model_dir': model_dir
             }
 
-            print("[VoiceManager] TTS 模型加载完成")
-
         except Exception as e:
-            print(f"[VoiceManager] TTS: 使用 edge-tts")
             self.tts_recognizer = None
 
     def start_listening(self):
@@ -330,7 +286,6 @@ class VoiceManager:
             return
         
         self.is_listening = True
-        print("[VoiceManager] 开始监听...")
         
         # 通知前端
         self.socketio.emit('voice_status', {
@@ -358,65 +313,133 @@ class VoiceManager:
         sample_rate = 16000
         block_size = 1600  # 100ms 的音频
         
-        print("[VoiceManager] 监听循环启动，等待唤醒词...")
-        print(f"[VoiceManager] 唤醒词: {self.WAKE_WORDS}")
-        
         # 音频缓冲区
         audio_buffer = []
         
-        with sd.InputStream(
-            samplerate=sample_rate,
-            channels=1,
-            dtype=np.float32,
-            blocksize=block_size
-        ) as stream:
-            print("[VoiceManager] 音频流已打开")
+        # 尝试获取默认输入设备
+        selected_device = None
+        try:
+            import sounddevice as sd
+            # 获取所有输入设备
+            devices = sd.query_devices()
+            input_devices = [d for d in devices if d['max_input_channels'] > 0]
             
-            while self.is_listening:
+            # 选择合适的设备：优先选择非摄像头麦克风
+            # 优先级：1. 非摄像头麦克风 2. 默认设备 3. 第一个可用设备
+            
+            # 首先尝试找到Realtek麦克风（内置麦克风）
+            realtek_microphone = None
+            non_camera_microphone = None
+            
+            # 遍历所有输入设备，找到合适的麦克风
+            for i, device in enumerate(input_devices):
+                name = device['name'].lower()
+                # 排除可能是外接摄像头的设备
+                if 'camera' not in name and 'webcam' not in name:
+                    # 优先选择Realtek麦克风（内置麦克风）
+                    if 'realtek' in name and ('mic' in name or 'audio' in name):
+                        realtek_microphone = i  # 使用列表索引，确保有效
+                        break
+                    # 其次选择其他非摄像头麦克风
+                    elif non_camera_microphone is None and 'microsoft 声音映射器' not in name:
+                        non_camera_microphone = i  # 使用列表索引，确保有效
+            
+            # 设置最终选择的设备
+            selected_device = None
+            if realtek_microphone is not None and realtek_microphone < len(input_devices):
+                selected_device = input_devices[realtek_microphone]['index']
+            elif non_camera_microphone is not None and non_camera_microphone < len(input_devices):
+                selected_device = input_devices[non_camera_microphone]['index']
+            # 如果没有找到，尝试找到第一个非摄像头的麦克风
+            else:
+                for i, device in enumerate(input_devices):
+                    name = device['name'].lower()
+                    if 'camera' not in name and 'webcam' not in name:
+                        selected_device = device['index']
+                        break
+            
+            # 如果没有找到合适的设备，使用默认输入设备
+            if selected_device is None and input_devices:
                 try:
-                    # 读取音频数据
-                    audio_data, _ = stream.read(block_size)
-                    audio_data = audio_data.flatten()
-                    
-                    # 添加到缓冲区
-                    audio_buffer.extend(audio_data)
-                    
-                    # 每 2 秒处理一次
-                    if len(audio_buffer) >= sample_rate * 2:
-                        # 转换为 numpy 数组
-                        audio_np = np.array(audio_buffer, dtype=np.float32)
-                        audio_buffer = []
-                        
-                        # 检测唤醒词
-                        if not self.is_awakened:
-                            if self.kws_recognizer:
-                                # 使用本地KWS模型
-                                if self._detect_wake_word(audio_np):
-                                    self._on_wake_up()
-                            elif self.use_google_kws:
-                                # 使用Google Speech Recognition作为备用
-                                if self._detect_wake_word_google():
-                                    self._on_wake_up()
-                            else:
-                                # KWS识别器未初始化，记录错误
-                                print("[VoiceManager] 警告: 唤醒词识别器未初始化，无法检测唤醒词")
-                        
-                        # 识别语音（已唤醒状态）
-                        elif self.is_awakened:
-                            if self.asr_recognizer:
-                                text = self._recognize_speech(audio_np)
-                                if text:
-                                    print(f"[VoiceManager] 识别到: '{text}'")
-                                    self._on_user_speak(text)
-                            else:
-                                # ASR识别器未初始化，提示用户
-                                print("[VoiceManager] 警告: 语音识别器未初始化，无法识别语音")
-                                # 退出唤醒状态，避免持续无响应
-                                self._on_awake_timeout()
-                    
+                    selected_device = sd.default.device[0]  # 默认输入设备
                 except Exception as e:
-                    print(f"[VoiceManager] 监听错误: {e}")
-                    time.sleep(0.1)
+                    # 尝试使用第一个可用的输入设备
+                    if input_devices:
+                        selected_device = input_devices[0]['index']
+                    else:
+                        selected_device = None
+            
+            # 如果仍然没有设备，尝试使用第一个可用的输入设备
+            if selected_device is None and input_devices:
+                selected_device = input_devices[0]['index']
+                
+        except Exception as e:
+            selected_device = None
+        
+        try:
+            with sd.InputStream(
+                samplerate=sample_rate,
+                channels=1,
+                dtype=np.float32,
+                blocksize=block_size,
+                device=selected_device
+            ) as stream:
+                while self.is_listening:
+                    try:
+                        # 读取音频数据
+                        audio_data, _ = stream.read(block_size)
+                        audio_data = audio_data.flatten()
+                        
+                        # 添加到缓冲区
+                        audio_buffer.extend(audio_data)
+                        
+                        # 每 2 秒处理一次
+                        if len(audio_buffer) >= sample_rate * 2:
+                            # 转换为 numpy 数组
+                            audio_np = np.array(audio_buffer, dtype=np.float32)
+                            audio_buffer = []
+                            
+                            # 检测唤醒词
+                            if not self.is_awakened:
+                                if self.kws_recognizer:
+                                    # 使用本地KWS模型
+                                    if self._detect_wake_word(audio_np):
+                                        self._on_wake_up()
+                                elif self.use_google_kws:
+                                    # 使用Google Speech Recognition作为备用
+                                    if self._detect_wake_word_google():
+                                        self._on_wake_up()
+                            
+                            # 识别语音（已唤醒状态）
+                            elif self.is_awakened:
+                                if self.asr_recognizer:
+                                    text = self._recognize_speech(audio_np)
+                                    if text:
+                                        self._on_user_speak(text)
+                                else:
+                                    # 退出唤醒状态，避免持续无响应
+                                    self._on_awake_timeout()
+                    
+                    except Exception as e:
+                        time.sleep(0.1)
+        except Exception as e:
+            # 尝试使用Google Speech Recognition作为备用
+            if self.use_google_kws:
+                while self.is_listening:
+                    try:
+                        if not self.is_awakened:
+                            if self._detect_wake_word_google():
+                                self._on_wake_up()
+                        time.sleep(1)
+                    except Exception as google_error:
+                        time.sleep(2)
+            else:
+                # 退出监听状态
+                self.is_listening = False
+                self.socketio.emit('voice_status', {
+                    'status': 'error',
+                    'message': '无法初始化音频设备'
+                })
     
     def _detect_wake_word(self, audio_data: np.ndarray) -> bool:
         """检测唤醒词"""

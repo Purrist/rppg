@@ -27,44 +27,44 @@
         </div>
         
         <!-- 游戏状态 -->
-        <div class="sys-card" :class="'game-' + systemState.gameState.status.toLowerCase()">
+        <div class="sys-card" :class="'game-' + systemState.game?.status.toLowerCase()">
           <div class="sys-label">游戏状态</div>
           <div class="sys-value">{{ gameStatusText }}</div>
-          <div class="sys-desc">{{ systemState.gameState.currentGame || '无' }}</div>
+          <div class="sys-desc">{{ systemState.game?.currentGame || '无' }}</div>
         </div>
         
         <!-- 当前游戏 -->
         <div class="sys-card">
           <div class="sys-label">当前游戏</div>
           <div class="sys-value">{{ currentGameText }}</div>
-          <div class="sys-desc">{{ systemState.gameState.module || '-' }}</div>
+          <div class="sys-desc">{{ systemState.game?.module || '-' }}</div>
         </div>
         
         <!-- 游戏难度 -->
         <div class="sys-card">
           <div class="sys-label">游戏难度</div>
-          <div class="sys-value">{{ systemState.gameState.difficulty }}/8</div>
+          <div class="sys-value">{{ systemState.game?.status !== 'IDLE' ? systemState.game?.difficulty + '/8' : '-' }}</div>
           <div class="sys-desc">难度等级</div>
         </div>
         
         <!-- 确认时间 -->
         <div class="sys-card">
           <div class="sys-label">确认时间</div>
-          <div class="sys-value">{{ (systemState.gameState.dwellTime / 1000).toFixed(1) }}s</div>
+          <div class="sys-value">{{ (systemState.game?.dwellTime / 1000).toFixed(1) }}s</div>
           <div class="sys-desc">进度圈填充时间</div>
         </div>
         
         <!-- 游戏得分 -->
-        <div class="sys-card" v-if="systemState.gameState.status !== 'IDLE'">
+        <div class="sys-card" v-if="systemState.game?.status !== 'IDLE'">
           <div class="sys-label">当前得分</div>
-          <div class="sys-value">{{ systemState.gameState.score }}</div>
+          <div class="sys-value">{{ systemState.gameRuntime?.score }}</div>
           <div class="sys-desc">游戏得分</div>
         </div>
         
         <!-- 剩余时间 -->
-        <div class="sys-card" v-if="systemState.gameState.status !== 'IDLE'">
+        <div class="sys-card" v-if="systemState.game?.status !== 'IDLE'">
           <div class="sys-label">剩余时间</div>
-          <div class="sys-value">{{ systemState.gameState.timer }}s</div>
+          <div class="sys-value">{{ systemState.gameRuntime?.timer }}s</div>
           <div class="sys-desc">游戏倒计时</div>
         </div>
       </div>
@@ -288,20 +288,48 @@ let unsubscribe = null
 const systemState = reactive({
   aiMode: 'basic',
   currentPage: '/',
-  gameState: {
+  game: {
     status: 'IDLE',
     currentGame: null,
     difficulty: 3,
+    module: null,
+    dwellTime: 2000,
+  },
+  gameRuntime: {
     score: 0,
     timer: 60,
     accuracy: 0,
-    module: null,
-    dwellTime: 2000
+    trialCount: 0,
+    correctCount: 0,
+  },
+  perception: {
+    personDetected: false,
+    personCount: 0,
+    faceCount: 0,
+    bodyDetected: false,
+    footPosition: { x: 0, y: 0, detected: false },
+    emotion: 'neutral',
+    attention: 0,
+    fatigue: 0,
+    heartRate: null,
+    activity: 'unknown',
+    speaking: false,
+    idleMinutes: 0,
+  },
+  environment: {
+    lightLevel: 'normal',
   },
   settings: {
-    dwellTime: 2000
+    dwellTime: 2000,
+    soundEnabled: true,
+    projectionEnabled: true,
   },
-  timestamp: Date.now()
+  timeInfo: {
+    time: '',
+    date: '',
+    weekday: '',
+  },
+  timestamp: 0
 })
 
 const lightText = { 'dark': '暗', 'normal': '正常', 'bright': '亮' }
@@ -314,34 +342,56 @@ const isEditing = ref(false)
 const savedCorners = ref(null)
 const corners = ref([[0.15, 0.2], [0.85, 0.2], [0.85, 0.85], [0.15, 0.85]])
 
-const status = reactive({
-  feet_detected: false,
-  feet_x: 320,
-  feet_y: 180
-})
-
-const userState = reactive({
-  person_detected: false,
-  face_detected: false,
-  body_detected: false,
-  face_count: 0,
-  physical_load: { value: 0, heart_rate: null, movement_intensity: 0, fall_detected: false },
-  cognitive_load: { value: 0, error_rate: 0, attention_stability: 1 },
-  engagement: { value: 0.5, emotion_positive: 0.5, initiative_level: 0.5 },
-  emotion: { primary: 'neutral' },
-  posture: { type: 'unknown', stability: 1 },
-  activity: { level: 0 },
-  environment: { light_level: 'normal' },
-  overall: { state_summary: 'normal' },
-})
-
-const personDetected = computed(() => userState.person_detected)
-
-const gameState = reactive({
-  status: 'IDLE',
-  score: 0,
-  timer: 60
-})
+// 计算属性
+const personDetected = computed(() => systemState.perception?.personDetected || false)
+const gameState = computed(() => ({
+  status: systemState.game?.status || 'IDLE',
+  score: systemState.gameRuntime?.score || 0,
+  timer: systemState.gameRuntime?.timer || 60
+}))
+const status = computed(() => ({
+  feet_detected: systemState.perception?.footPosition?.detected || false,
+  feet_x: systemState.perception?.footPosition?.x || 320,
+  feet_y: systemState.perception?.footPosition?.y || 180
+}))
+const userState = computed(() => ({
+  person_detected: systemState.perception?.personDetected || false,
+  face_detected: systemState.perception?.faceCount > 0,
+  body_detected: systemState.perception?.bodyDetected || false,
+  face_count: systemState.perception?.faceCount || 0,
+  physical_load: {
+    value: systemState.perception?.fatigue || 0,
+    heart_rate: systemState.perception?.heartRate || null,
+    movement_intensity: 0,
+    fall_detected: false
+  },
+  cognitive_load: {
+    value: systemState.perception?.attention || 0,
+    error_rate: 0,
+    attention_stability: 1
+  },
+  engagement: {
+    value: 0.5,
+    emotion_positive: 0.5,
+    initiative_level: 0.5
+  },
+  emotion: {
+    primary: systemState.perception?.emotion || 'neutral'
+  },
+  posture: {
+    type: systemState.perception?.activity || 'unknown',
+    stability: 1
+  },
+  activity: {
+    level: 0
+  },
+  environment: {
+    light_level: systemState.environment?.lightLevel || 'normal'
+  },
+  overall: {
+    state_summary: 'normal'
+  }
+}))
 
 const gameStateText = computed(() => {
   const t = { 'IDLE': '待机', 'READY': '等待', 'PLAYING': '进行中', 'PAUSED': '暂停', 'SETTLING': '结算' }
@@ -365,7 +415,7 @@ const currentPageText = computed(() => {
 
 const gameStatusText = computed(() => {
   const t = { 'IDLE': '待机', 'READY': '预备', 'PLAYING': '游戏中', 'PAUSED': '暂停', 'SETTLING': '结算' }
-  return t[systemState.gameState.status] || '未知'
+  return t[systemState.game?.status] || '未知'
 })
 
 const currentGameText = computed(() => {
@@ -373,7 +423,7 @@ const currentGameText = computed(() => {
     'whack_a_mole': '打地鼠',
     'processing_speed': '处理速度训练'
   }
-  return gameMap[systemState.gameState.currentGame] || (systemState.gameState.currentGame || '无')
+  return gameMap[systemState.game?.currentGame] || (systemState.game?.currentGame || '无')
 })
 
 const toast = reactive({ show: false, msg: '' })
@@ -493,10 +543,9 @@ async function updateStatus() {
     const gr = await fetch(`${baseUrl}/api/system/state`)
     if (gr.ok) {
       const gd = await gr.json()
-      if (gd.state?.game) {
-        gameState.status = gd.state.game.status || 'IDLE'
-        gameState.score = gd.state.game.score || 0
-        gameState.timer = gd.state.game.timer || 60
+      if (gd.state) {
+        // 直接更新systemState，因为我们现在使用单一状态源
+        Object.assign(systemState, gd.state)
       }
     }
     
@@ -670,15 +719,38 @@ onMounted(async () => {
     reconnection: true
   })
   
+  // 连接状态管理
+  let reconnectAttempts = 0
+  const maxReconnectAttempts = 5
+  
   socket.on('connect', () => {
     console.log('[developer] Socket.IO已连接')
     connected.value = true
+    reconnectAttempts = 0
     // 请求系统状态
     socket.emit('get_system_state')
   })
   
   socket.on('disconnect', () => {
+    console.log('[developer] Socket.IO已断开连接')
     connected.value = false
+  })
+  
+  socket.on('connect_error', (error) => {
+    console.error('[developer] Socket.IO连接错误:', error)
+    connected.value = false
+    reconnectAttempts++
+    if (reconnectAttempts > maxReconnectAttempts) {
+      console.warn('[developer] 连接尝试次数过多，将停止自动重连')
+    }
+  })
+  
+  socket.on('reconnect', (attemptNumber) => {
+    console.log('[developer] Socket.IO重连成功，尝试次数:', attemptNumber)
+    connected.value = true
+    reconnectAttempts = 0
+    // 重连后重新请求系统状态
+    socket.emit('get_system_state')
   })
   
   // ⭐ 初始化SystemStore
@@ -686,34 +758,20 @@ onMounted(async () => {
   
   // ⭐ 订阅系统全局状态
   unsubscribe = subscribe((state) => {
-    // 更新本地状态
+    // 更新本地状态 - 完整同步
     if (state) {
-      systemState.aiMode = state.aiMode || 'basic'
-      systemState.currentPage = state.currentPage || '/'
-      systemState.gameState = {
-        status: state.game?.status || 'IDLE',
-        currentGame: state.game?.currentGame || null,
-        difficulty: state.game?.difficulty || 3,
-        score: state.gameRuntime?.score || 0,
-        timer: state.gameRuntime?.timer || 60,
-        accuracy: state.gameRuntime?.accuracy || 0,
-        module: state.game?.module || null,
-        dwellTime: state.game?.dwellTime || 2000
-      }
-      systemState.settings = { ...systemState.settings, ...(state.settings || {}) }
-      systemState.timestamp = state.timestamp || Date.now()
+      Object.assign(systemState, state)
     }
     console.log('[developer] 系统状态更新')
   })
   
   resize()
   requestAnimationFrame(draw)
-  interval = setInterval(updateStatus, 200)  // 200ms更新一次
+  // 移除定期API请求，改为完全依赖Socket.IO实时更新
   window.addEventListener('resize', resize)
 })
 
 onUnmounted(() => {
-  if (interval) clearInterval(interval)
   window.removeEventListener('resize', resize)
   if (unsubscribe) unsubscribe()
   if (socket) socket.disconnect()

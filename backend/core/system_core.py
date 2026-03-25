@@ -128,6 +128,8 @@ class SystemCore:
                 'dwellTime': 2000,
                 'soundEnabled': True,
                 'projectionEnabled': True,
+                'voiceWakeup': True,
+                'voiceSpeaking': True,
             },
             
             # 时间信息
@@ -152,6 +154,19 @@ class SystemCore:
         
         # 最近操作记录
         self._recent_actions: List[Dict] = []
+        
+        # 系统监控
+        self._monitoring = {
+            'start_time': datetime.now().isoformat(),
+            'broadcast_count': 0,
+            'state_update_count': 0,
+            'error_count': 0,
+            'last_error': None,
+            'performance': {
+                'average_broadcast_time': 0,
+                'total_broadcast_time': 0,
+            }
+        }
         
         # 内部计时
         self._last_activity_time = time.time()
@@ -184,6 +199,11 @@ class SystemCore:
                     self._state['aiMode'] = saved.get('aiMode', 'basic')
                     self._state['settings'].update(saved.get('settings', {}))
                     self._state['game']['dwellTime'] = self._state['settings'].get('dwellTime', 2000)
+                    # 确保语音设置存在
+                    if 'voiceWakeup' not in self._state['settings']:
+                        self._state['settings']['voiceWakeup'] = True
+                    if 'voiceSpeaking' not in self._state['settings']:
+                        self._state['settings']['voiceSpeaking'] = True
                     print(f'[SystemCore] 配置已加载: aiMode={self._state["aiMode"]}')
             else:
                 # ⭐ 配置文件不存在，创建默认配置
@@ -201,10 +221,20 @@ class SystemCore:
                     'aiMode': self._state['aiMode'],
                     'settings': self._state['settings']
                 }
+            # 确保目录存在
+            os.makedirs(os.path.dirname(self.config_file), exist_ok=True)
             with open(self.config_file, 'w', encoding='utf-8') as f:
                 json.dump(config, f, ensure_ascii=False, indent=2)
         except Exception as e:
             print(f'[SystemCore] 保存配置失败: {e}')
+            # 尝试使用备用路径
+            try:
+                backup_path = os.path.join(os.path.dirname(__file__), 'system_config_backup.json')
+                with open(backup_path, 'w', encoding='utf-8') as f:
+                    json.dump(config, f, ensure_ascii=False, indent=2)
+                print(f'[SystemCore] 已保存到备用路径: {backup_path}')
+            except Exception as backup_error:
+                print(f'[SystemCore] 备用保存也失败: {backup_error}')
     
     def _load_history(self):
         """加载训练历史"""
@@ -221,20 +251,40 @@ class SystemCore:
         try:
             with self._lock:
                 history = self._training_history.copy()
+            # 确保目录存在
+            os.makedirs(os.path.dirname(self.history_file), exist_ok=True)
             with open(self.history_file, 'w', encoding='utf-8') as f:
                 json.dump(history, f, ensure_ascii=False, indent=2)
         except Exception as e:
             print(f'[SystemCore] 保存历史失败: {e}')
+            # 尝试使用备用路径
+            try:
+                backup_path = os.path.join(os.path.dirname(__file__), 'training_history_backup.json')
+                with open(backup_path, 'w', encoding='utf-8') as f:
+                    json.dump(history, f, ensure_ascii=False, indent=2)
+                print(f'[SystemCore] 已保存到备用路径: {backup_path}')
+            except Exception as backup_error:
+                print(f'[SystemCore] 备用保存也失败: {backup_error}')
     
     # ==================== 状态广播（线程安全）====================
     
-    def _broadcast(self, force=False):
-        """广播状态到所有前端（线程安全，带频率限制）"""
-        now = time.time()
+    def _broadcast(self, force=False, important_fields=None):
+        """广播状态到所有前端（线程安全，带频率限制）
+        
+        Args:
+            force: 是否强制广播，忽略频率限制
+            important_fields: 重要字段列表，当这些字段变化时优先广播
+        """
+        start_time = time.time()
+        now = start_time
         
         # 检查是否需要广播
         if not force and (now - self._last_full_broadcast_time < self._broadcast_config['full']):
-            return
+            # 如果有重要字段变化，仍然广播
+            if important_fields:
+                pass  # 允许重要字段变化时广播
+            else:
+                return
         
         with self._lock:
             self._state['timestamp'] = int(time.time() * 1000)
@@ -247,6 +297,10 @@ class SystemCore:
             
             # 更新最后广播时间
             self._last_full_broadcast_time = now
+            
+            # 更新监控数据
+            self._monitoring['broadcast_count'] += 1
+            self._monitoring['state_update_count'] += 1
         
         # ⭐ 复制监听器列表避免并发修改
         with self._listeners_lock:
@@ -258,6 +312,9 @@ class SystemCore:
                 listener(state_copy)
             except Exception as e:
                 print(f'[SystemCore] 监听器错误: {e}')
+                with self._lock:
+                    self._monitoring['error_count'] += 1
+                    self._monitoring['last_error'] = f'监听器错误: {e}'
         
         # Socket广播
         if self.socketio:
@@ -265,6 +322,18 @@ class SystemCore:
                 self.socketio.emit('system_state', state_copy)
             except Exception as e:
                 print(f'[SystemCore] Socket广播错误: {e}')
+                with self._lock:
+                    self._monitoring['error_count'] += 1
+                    self._monitoring['last_error'] = f'Socket广播错误: {e}'
+        
+        # 记录性能数据
+        broadcast_time = time.time() - start_time
+        with self._lock:
+            self._monitoring['performance']['total_broadcast_time'] += broadcast_time
+            self._monitoring['performance']['average_broadcast_time'] = (
+                self._monitoring['performance']['total_broadcast_time'] / 
+                self._monitoring['broadcast_count']
+            )
     
     def subscribe(self, callback: Callable):
         """订阅状态变化（线程安全）"""
@@ -365,8 +434,13 @@ class SystemCore:
     def set_game_difficulty(self, difficulty: int):
         """设置游戏难度 1-8"""
         with self._lock:
-            self._state['game']['difficulty'] = max(1, min(8, difficulty))
-        self._broadcast()
+            old_difficulty = self._state['game']['difficulty']
+            new_difficulty = max(1, min(8, difficulty))
+            if old_difficulty != new_difficulty:
+                self._state['game']['difficulty'] = new_difficulty
+                # 难度变化时立即广播，不受频率限制
+                self._broadcast(force=True, important_fields=['game.difficulty'])
+                print(f'[SystemCore] 游戏难度: {old_difficulty} -> {new_difficulty}')
 
     def set_game_module(self, module: str):
         """设置游戏模块"""
@@ -387,6 +461,17 @@ class SystemCore:
         self._save_config()
         self._broadcast()
         print(f'[SystemCore] 确认时间: {ms}ms')
+    
+    def set_voice_setting(self, voice_type: str, enabled: bool):
+        """设置语音功能"""
+        with self._lock:
+            if voice_type == 'wakeup':
+                self._state['settings']['voiceWakeup'] = enabled
+            elif voice_type == 'speaking':
+                self._state['settings']['voiceSpeaking'] = enabled
+        self._save_config()
+        self._broadcast()
+        print(f'[SystemCore] 语音设置: {voice_type} = {enabled}')
     
     def get_dwell_time(self) -> int:
         with self._lock:
@@ -419,7 +504,8 @@ class SystemCore:
             try:
                 self.socketio.emit('game_runtime_update', {
                     'gameRuntime': game_runtime_copy,
-                    'gameStatus': game_status_copy
+                    'gameStatus': game_status_copy,
+                    'gameDifficulty': game_status_copy.get('difficulty', 3)  # 确保包含游戏难度
                 })
             except Exception as e:
                 print(f'[SystemCore] 游戏运行时广播错误: {e}')
@@ -447,10 +533,124 @@ class SystemCore:
                 self._training_history = self._training_history[-100:]
         self._save_history()
     
+    def save_game_session(self, session_data: Dict):
+        """保存完整的游戏会话数据到data文件夹"""
+        try:
+            # 确保data文件夹存在
+            data_dir = os.path.join(self.data_dir, 'data')
+            if not os.path.exists(data_dir):
+                os.makedirs(data_dir)
+                print(f'[SystemCore] 创建数据目录: {data_dir}')
+            
+            # 生成会话ID和文件名
+            session_id = session_data.get('session_id', f"{session_data.get('game_type', 'game')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+            session_file = os.path.join(data_dir, f"session_{session_id.split('_')[-2]}_{session_id.split('_')[-1]}.json")
+            
+            # 保存会话数据
+            with open(session_file, 'w', encoding='utf-8') as f:
+                json.dump(session_data, f, ensure_ascii=False, indent=2)
+            
+            # 更新训练摘要
+            self._update_training_summary(session_data)
+            
+            print(f'[SystemCore] 游戏会话数据已保存: {session_file}')
+            return True
+        except Exception as e:
+            print(f'[SystemCore] 保存游戏会话失败: {e}')
+            return False
+    
+    def _update_training_summary(self, session_data: Dict):
+        """更新训练摘要文件"""
+        try:
+            data_dir = os.path.join(self.data_dir, 'data')
+            summary_file = os.path.join(data_dir, 'training_summary.json')
+            
+            # 读取现有摘要
+            summaries = []
+            if os.path.exists(summary_file):
+                with open(summary_file, 'r', encoding='utf-8') as f:
+                    summaries = json.load(f)
+            
+            # 创建新摘要
+            new_summary = {
+                'session_id': session_data.get('session_id'),
+                'timestamp': session_data.get('start_time'),
+                'game_type': session_data.get('game_type'),
+                'module': session_data.get('module'),
+                'difficulty_range': f"{session_data.get('min_difficulty', 1)}-{session_data.get('max_difficulty', 8)}",
+                'score': session_data.get('final_score', 0),
+                'total_trials': session_data.get('total_trials', 0),
+                'correct_trials': session_data.get('correct_trials', 0),
+                'incorrect_trials': session_data.get('total_trials', 0) - session_data.get('correct_trials', 0),
+                'missed_trials': session_data.get('missed_trials', 0),
+                'accuracy': session_data.get('final_accuracy', 0),
+                'avg_reaction_time_ms': session_data.get('avg_reaction_time_ms', 0),
+                'duration': session_data.get('duration', 0)
+            }
+            
+            # 添加到摘要列表
+            summaries.append(new_summary)
+            
+            # 保存摘要文件
+            with open(summary_file, 'w', encoding='utf-8') as f:
+                json.dump(summaries, f, ensure_ascii=False, indent=2)
+            
+        except Exception as e:
+            print(f'[SystemCore] 更新训练摘要失败: {e}')
+    
     def get_training_history(self) -> List[Dict]:
         """获取训练历史"""
         with self._lock:
             return self._training_history.copy()
+    
+    def delete_training_record(self, session_id: str) -> bool:
+        """删除训练记录，同时删除summary和session文件"""
+        try:
+            data_dir = os.path.join(self.data_dir, 'data')
+            summary_file = os.path.join(data_dir, 'training_summary.json')
+            
+            # 读取摘要文件
+            summaries = []
+            if os.path.exists(summary_file):
+                with open(summary_file, 'r', encoding='utf-8') as f:
+                    summaries = json.load(f)
+            
+            # 找到要删除的记录
+            record_to_delete = None
+            for i, summary in enumerate(summaries):
+                if summary.get('session_id') == session_id:
+                    record_to_delete = summary
+                    summaries.pop(i)
+                    break
+            
+            if not record_to_delete:
+                print(f'[SystemCore] 未找到训练记录: {session_id}')
+                return False
+            
+            # 保存更新后的摘要
+            with open(summary_file, 'w', encoding='utf-8') as f:
+                json.dump(summaries, f, ensure_ascii=False, indent=2)
+            
+            # 删除对应的session文件
+            if session_id:
+                # 从session_id提取日期和时间部分
+                parts = session_id.split('_')
+                if len(parts) >= 2:
+                    date_time_part = f"{parts[-2]}_{parts[-1]}"
+                    session_file = os.path.join(data_dir, f"session_{date_time_part}.json")
+                    if os.path.exists(session_file):
+                        os.remove(session_file)
+                        print(f'[SystemCore] 已删除会话文件: {session_file}')
+            
+            # 从内存历史中删除
+            with self._lock:
+                self._training_history = [h for h in self._training_history if h.get('session_id') != session_id]
+            
+            print(f'[SystemCore] 训练记录已删除: {session_id}')
+            return True
+        except Exception as e:
+            print(f'[SystemCore] 删除训练记录失败: {e}')
+            return False
     
     # ==================== 感知数据（优化广播）====================
     
@@ -584,6 +784,27 @@ class SystemCore:
         """获取JSON格式的状态"""
         with self._lock:
             return json.dumps(self._state, ensure_ascii=False, indent=2)
+    
+    def get_monitoring_data(self) -> Dict[str, Any]:
+        """获取系统监控数据"""
+        with self._lock:
+            return self._monitoring.copy()
+    
+    def reset_monitoring(self):
+        """重置系统监控数据"""
+        with self._lock:
+            self._monitoring = {
+                'start_time': datetime.now().isoformat(),
+                'broadcast_count': 0,
+                'state_update_count': 0,
+                'error_count': 0,
+                'last_error': None,
+                'performance': {
+                    'average_broadcast_time': 0,
+                    'total_broadcast_time': 0,
+                }
+            }
+            print('[SystemCore] 监控数据已重置')
 
 
 # ==================== 全局实例（线程安全）====================

@@ -119,14 +119,19 @@ class GameManager:
         if self._current_game:
             # ⭐ 记录更新前的状态
             old_status = self._current_game.state.status
+            old_difficulty = self._current_game.state.difficulty
             
             # 更新游戏
             self._current_game.update(perception_data)
             
-            # ⭐ 检查状态是否发生变化，如果是则立即同步到SystemCore
+            # ⭐ 检查状态或难度是否发生变化，如果是则立即同步到SystemCore
             new_status = self._current_game.state.status
-            if old_status != new_status:
-                print(f'[GameManager] 游戏状态变化: {old_status} -> {new_status}')
+            new_difficulty = self._current_game.state.difficulty
+            if old_status != new_status or old_difficulty != new_difficulty:
+                if old_status != new_status:
+                    print(f'[GameManager] 游戏状态变化: {old_status} -> {new_status}')
+                if old_difficulty != new_difficulty:
+                    print(f'[GameManager] 游戏难度变化: {old_difficulty} -> {new_difficulty}')
                 self._sync_to_system_core()
     
     # 状态查询
@@ -190,6 +195,16 @@ class GameManager:
             # 计算准确率百分比
             raw_accuracy = stats.get('accuracy', 0)
             accuracy_percent = round(raw_accuracy * 100) if raw_accuracy <= 1 else round(raw_accuracy)
+            
+            # 同步游戏难度 - 优先使用difficulty_level（ProcessingSpeedGame），其次使用difficulty（其他游戏）
+            game_difficulty = game_state.get('difficulty_level', game_state.get('difficulty', 3))
+            # 将难度字符串转换为数字（如果需要）
+            if isinstance(game_difficulty, str):
+                difficulty_map = {'easy': 1, 'normal': 3, 'hard': 5}
+                game_difficulty = difficulty_map.get(game_difficulty, 3)
+            
+            # 更新SystemCore中的游戏难度
+            self._system_core.set_game_difficulty(game_difficulty)
             
             self._system_core.update_game_runtime({
                 'score': self._current_game.state.score,

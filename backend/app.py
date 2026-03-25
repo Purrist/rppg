@@ -90,7 +90,6 @@ socketio = SocketIO(
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # ⭐ 依赖项检查
-print("[系统] 检查依赖项...")
 try:
     from core.check_dependencies import check_and_install_dependencies
     check_and_install_dependencies()
@@ -138,45 +137,35 @@ import os
 import subprocess
 models_dir = os.path.join(os.path.dirname(__file__), "core", "models")
 if not os.path.exists(models_dir) or not os.listdir(models_dir):
-    print("[语音系统] 模型不存在，正在自动下载...")
     try:
         # 运行下载脚本
         download_script = os.path.join(os.path.dirname(__file__), "core", "download_models.py")
-        subprocess.run([sys.executable, download_script], check=True)
-        print("[语音系统] 模型下载完成")
+        subprocess.run([sys.executable, download_script], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     except Exception as e:
-        print(f"[语音系统] 模型下载失败: {e}")
-        print("[语音系统] 跳过语音功能初始化")
         voice_manager = None
     else:
         try:
             from core.voice_manager_sherpa import init_voice_manager, get_voice_manager
             voice_manager = init_voice_manager(socketio, system_core)
-            print("[语音系统] sherpa-onnx 语音管理器已初始化")
             
             # ⭐ 设置语音识别回调 - 识别到用户语音后自动发送给AI
             voice_manager.set_speech_recognized_callback(lambda text: handle_voice_command(text))
             
             # ⭐ 启动语音监听（后端持续监听麦克风）
             voice_manager.start_listening()
-            print("[语音系统] 已开始监听麦克风，等待唤醒词'阿康阿康'")
         except Exception as e:
-            print(f"[语音系统] 初始化失败: {e}")
             voice_manager = None
 else:
     try:
         from core.voice_manager_sherpa import init_voice_manager, get_voice_manager
         voice_manager = init_voice_manager(socketio, system_core)
-        print("[语音系统] sherpa-onnx 语音管理器已初始化")
         
         # ⭐ 设置语音识别回调 - 识别到用户语音后自动发送给AI
         voice_manager.set_speech_recognized_callback(lambda text: handle_voice_command(text))
         
         # ⭐ 启动语音监听（后端持续监听麦克风）
         voice_manager.start_listening()
-        print("[语音系统] 已开始监听麦克风，等待唤醒词'阿康阿康'")
     except Exception as e:
-        print(f"[语音系统] 初始化失败: {e}")
         voice_manager = None
 
 # 7. 训练分析器
@@ -536,8 +525,8 @@ def api_training_delete():
     if not session_id:
         return jsonify({"success": False, "message": "缺少session_id参数"}), 400
     
-    analytics = get_training_analytics()
-    success = analytics.delete_record(session_id)
+    # 使用SystemCore的删除方法，同时删除summary和session文件
+    success = system_core.delete_training_record(session_id)
     
     if success:
         return jsonify({"success": True, "message": "删除成功"})
@@ -718,6 +707,32 @@ def handle_set_dwell_time(data):
             print(f"[Socket] set_dwell_time: 确认时间超出范围 {dwell_time}")
     else:
         print(f"[Socket] set_dwell_time: 无效确认时间 {dwell_time}")
+
+@socketio.on('set_voice_setting')
+def handle_set_voice_setting(data):
+    """设置语音功能"""
+    if not isinstance(data, dict):
+        return
+    
+    voice_type = data.get('type')
+    enabled = data.get('enabled')
+    
+    if voice_type in ['wakeup', 'speaking'] and isinstance(enabled, bool):
+        # 更新系统设置
+        with system_core._lock:
+            if voice_type == 'wakeup':
+                system_core._state['settings']['voiceWakeup'] = enabled
+            elif voice_type == 'speaking':
+                system_core._state['settings']['voiceSpeaking'] = enabled
+        
+        # 保存配置
+        system_core._save_config()
+        # 广播状态更新
+        system_core._broadcast()
+        
+        print(f"[Socket] 语音设置更新: {voice_type} = {enabled}")
+    else:
+        print(f"[Socket] set_voice_setting: 无效参数 type={voice_type}, enabled={enabled}")
 
 @socketio.on('get_system_state')
 def handle_get_system_state():

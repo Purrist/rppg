@@ -36,9 +36,38 @@
           <span class="toggle-label">{{ aiCompanionEnabled ? '已开启' : '已关闭' }}</span>
         </div>
       </div>
+      <div class="setting-item">
+        <span class="label">
+          <div class="label-main">唤醒识别</div>
+          <div class="label-sub">
+            启用后，系统会监听唤醒词"阿康阿康"，识别后开始语音交互
+          </div>
+        </span>
+        <div class="toggle-switch" @click="voiceWakeupEnabled = !voiceWakeupEnabled; toggleVoiceWakeup()">
+          <div class="toggle-track" :class="{ active: voiceWakeupEnabled }">
+            <div class="toggle-thumb" :class="{ active: voiceWakeupEnabled }"></div>
+          </div>
+          <span class="toggle-label">{{ voiceWakeupEnabled ? '已开启' : '已关闭' }}</span>
+        </div>
+      </div>
+      <div class="setting-item">
+        <span class="label">
+          <div class="label-main">语音朗读</div>
+          <div class="label-sub">
+            启用后，AI会通过语音朗读回复内容
+          </div>
+        </span>
+        <div class="toggle-switch" @click="voiceSpeakingEnabled = !voiceSpeakingEnabled; toggleVoiceSpeaking()">
+          <div class="toggle-track" :class="{ active: voiceSpeakingEnabled }">
+            <div class="toggle-thumb" :class="{ active: voiceSpeakingEnabled }"></div>
+          </div>
+          <span class="toggle-label">{{ voiceSpeakingEnabled ? '已开启' : '已关闭' }}</span>
+        </div>
+      </div>
       <div class="setting-hint">
         <p>💡 <strong>基础模式</strong>：系统按预设程序运行，AI仅提供基础问答和页面切换功能</p>
         <p>💡 <strong>智伴模式</strong>：AI主动分析数据，动态调整游戏难度，提供个性化健康建议和情感陪伴</p>
+        <p>💡 <strong>语音功能</strong>：唤醒识别和语音朗读可以独立开启或关闭，不影响智伴模式的其他功能</p>
       </div>
     </div>
 
@@ -101,6 +130,10 @@ const dwellTime = ref(2000)
 // AI模式开关
 const aiCompanionEnabled = ref(false)
 
+// 语音功能开关
+const voiceWakeupEnabled = ref(true)
+const voiceSpeakingEnabled = ref(true)
+
 const getBackendHost = () => {
   if (typeof window === 'undefined') return 'localhost'
   return window.location.hostname || 'localhost'
@@ -134,6 +167,13 @@ onMounted(() => {
     // 更新AI模式
     if (state.aiMode !== undefined) {
       aiCompanionEnabled.value = state.aiMode === 'companion'
+    }
+    // 更新语音设置
+    if (state.settings?.voiceWakeup !== undefined) {
+      voiceWakeupEnabled.value = state.settings.voiceWakeup
+    }
+    if (state.settings?.voiceSpeaking !== undefined) {
+      voiceSpeakingEnabled.value = state.settings.voiceSpeaking
     }
   })
 })
@@ -171,6 +211,18 @@ const toggleAIMode = () => {
   const newMode = aiCompanionEnabled.value ? 'companion' : 'basic'
   setAIMode(newMode)
   console.log('[settings] AI模式发送到后端:', newMode)
+}
+
+// 切换唤醒识别 - 发送到后端
+const toggleVoiceWakeup = () => {
+  setVoiceSetting('wakeup', voiceWakeupEnabled.value)
+  console.log('[settings] 唤醒识别设置发送到后端:', voiceWakeupEnabled.value)
+}
+
+// 切换语音朗读 - 发送到后端
+const toggleVoiceSpeaking = () => {
+  setVoiceSetting('speaking', voiceSpeakingEnabled.value)
+  console.log('[settings] 语音朗读设置发送到后端:', voiceSpeakingEnabled.value)
 }
 
 const goToDeveloper = () => {

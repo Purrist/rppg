@@ -1,17 +1,32 @@
 [
   {
-    "session_id": "processing_speed_20260324_182530",
-    "timestamp": "2026-03-24T18:25:30.886276",
+    "session_id": "processing_speed_20260324_201645",
+    "timestamp": "2026-03-24T20:16:45.940160",
     "game_type": "processing_speed",
     "module": "go_no_go",
-    "difficulty_range": "1-8",
+    "difficulty_range": "3-8",
+    "score": 127,
+    "total_trials": 9,
+    "correct_trials": 7,
+    "incorrect_trials": 2,
+    "missed_trials": 3,
+    "accuracy": 0.7777777777777778,
+    "avg_reaction_time_ms": 4757.207367155287,
+    "duration": 64
+  },
+  {
+    "session_id": "processing_speed_20260324_202359",
+    "timestamp": "2026-03-24T20:23:59.798353",
+    "game_type": "processing_speed",
+    "module": "go_no_go",
+    "difficulty_range": "1-6",
     "score": 0,
-    "total_trials": 25,
-    "correct_trials": 16,
-    "incorrect_trials": 9,
-    "missed_trials": 7,
-    "accuracy": 0.64,
-    "avg_reaction_time_ms": 4856.491241455078,
-    "duration": 186
+    "total_trials": 21,
+    "correct_trials": 8,
+    "incorrect_trials": 13,
+    "missed_trials": 14,
+    "accuracy": 0.38095238095238093,
+    "avg_reaction_time_ms": 6288.737694422404,
+    "duration": 190
   }
 ]
