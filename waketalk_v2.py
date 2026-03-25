@@ -22,6 +22,9 @@ KEYWORDS_FILE = KWS_MODEL_DIR / "keywords.txt"
 # 语音识别模型路径 (Sherpa-ONNX)
 ASR_MODEL_DIR = Path(r"C:\Users\purriste\Desktop\PYProject\rppg\backend\core\models\sherpa-onnx-paraformer-zh-2024-03-09")
 
+# 语音合成配置
+USE_PYTTSX3 = True  # 使用pyttsx3进行语音合成
+
 # 音频参数
 SAMPLE_RATE = 16000
 CHANNELS = 1  # ✅ 改为单声道
@@ -29,15 +32,18 @@ MIC_DEVICE_ID = None  # 自动检测 Realtek 麦克风
 
 # 检测参数
 NUM_THREADS = 4
-KEYWORDS_SCORE = 1.0       # 检测阈值，越小越宽松
-KEYWORDS_THRESHOLD = 0.25  # 触发阈值
+KEYWORDS_SCORE = 1.5      # 检测阈值，提高灵敏度，越高越敏感
+KEYWORDS_THRESHOLD = 0.15   # 降低触发阈值，提高唤醒成功率
 
 # 语音端点检测（VAD）参数
-VAD_ENERGY_THRESHOLD = 0.015  # 能量阈值，超过此值视为有语音
-VAD_SILENCE_TIMEOUT = 1.5     # 静音超时时间（秒），超过此时间无语音则结束录制
-VAD_MIN_SPEECH_DURATION = 0.5  # 最短语音时长（秒），避免误触发
-VAD_MAX_RECORD_DURATION = 10   # 最长录制时长（秒），防止无限录制
+VAD_ENERGY_THRESHOLD = 0.02  # 降低能量阈值，提高语音检测灵敏度
+VAD_SILENCE_TIMEOUT = 1.5     # 减少静音超时时间，更快结束录音
+VAD_MIN_SPEECH_DURATION = 0.5  # 降低最短语音时长，捕获更短的语音
+VAD_MAX_RECORD_DURATION = 15   # 缩短最长录制时长，避免长时间卡住
 
+
+# 防抖和打断相关配置
+DEBOUNCE_TIME = 1  # 防抖窗口时长（秒）
 
 class WakeTalkDetector:
     def __init__(self):
@@ -86,6 +92,7 @@ class WakeTalkDetector:
         self.audio_queue = queue.Queue()
         self.is_running = False
         self.is_recording = False
+        self.is_playing = False  # 添加播放状态标志
         self.recorded_audio = []
         
         # VAD 状态
@@ -93,6 +100,22 @@ class WakeTalkDetector:
         self.vad_silence_start_time = None
         self.vad_speech_start_time = None
         self.silence_intervals = []
+        
+        # 状态机相关
+        self.state = "IDLE"  # IDLE / LISTENING / PROCESSING
+        self.last_wake_time = 0  # 上次唤醒时间戳
+        
+        # 唤醒回复列表
+        self.wake_responses = [
+            "来啦",
+            "在呢",
+            "请说",
+            "我在",
+            "来了",
+        ]
+        
+        # 语音合成器将在每次播放时动态创建
+        print("[初始化] 语音合成引擎配置完成")
         
         print(f"[初始化] 系统就绪，使用麦克风设备: {self.mic_device_id}")
 
@@ -130,10 +153,12 @@ class WakeTalkDetector:
         if status:
             print(f"[警告] 音频状态: {status}")
         
-        # 如果正在录制语音，保存音频数据并进行 VAD 检测
-        if self.is_recording:
-            self.recorded_audio.append(indata.copy())
-            self.process_vad(indata)
+        # 如果正在播放语音，不保存录音数据
+        if not self.is_playing:
+            # 如果正在录制语音，保存音频数据并进行 VAD 检测
+            if self.is_recording:
+                self.recorded_audio.append(indata.copy())
+                self.process_vad(indata)
         
         self.audio_queue.put(indata.copy())
 
@@ -207,23 +232,58 @@ class WakeTalkDetector:
         print("\n" + "🎉" * 20)
         print(f"✅ 检测到唤醒词: {keyword}")
         print("🎉" * 20 + "\n")
+        
+        current_time = time.time()
+        time_since_last_wake = current_time - self.last_wake_time
+        
+        if self.state == "IDLE":
+            # 空闲状态，直接触发唤醒
+            self.trigger_action(keyword)
+            self.last_wake_time = current_time
+            return
+        
+        # 在防抖窗口内，忽略快速连续唤醒
+        if time_since_last_wake < DEBOUNCE_TIME:
+            print(f"[防抖] 忽略快速连续唤醒（距上次 {time_since_last_wake:.1f} 秒）")
+            return
+        
+        # 超过防抖窗口，允许打断
+        print(f"[打断] 检测到新的唤醒请求（距上次 {time_since_last_wake:.1f} 秒）")
+        
+        if self.state == "LISTENING":
+            self.reset_listening()
+        elif self.state == "PROCESSING":
+            self.stop_processing_and_restart()
+        
         self.trigger_action(keyword)
+        self.last_wake_time = current_time
 
     def trigger_action(self, keyword):
         """触发后续动作"""
-        # ✅ 如果正在录音，忽略新的唤醒词
-        if self.is_recording:
-            print("[忽略] 正在录音中，忽略新的唤醒词")
-            return
-        
         normalized_keyword = keyword.strip()
-        if "ā k āng" in normalized_keyword or "kāng" in normalized_keyword or "阿康" in normalized_keyword:
-            self.start_listening()
+        # 更宽松的匹配条件，确保能捕获"āng"等变体
+        if "āng" in normalized_keyword or "kāng" in normalized_keyword or "阿康" in normalized_keyword:
+            print("[触发] 匹配到唤醒词，开始录音...")
+            # ✅ 在独立线程中启动录音，避免阻塞关键词检测
+            import threading
+            threading.Thread(target=self.start_listening).start()
         else:
             print(f"→ 收到唤醒词: {keyword}")
 
     def start_listening(self):
         """开始监听用户说话"""
+        self.state = "LISTENING"
+        
+        # 播放随机唤醒回复
+        response = self.get_random_wake_response()
+        print(f"→ {response}")
+        
+        # 合成并播放回复
+        try:
+            self.play_audio(response)
+        except Exception as e:
+            print(f"[错误] 合成唤醒回复失败: {e}")
+        
         print("→ 您说，我来复述")
         print(f"🔊 正在听...（说完后停顿 {VAD_SILENCE_TIMEOUT} 秒自动结束）")
         
@@ -237,6 +297,9 @@ class WakeTalkDetector:
         
         start_time = time.time()
         
+        # 确保录音线程不会阻塞主线程
+        print(f"[线程] 录音线程启动，状态: LISTENING")
+        
         while self.is_recording and self.is_running:
             elapsed = time.time() - start_time
             if elapsed >= VAD_MAX_RECORD_DURATION:
@@ -246,16 +309,80 @@ class WakeTalkDetector:
             time.sleep(0.05)
         
         self.is_recording = False
+        self.state = "IDLE"
+        print(f"[线程] 录音线程结束，状态: IDLE")
         
         if len(self.recorded_audio) > 0:
             total_samples = sum(len(chunk) for chunk in self.recorded_audio)
             duration = total_samples / SAMPLE_RATE
+            print(f"[录音] 录制时长: {duration:.1f} 秒，采样数: {total_samples}")
             if duration >= VAD_MIN_SPEECH_DURATION:
                 self.process_recorded_audio()
             else:
                 print(f"→ 语音太短（{duration:.1f} 秒），请再说一次")
         else:
             print("→ 未检测到语音输入")
+
+    def reset_listening(self):
+        """打断录音，重新开始"""
+        print("→ 检测到打断，重新开始 listening...")
+        self.recorded_audio = []
+        self.vad_is_speaking = False
+        self.vad_silence_start_time = None
+        self.vad_speech_start_time = None
+        self.silence_intervals = []
+
+    def stop_processing_and_restart(self):
+        """打断处理，重新开始"""
+        print("→ 检测到打断，停止处理...")
+        # 这里可以添加停止TTS等处理逻辑
+
+    def play_audio(self, text):
+        """播放文本语音（非阻塞）"""
+        try:
+            # 创建一个新线程来播放语音，避免阻塞
+            import threading
+            import pyttsx3
+            
+            def play_thread():
+                try:
+                    # 设置播放状态，避免系统自己的回复被当成用户输入
+                    self.is_playing = True
+                    
+                    # 每次创建新的tts实例，避免run loop冲突
+                    tts = pyttsx3.init()
+                    # 设置语音属性
+                    voices = tts.getProperty('voices')
+                    # 选择中文语音
+                    for voice in voices:
+                        if 'zh' in voice.id or 'Chinese' in voice.name:
+                            tts.setProperty('voice', voice.id)
+                            break
+                    tts.setProperty('rate', 150)  # 语速
+                    tts.setProperty('volume', 1.0)  # 音量
+                    
+                    tts.say(text)
+                    tts.runAndWait()
+                    tts.stop()
+                    
+                    # 恢复播放状态
+                    self.is_playing = False
+                except Exception as e:
+                    print(f"[错误] 播放音频失败: {e}")
+                    # 确保恢复播放状态
+                    self.is_playing = False
+            
+            t = threading.Thread(target=play_thread)
+            t.daemon = True
+            t.start()
+        except Exception as e:
+            print(f"[错误] 播放音频失败: {e}")
+
+    def get_random_wake_response(self):
+        """随机获取一个唤醒回复"""
+        import random
+        return random.choice(self.wake_responses)
+
 
     def add_punctuation(self, text):
         """使用规则-based 添加标点符号（优化版）"""
@@ -336,6 +463,7 @@ class WakeTalkDetector:
 
     def process_recorded_audio(self):
         """处理录制的音频并进行语音识别"""
+        self.state = "PROCESSING"
         try:
             print("📝 正在识别...")
             
@@ -352,6 +480,13 @@ class WakeTalkDetector:
             if text:
                 text_with_punctuation = self.add_punctuation(text)
                 print(f"→ 您说: {text_with_punctuation}")
+                
+                # 合成并播放用户的语音内容
+                try:
+                    print("🔊 正在复述...")
+                    self.play_audio(text_with_punctuation)
+                except Exception as e:
+                    print(f"[错误] 合成语音失败: {e}")
             else:
                 print("→ 无法识别语音")
                 
@@ -359,6 +494,8 @@ class WakeTalkDetector:
             print(f"→ 识别出错: {e}")
             import traceback
             traceback.print_exc()
+        finally:
+            self.state = "IDLE"
 
     def run(self):
         """主运行循环"""
