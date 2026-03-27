@@ -139,7 +139,16 @@ class SystemCore:
                 'weekday': ['一','二','三','四','五','六','日'][datetime.now().weekday()],
             },
             
-            'timestamp': 0
+            'timestamp': 0,
+            
+            # ⭐ 语音状态
+            'voice': {
+                'state': 'STANDBY',  # STANDBY / RESPONDING / LISTENING / PROCESSING
+                'isRecording': False,
+                'isPlaying': False,
+                'lastWakeTime': 0,
+                'message': '等待唤醒...'
+            }
         }
         
         # 用户偏好
@@ -472,6 +481,47 @@ class SystemCore:
         self._save_config()
         self._broadcast()
         print(f'[SystemCore] 语音设置: {voice_type} = {enabled}')
+    
+    def update_voice_state(self, voice_data: Dict[str, Any]):
+        """更新语音状态（由VoiceManager调用）"""
+        with self._lock:
+            old_state = self._state['voice']['state']
+            
+            # 更新语音状态
+            if 'state' in voice_data:
+                self._state['voice']['state'] = voice_data['state']
+            if 'isRecording' in voice_data:
+                self._state['voice']['isRecording'] = voice_data['isRecording']
+            if 'isPlaying' in voice_data:
+                self._state['voice']['isPlaying'] = voice_data['isPlaying']
+            if 'timestamp' in voice_data:
+                self._state['voice']['lastWakeTime'] = voice_data['timestamp']
+            
+            # 根据状态更新消息
+            state_messages = {
+                'STANDBY': '等待唤醒...',
+                'RESPONDING': '回应中...',
+                'LISTENING': '聆听中...',
+                'PROCESSING': '处理中...'
+            }
+            self._state['voice']['message'] = state_messages.get(
+                self._state['voice']['state'], '未知状态'
+            )
+            
+            new_state = self._state['voice']['state']
+        
+        # 状态变化时广播
+        if old_state != new_state:
+            self._broadcast(force=True, important_fields=['voice'])
+            print(f'[SystemCore] 语音状态: {old_state} -> {new_state}')
+        else:
+            # 非状态变化但数据更新时也广播（但不必强制）
+            self._broadcast(important_fields=['voice'])
+    
+    def get_voice_state(self) -> Dict[str, Any]:
+        """获取当前语音状态"""
+        with self._lock:
+            return dict(self._state['voice'])
     
     def get_dwell_time(self) -> int:
         with self._lock:

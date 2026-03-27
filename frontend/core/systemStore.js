@@ -60,9 +60,14 @@ const state = ref({
   chatMessages: [],
   // ⭐ 语音状态
   voice: {
+    state: 'STANDBY',  // STANDBY / RESPONDING / LISTENING / PROCESSING
     isListening: false,
     isSpeaking: false,
+    isRecording: false,
+    isPlaying: false,
     isAwakened: false,
+    message: '等待唤醒...',
+    lastWakeTime: 0,
   },
 })
 
@@ -85,6 +90,8 @@ export function initStore(socketInstance) {
     if (data.settings !== undefined) Object.assign(state.value.settings, data.settings)
     if (data.timeInfo !== undefined) Object.assign(state.value.timeInfo, data.timeInfo)
     if (data.timestamp !== undefined) state.value.timestamp = data.timestamp
+    // ⭐ 语音状态
+    if (data.voice !== undefined) Object.assign(state.value.voice, data.voice)
     
     listeners.forEach(cb => cb(state.value))
   })
@@ -104,61 +111,74 @@ export function initStore(socketInstance) {
     listeners.forEach(cb => cb(state.value))
   })
   
-  // ⭐ 语音状态更新
-  socket.on('voice_status', (data) => {
-    if (data.status === 'listening') {
-      state.value.voice.isListening = true
-    } else {
-      state.value.voice.isListening = false
-    }
+  // ⭐ 语音状态变更
+  socket.on('voice_state_change', (data) => {
+    if (data.state) state.value.voice.state = data.state
+    if (data.isRecording !== undefined) state.value.voice.isRecording = data.isRecording
+    if (data.isPlaying !== undefined) state.value.voice.isPlaying = data.isPlaying
+    listeners.forEach(cb => cb(state.value))
   })
   
-  // ⭐ 语音播报状态更新
-  socket.on('voice_speaking', (data) => {
-    state.value.voice.isSpeaking = data.status === 'start'
-  })
-  
-  // ⭐ 唤醒超时更新
-  socket.on('voice_sleep', (data) => {
-    state.value.voice.isAwakened = false
-  })
-  
-  // ⭐ 唤醒成功
+  // ⭐ 唤醒成功 - 弹出阿康对话框
   socket.on('voice_wake_up', (data) => {
     state.value.voice.isAwakened = true
-    // 添加系统消息
-    state.value.chatMessages.push({ role: 'system', content: data.response })
-    if (data.user_text) {
-      state.value.chatMessages.push({ role: 'user', content: data.user_text })
-    }
+    state.value.voice.state = data.state || 'RESPONDING'
+    // 添加系统消息（阿康的回应）
+    state.value.chatMessages.push({ 
+      role: 'assistant', 
+      content: data.response,
+      type: 'voice_wake',
+      timestamp: Date.now()
+    })
     listeners.forEach(cb => cb(state.value))
   })
   
-  // ⭐ 用户说话
+  // ⭐ 用户说话 - 显示在对话中
   socket.on('voice_user_speak', (data) => {
-    state.value.chatMessages.push({ role: 'user', content: data.text })
+    state.value.voice.state = data.state || 'PROCESSING'
+    // 添加用户消息
+    state.value.chatMessages.push({ 
+      role: 'user', 
+      content: data.text,
+      type: 'voice_input',
+      timestamp: Date.now()
+    })
     listeners.forEach(cb => cb(state.value))
   })
   
-  // ⭐ AI回复（语音命令）
-  socket.on('voice_ai_response', (data) => {
-    // 避免重复添加用户消息
-    const lastMsg = state.value.chatMessages[state.value.chatMessages.length - 1]
-    if (!lastMsg || lastMsg.role !== 'user' || lastMsg.content !== data.user_text) {
-      state.value.chatMessages.push({ role: 'user', content: data.user_text })
-    }
-    state.value.chatMessages.push({ role: 'assistant', content: data.ai_response })
+  // ⭐ LLM回复
+  socket.on('voice_llm_response', (data) => {
+    // 移除[ACTION:]标记
+    let text = data.text.replace(/\[ACTION:\]/g, '').trim()
+    // 添加AI回复
+    state.value.chatMessages.push({ 
+      role: 'assistant', 
+      content: text,
+      type: 'llm_response',
+      timestamp: Date.now()
+    })
     listeners.forEach(cb => cb(state.value))
   })
   
   // ⭐ 语音播报状态
   socket.on('voice_speaking', (data) => {
     state.value.voice.isSpeaking = data.status === 'start'
+    state.value.voice.isPlaying = data.status === 'start'
+    listeners.forEach(cb => cb(state.value))
   })
   
-  // ⭐ 唤醒超时
-  socket.on('voice_sleep', (data) => {
-    state.value.voice.isAwakened = false
+  // ⭐ 语音状态（兼容旧版）
+  socket.on('voice_status', (data) => {
+    if (data.state) state.value.voice.state = data.state
+    if (data.status === 'listening') {
+      state.value.voice.isListening = true
+    } else if (data.status === 'standby') {
+      state.value.voice.isListening = false
+      state.value.voice.isAwakened = false
+      state.value.voice.state = 'STANDBY'
+    }
+    if (data.message) state.value.voice.message = data.message
+    listeners.forEach(cb => cb(state.value))
   })
 }
 

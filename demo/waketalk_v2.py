@@ -36,10 +36,10 @@ KEYWORDS_SCORE = 1.5      # 检测阈值，提高灵敏度，越高越敏感
 KEYWORDS_THRESHOLD = 0.15   # 降低触发阈值，提高唤醒成功率
 
 # 语音端点检测（VAD）参数
-VAD_ENERGY_THRESHOLD = 0.02  # 降低能量阈值，提高语音检测灵敏度
+VAD_ENERGY_THRESHOLD = 0.01  # 降低能量阈值，提高语音检测灵敏度
 VAD_SILENCE_TIMEOUT = 1.5     # 减少静音超时时间，更快结束录音
 VAD_MIN_SPEECH_DURATION = 0.5  # 降低最短语音时长，捕获更短的语音
-VAD_MAX_RECORD_DURATION = 15   # 缩短最长录制时长，避免长时间卡住
+VAD_MAX_RECORD_DURATION = 10   # 缩短最长录制时长，避免长时间卡住
 
 
 # 防抖和打断相关配置
@@ -102,7 +102,7 @@ class WakeTalkDetector:
         self.silence_intervals = []
         
         # 状态机相关
-        self.state = "IDLE"  # IDLE / LISTENING / PROCESSING
+        self.state = "STANDBY"  # STANDBY（待机） / RESPONDING（回应） / LISTENING（聆听） / PROCESSING（处理）
         self.last_wake_time = 0  # 上次唤醒时间戳
         
         # 唤醒回复列表
@@ -236,8 +236,8 @@ class WakeTalkDetector:
         current_time = time.time()
         time_since_last_wake = current_time - self.last_wake_time
         
-        if self.state == "IDLE":
-            # 空闲状态，直接触发唤醒
+        if self.state == "STANDBY":
+            # 待机状态，直接触发唤醒
             self.trigger_action(keyword)
             self.last_wake_time = current_time
             return
@@ -254,6 +254,8 @@ class WakeTalkDetector:
             self.reset_listening()
         elif self.state == "PROCESSING":
             self.stop_processing_and_restart()
+        elif self.state == "RESPONDING":
+            print("→ 检测到打断，在回应期重新开始...")
         
         self.trigger_action(keyword)
         self.last_wake_time = current_time
@@ -272,7 +274,9 @@ class WakeTalkDetector:
 
     def start_listening(self):
         """开始监听用户说话"""
-        self.state = "LISTENING"
+        # 先进入回应状态
+        self.state = "RESPONDING"
+        print(f"[线程] 录音线程启动，状态: RESPONDING")
         
         # 播放随机唤醒回复
         response = self.get_random_wake_response()
@@ -281,8 +285,14 @@ class WakeTalkDetector:
         # 合成并播放回复
         try:
             self.play_audio(response)
+            # 添加短暂延迟，确保语音播放完整
+            time.sleep(0.5)
         except Exception as e:
             print(f"[错误] 合成唤醒回复失败: {e}")
+        
+        # 进入聆听状态
+        self.state = "LISTENING"
+        print(f"[线程] 状态切换: RESPONDING → LISTENING")
         
         print("→ 您说，我来复述")
         print(f"🔊 正在听...（说完后停顿 {VAD_SILENCE_TIMEOUT} 秒自动结束）")
@@ -298,7 +308,7 @@ class WakeTalkDetector:
         start_time = time.time()
         
         # 确保录音线程不会阻塞主线程
-        print(f"[线程] 录音线程启动，状态: LISTENING")
+        print(f"[线程] 开始录音，状态: LISTENING")
         
         while self.is_recording and self.is_running:
             elapsed = time.time() - start_time
@@ -309,8 +319,8 @@ class WakeTalkDetector:
             time.sleep(0.05)
         
         self.is_recording = False
-        self.state = "IDLE"
-        print(f"[线程] 录音线程结束，状态: IDLE")
+        self.state = "STANDBY"
+        print(f"[线程] 录音线程结束，状态: STANDBY")
         
         if len(self.recorded_audio) > 0:
             total_samples = sum(len(chunk) for chunk in self.recorded_audio)
@@ -326,6 +336,9 @@ class WakeTalkDetector:
     def reset_listening(self):
         """打断录音，重新开始"""
         print("→ 检测到打断，重新开始 listening...")
+        # 停止当前录音
+        self.is_recording = False
+        # 清空录音数据
         self.recorded_audio = []
         self.vad_is_speaking = False
         self.vad_silence_start_time = None
@@ -335,7 +348,9 @@ class WakeTalkDetector:
     def stop_processing_and_restart(self):
         """打断处理，重新开始"""
         print("→ 检测到打断，停止处理...")
-        # 这里可以添加停止TTS等处理逻辑
+        # 停止语音播报
+        self.is_playing = False
+        print("→ 已停止语音播报")
 
     def play_audio(self, text):
         """播放文本语音（非阻塞）"""
@@ -343,6 +358,7 @@ class WakeTalkDetector:
             # 创建一个新线程来播放语音，避免阻塞
             import threading
             import pyttsx3
+            import time
             
             def play_thread():
                 try:
@@ -361,9 +377,28 @@ class WakeTalkDetector:
                     tts.setProperty('rate', 150)  # 语速
                     tts.setProperty('volume', 1.0)  # 音量
                     
+                    # 添加短暂延迟，确保语音合成引擎完全初始化
+                    time.sleep(0.2)
+                    
+                    # 使用runAndWait()，但通过监控is_playing状态来模拟中断
                     tts.say(text)
+                    
+                    # 创建一个监控线程来检查是否需要停止
+                    def monitor_stop():
+                        while self.is_playing:
+                            time.sleep(0.1)
+                        # 如果is_playing被设置为False，尝试停止tts
+                        try:
+                            tts.stop()
+                        except:
+                            pass
+                    
+                    monitor = threading.Thread(target=monitor_stop)
+                    monitor.daemon = True
+                    monitor.start()
+                    
+                    # 执行播放
                     tts.runAndWait()
-                    tts.stop()
                     
                     # 恢复播放状态
                     self.is_playing = False
@@ -495,7 +530,7 @@ class WakeTalkDetector:
             import traceback
             traceback.print_exc()
         finally:
-            self.state = "IDLE"
+            self.state = "STANDBY"
 
     def run(self):
         """主运行循环"""
@@ -515,6 +550,7 @@ class WakeTalkDetector:
                 blocksize=480,
             ):
                 print("[状态] 麦克风已启动，开始检测...")
+                print("🔔 等待唤醒...")
                 processor_thread.join()
 
         except KeyboardInterrupt:

@@ -189,14 +189,15 @@ def handle_voice_command(text: str):
         
         print(f"[语音命令] AI回复: {response}")
         
-        # 语音播报回复
-        if voice_manager:
-            voice_manager.speak(response)
+        # 禁用后端播报，由前端统一负责所有语音播报
+        # if voice_manager:
+        #     voice_manager._speak(response)
         
-        # 通知前端显示对话
-        socketio.emit('voice_ai_response', {
-            'user_text': text,
-            'ai_response': response
+        # 通知前端显示对话 - 使用voice_llm_response事件，与voice_manager_sherpa.py保持一致
+        socketio.emit('voice_llm_response', {
+            'text': response,
+            'state': 'PROCESSING',
+            'session_id': 0
         })
         
         # 处理页面跳转
@@ -205,8 +206,10 @@ def handle_voice_command(text: str):
         
     except Exception as e:
         print(f"[语音命令] 处理错误: {e}")
+        import traceback
+        traceback.print_exc()
         if voice_manager:
-            voice_manager.speak('抱歉，我遇到了一点问题。')
+            voice_manager._speak('抱歉，我遇到了一点问题。')
 
 # 用户状态（保留用于兼容）
 user_state = {
@@ -748,6 +751,14 @@ def handle_get_state(data=None):
     
     # ⭐ 发送 system_state
     socketio.emit('system_state', system_core.get_state())
+
+@socketio.on('start_voice_input')
+def handle_start_voice_input():
+    """开始语音输入（点击按钮触发，不播放回应语）"""
+    print("[语音] 前端请求开始语音输入（按钮点击）")
+    # 通知语音管理器开始录音，跳过回应语
+    if voice_manager:
+        voice_manager.start_voice_input()
 
 # ============================================================================
 # Socket事件 - 导航

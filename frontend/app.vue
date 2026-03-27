@@ -165,34 +165,51 @@ function setupVoiceSocketHandlers() {
     // 打开对话框
     ui.akon = true
     ball.status = 'full'
+    // 显示系统回应
+    akonMessages.value.push({ role: 'assistant', content: data.response })
     // 显示用户说的话
     if (data.user_text) {
       akonMessages.value.push({ role: 'user', content: data.user_text })
     }
   })
   
-  // ⭐ 用户说话识别结果
-  socket.on('voice_user_speak', (data) => {
-    console.log('[语音] 用户说:', data.text)
-    // 添加到消息列表
-    akonMessages.value.push({ role: 'user', content: data.text })
-    // 自动发送
-    akonInput.value = data.text
-    sendAkonMessage()
-  })
+  // ⭐ 用户说话识别结果 - 由systemStore.js处理，避免重复显示
+  // socket.on('voice_user_speak', (data) => {
+  //   console.log('[语音] 用户说:', data.text)
+  //   // 只添加到消息列表，不自动发送，避免重复处理
+  //   akonMessages.value.push({ role: 'user', content: data.text })
+  //   // 不填充到输入框，避免重复显示
+  // })
   
   // ⭐ 语音播报指令（后端让前端播报）
   socket.on('voice_speaking', (data) => {
-    if (data.status === 'start') {
-      console.log('[语音] 开始播报:', data.text)
-      isSpeaking.value = true
-      // 前端播报（使用浏览器语音合成）
-      speak(data.text)
+    if (data.status === 'start' && data.text) {
+      // 过滤掉[ACTION:]标记和表情符号，不播报action内容
+      let cleanText = data.text
+      // 移除[ACTION:]标记
+      cleanText = cleanText.replace(/\[ACTION:\]/g, '').trim()
+      // 移除表情符号（匹配常见的表情符号）
+      cleanText = cleanText.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '').trim()
+      if (cleanText) {
+        console.log('[语音] 开始播报:', cleanText)
+        isSpeaking.value = true
+        // 启用前端播报，由前端统一负责所有语音播报
+        speak(cleanText)
+      }
     } else if (data.status === 'end') {
       console.log('[语音] 播报结束')
       isSpeaking.value = false
     }
   })
+  
+  // ⭐ 语音AI回复事件 - 由systemStore.js处理，避免重复显示
+  // socket.on('voice_ai_response', (data) => {
+  //   console.log('[语音] AI回复:', data.ai_response)
+  //   // 添加AI回复到消息列表
+  //   akonMessages.value.push({ role: 'assistant', content: data.ai_response })
+  //   // 语音播报回复
+  //   speak(data.ai_response)
+  // })
   
   // 唤醒超时
   socket.on('voice_sleep', (data) => {
@@ -223,11 +240,13 @@ function speak(text) {
   synth.speak(utterance)
 }
 
-// ⭐ 语音输入按钮（仅作为指示器，实际识别在后端）
+// ⭐ 语音输入按钮（触发语音输入）
 function toggleVoiceInput() {
-  // 由于语音识别在后端，这里只是显示状态
-  // 用户可以直接说话，后端会自动识别
-  console.log('[语音] 请直接说话，后端正在监听...')
+  // 通知后端开始语音输入
+  socket.emit('start_voice_input')
+  console.log('[语音] 开始语音输入，请说话...')
+  // 显示录音状态
+  isListening.value = true
 }
 
 let socket = null
@@ -427,11 +446,13 @@ async function sendAkonMessage() {
     
     const data = await response.json()
     
+    // 移除[ACTION:]标记
+    let processedResponse = data.response.replace(/\[ACTION:\]/g, '').trim()
     // 添加回复到全局聊天记录
-    addChatMessage({ role: 'assistant', content: data.response })
+    addChatMessage({ role: 'assistant', content: processedResponse })
     
-    // ⭐ 语音播报回复（后端也会播报，这里是为了确保前端也播报）
-    speak(data.response)
+    // 启用前端播报，确保手动输入时也能语音播报
+    speak(processedResponse)
     
   } catch (error) {
     addChatMessage({ role: 'assistant', content: '抱歉，网络出了点问题。' })

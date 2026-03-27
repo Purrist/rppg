@@ -73,11 +73,11 @@ def ask_akon(user_input: str, system_state: dict) -> Tuple[str, dict]:
 当前页面：{system_state.get('current_page', '/')}
 游戏状态：{'正在玩' + system_state.get('game_name') if system_state.get('game_active') else '未开始'}
 
-请直接回复用户的话，用温暖简短的语气。不要返回JSON格式，只返回纯文本。
+请直接回复用户的话，用温暖简短的语气，使用自然的口语化表达。
 
-如果用户想跳转页面，在回复后另起一行加上：[ACTION:页面路径]
+如果用户想跳转页面，请先给出友好的回复，然后在回复后另起一行加上：[ACTION:页面路径]
 例如：
-"好的，我带你去看电影。
+"好的，为您跳转到娱乐页面了，给您推荐一些好看的电影。
 [ACTION:/entertainment]"
 
 可用页面：
@@ -87,10 +87,15 @@ def ask_akon(user_input: str, system_state: dict) -> Tuple[str, dict]:
 - /settings (设置)
 
 跳转规则：
-- 看电影/视频/娱乐 → [ACTION:/entertainment]
-- 玩游戏/训练/益智 → [ACTION:/learning]
-- 看健康/血压/心率 → [ACTION:/health]
-- 闲聊/问候/天气/时间 → 不跳转，直接回复"""
+- 用户提到想看电影、视频、娱乐内容时 → [ACTION:/entertainment]
+- 用户提到想玩游戏、做训练、益智活动时 → [ACTION:/learning]
+- 用户提到想看健康、血压、心率等健康相关内容时 → [ACTION:/health]
+- 用户只是闲聊、问候、问天气或时间时 → 不跳转，直接回复
+
+请注意：
+1. 回复要自然友好，不要机械复述规则
+2. 先给出完整的回复内容，再添加ACTION标记
+3. 回复要符合老年人的语言习惯，简洁易懂"""
 
     try:
         response = requests.post(

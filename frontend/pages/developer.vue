@@ -67,6 +67,19 @@
           <div class="sys-value">{{ systemState.gameRuntime?.timer }}s</div>
           <div class="sys-desc">游戏倒计时</div>
         </div>
+        
+        <!-- ⭐ 语音状态 -->
+        <div class="sys-card voice-card" :class="'voice-' + (systemState.voice?.state || 'STANDBY').toLowerCase()">
+          <div class="sys-label">🎤 语音状态</div>
+          <div class="sys-value">{{ voiceStateText }}</div>
+          <div class="sys-desc voice-desc">
+            <span v-if="systemState.voice?.isRecording" class="recording-indicator">🔴 录音中</span>
+            <span v-if="systemState.voice?.isPlaying" class="playing-indicator">🔊 播放中</span>
+            <span v-if="!systemState.voice?.isRecording && !systemState.voice?.isPlaying">
+              {{ systemState.voice?.message || '等待唤醒...' }}
+            </span>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -424,6 +437,17 @@ const currentGameText = computed(() => {
     'processing_speed': '处理速度训练'
   }
   return gameMap[systemState.game?.currentGame] || (systemState.game?.currentGame || '无')
+})
+
+// ⭐ 语音状态文本
+const voiceStateText = computed(() => {
+  const stateMap = {
+    'STANDBY': '待机',
+    'RESPONDING': '回应中',
+    'LISTENING': '聆听中',
+    'PROCESSING': '处理中'
+  }
+  return stateMap[systemState.voice?.state] || '未知'
 })
 
 const toast = reactive({ show: false, msg: '' })
@@ -851,6 +875,64 @@ onUnmounted(() => {
 
 .sys-card.game-settling {
   border-color: #9C27B0;
+}
+
+/* ⭐ 语音状态样式 */
+.sys-card.voice-card {
+  border-color: #666;
+}
+
+.sys-card.voice-responding {
+  border-color: #FF7222;
+  background: rgba(255, 114, 34, 0.1);
+  animation: pulse-orange 1.5s infinite;
+}
+
+.sys-card.voice-listening {
+  border-color: #33B555;
+  background: rgba(51, 181, 85, 0.1);
+  animation: pulse-green 1s infinite;
+}
+
+.sys-card.voice-processing {
+  border-color: #2196F3;
+  background: rgba(33, 150, 243, 0.1);
+  animation: pulse-blue 0.8s infinite;
+}
+
+.voice-desc {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.recording-indicator {
+  color: #ff4444;
+  animation: blink 1s infinite;
+}
+
+.playing-indicator {
+  color: #33B555;
+}
+
+@keyframes pulse-orange {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 114, 34, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(255, 114, 34, 0); }
+}
+
+@keyframes pulse-green {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(51, 181, 85, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(51, 181, 85, 0); }
+}
+
+@keyframes pulse-blue {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(33, 150, 243, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(33, 150, 243, 0); }
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
 }
 
 .sys-label {
