@@ -32,7 +32,8 @@
         :class="{ 'is-docked': ball.status === 'half' }"
         :style="{ left: ball.x + 'px', top: ball.y + 'px', opacity: ball.isDragging ? 1 : (ball.status === 'half' ? 0.5 : 1) }"
         @mousedown="handleDragStart"
-        @touchstart.passive="handleDragStart"
+        @touchstart="handleDragStart"
+        @click="handleBallClick"
       >
         <span class="akon-icon">🤖</span>
       </div>
@@ -132,6 +133,12 @@ const akonInput = ref('')
 const akonLoading = ref(false)
 const messagesRef = ref(null)
 const akonInputRef = ref(null)
+
+// 监听消息变化，自动滚动到底部
+watch(akonMessages, async () => {
+  await nextTick()
+  scrollToBottom()
+}, { deep: true })
 
 // ==================== 语音功能（后端处理） ====================
 const isListening = ref(false)  // 后端监听状态
@@ -280,6 +287,20 @@ onMounted(() => {
   window.addEventListener('touchmove', handleDragging, { passive: false })
   window.addEventListener('touchend', handleDragEnd)
   
+  // 监听全局事件，打开Akon面板
+  window.addEventListener('openAkon', async (event) => {
+    ui.akon = true
+    // 滚动到底部
+    await nextTick()
+    scrollToBottom()
+    
+    // 如果需要开始录音
+    if (event.detail && event.detail.startRecording) {
+      // 调用toggleVoiceInput函数开始录音
+      toggleVoiceInput()
+    }
+  })
+  
   // ⭐ 初始化语音功能（仅初始化语音合成，语音识别由后端处理）
   initVoice()
   
@@ -397,7 +418,7 @@ function handleDragStart(e) {
   ball.status = 'full'
   
   // 添加拖动样式
-  const ballElement = e.currentTarget
+  const ballElement = document.querySelector('.akon-ball')
   if (ballElement) {
     ballElement.style.transition = 'none' // 禁用过渡效果以提高拖动流畅度
   }
@@ -435,7 +456,7 @@ function handleDragEnd(e) {
   ball.isDragging = false
   
   // 恢复过渡效果
-  const ballElement = e?.currentTarget || document.querySelector('.akon-ball')
+  const ballElement = document.querySelector('.akon-ball')
   if (ballElement) {
     ballElement.style.transition = 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
   }
@@ -448,6 +469,10 @@ function handleDragEnd(e) {
     } else {
       // 从完全显示状态点击，打开对话框
       ui.akon = true
+      // 滚动到底部
+      nextTick(() => {
+        scrollToBottom()
+      })
     }
   } else {
     // 拖动操作，吸附到边缘
@@ -462,6 +487,29 @@ function closeAkon() {
   ui.akon = false
   ball.status = 'half'
   updateDockPos()
+}
+
+function handleBallClick(e) {
+  // 阻止默认行为，避免与拖动事件冲突
+  if (e.cancelable) {
+    e.preventDefault()
+  }
+  
+  // 只有在非拖动状态下才处理点击
+  if (!ball.isDragging) {
+    if (ball.status === 'half') {
+      // 从半隐藏状态点击，变为完全显示
+      ball.status = 'full'
+    } else {
+      // 从完全显示状态点击，打开对话框
+      ui.akon = true
+      // 滚动到底部
+      nextTick(() => {
+        scrollToBottom()
+      })
+    }
+    updateDockPos()
+  }
 }
 
 // ==================== 阿康对话 ====================

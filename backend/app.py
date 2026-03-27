@@ -89,13 +89,6 @@ socketio = SocketIO(
 # ============================================================================
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# ⭐ 依赖项检查
-try:
-    from core.check_dependencies import check_and_install_dependencies
-    check_and_install_dependencies()
-except Exception as e:
-    print(f"[系统] 依赖项检查失败: {e}")
-
 # ⭐ 系统核心（唯一数据中心）- 最先初始化
 from core import SystemCore, init_system_core, get_system_core
 
