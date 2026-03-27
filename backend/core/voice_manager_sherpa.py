@@ -10,6 +10,7 @@ import time
 import threading
 import queue
 import random
+import json
 from typing import Optional, Callable
 from pathlib import Path
 from datetime import datetime
@@ -17,6 +18,7 @@ from datetime import datetime
 # sherpa-onnx
 import sherpa_onnx
 import numpy as np
+import sounddevice as sd
 
 
 class VoiceManager:
@@ -40,9 +42,8 @@ class VoiceManager:
 
     # 回应语列表 - 亲和、简短、多样化
     RESPONSES = [
-        '来啦', '诶', '我在', '有什么能帮您', '请说', '在呢', '听着呢',
-        '您好呀', '在的', '您说', '我听着', '请讲', '在听呢',
-        '来了来了', '在的您说', '我在听', '请吩咐', '到'
+        '来啦', '诶', '我在', '在呢', '听着呢',
+        '在的', '您说', '来了', '我在呢', 
     ]
     
     def __init__(self, socketio, system_core):
@@ -56,8 +57,16 @@ class VoiceManager:
         self.asr_recognizer = None
         # 唤醒词识别器
         self.kws_recognizer = None
-        # 语音合成器 (TTS) - 使用pyttsx3
+        # 语音合成器 (TTS) - 使用sherpa-onnx VITS
         self.tts_engine = None
+
+        # TTS参数
+        self.tts_sid = 0  # 音色ID
+        self.tts_speed = 1.0  # 语速
+        self.tts_volume = 1.0  # 音量
+        
+        # 音色配置
+        self.voice_tones = []
 
         # 状态机
         self.state = "STANDBY"  # STANDBY / RESPONDING / LISTENING / PROCESSING
@@ -90,6 +99,7 @@ class VoiceManager:
         self.mic_device_id = None
 
         # 初始化
+        self._load_voice_tones()
         self._init_models()
         self._init_tts()
         
@@ -224,23 +234,79 @@ class VoiceManager:
             print(f"[VoiceManager] 唤醒词模型加载失败: {e}")
             self.kws_recognizer = None
 
-    def _init_tts(self):
-        """初始化语音合成引擎 (pyttsx3)"""
+    def _load_voice_tones(self):
+        """加载音色配置文件"""
         try:
-            import pyttsx3
-            self.tts_engine = pyttsx3.init()
-            # 设置语音属性
-            voices = self.tts_engine.getProperty('voices')
-            # 选择中文语音
-            for voice in voices:
-                if 'zh' in voice.id or 'Chinese' in voice.name:
-                    self.tts_engine.setProperty('voice', voice.id)
+            tones_file = Path(__file__).parent / "voice_tones.json"
+            if tones_file.exists():
+                with open(tones_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    self.voice_tones = data.get('tones', [])
+                print(f"[VoiceManager] 加载音色配置: {len(self.voice_tones)} 种音色")
+            else:
+                print(f"[VoiceManager] 音色配置文件不存在: {tones_file}")
+        except Exception as e:
+            print(f"[VoiceManager] 加载音色配置失败: {e}")
+            self.voice_tones = []
+
+    def _init_tts(self):
+        """初始化语音合成引擎 (sherpa-onnx VITS)"""
+        try:
+            # 尝试多个可能的模型目录名
+            possible_dirs = [
+                self.models_dir / "vits-zh-hf-fanchen-C",
+                self.models_dir / "vits-zh"
+            ]
+
+            tts_model_dir = None
+            for d in possible_dirs:
+                if d.exists():
+                    tts_model_dir = d
                     break
-            self.tts_engine.setProperty('rate', 150)  # 语速
-            self.tts_engine.setProperty('volume', 1.0)  # 音量
-            print("[VoiceManager] 语音合成引擎加载完成")
+
+            if not tts_model_dir:
+                # 尝试直接在models目录下查找
+                model_files = list(self.models_dir.glob("**/vits-zh-hf-fanchen-C.onnx"))
+                if model_files:
+                    tts_model_dir = model_files[0].parent
+                else:
+                    print("[VoiceManager] VITS模型文件不存在")
+                    return
+
+            # 查找TTS模型文件
+            model_files = list(tts_model_dir.glob("*.onnx"))
+            token_files = list(tts_model_dir.glob("tokens.txt"))
+            lexicon_files = list(tts_model_dir.glob("lexicon.txt"))
+
+            if not model_files or not token_files:
+                print("[VoiceManager] VITS模型文件不完整")
+                return
+
+            model_path = str(model_files[0])
+            tokens_path = str(token_files[0])
+            lexicon_path = str(lexicon_files[0]) if lexicon_files else None
+
+            # 创建TTS配置
+            tts_config = sherpa_onnx.OfflineTtsConfig(
+                model=sherpa_onnx.OfflineTtsModelConfig(
+                    vits=sherpa_onnx.OfflineTtsVitsModelConfig(
+                        model=model_path,
+                        tokens=tokens_path,
+                        lexicon=lexicon_path,
+                    ),
+                    num_threads=2,
+                    provider="cpu",
+                ),
+                rule_fsts=f"{tts_model_dir}/phone.fst,{tts_model_dir}/date.fst,{tts_model_dir}/number.fst" if tts_model_dir.exists() else None
+            )
+            
+            # 初始化TTS引擎
+            self.tts_engine = sherpa_onnx.OfflineTts(tts_config)
+            print("[VoiceManager] VITS语音合成引擎加载完成")
         except Exception as e:
             print(f"[VoiceManager] 语音合成引擎加载失败: {e}")
+            import traceback
+            traceback.print_exc()
             self.tts_engine = None
 
     def _detect_microphone(self):
@@ -590,34 +656,37 @@ class VoiceManager:
             speak_event = threading.Event()
             
             def speak_and_wait(text):
-                """通知前端播放语音并等待完成"""
+                """后端播放语音并等待完成"""
                 if not text:
                     speak_event.set()
                     return
                 
-                print(f"[VoiceManager] [会话{session_id}] 通知前端播放: {text}")
+                print(f"[VoiceManager] [会话{session_id}] 后端播放: {text}")
                 self.is_playing = True
                 
-                # 通知前端播放
+                # 通知前端播放状态
                 self.socketio.emit('voice_speaking', {
                     'status': 'start',
                     'text': text
                 })
                 
-                # 模拟播放完成，实际播放由前端负责
-                def simulate_play_thread():
+                # 后端实际播放语音
+                def play_thread():
                     try:
-                        # 估算语音播放时间（按中文字符数）
+                        # 调用_speak方法进行后端播放
+                        self._speak(text)
+                        # 等待播放完成
+                        # 由于_speak是异步的，我们需要估算播放时间
                         play_time = max(0.5, len(text) * 0.1)
                         time.sleep(play_time)
                     except Exception as e:
-                        print(f"[VoiceManager] 播放模拟错误: {e}")
+                        print(f"[VoiceManager] 播放错误: {e}")
                     finally:
                         self.is_playing = False
                         speak_event.set()
                         self.socketio.emit('voice_speaking', {'status': 'end'})
                 
-                threading.Thread(target=simulate_play_thread, daemon=True).start()
+                threading.Thread(target=play_thread, daemon=True).start()
             
             # 通知前端播放回应
             speak_and_wait(response)
@@ -763,19 +832,20 @@ class VoiceManager:
             if text:
                 print(f"[VoiceManager] [会话{session_id}] 用户说: {text}")
                 
-                # 通知前端显示用户语音（模拟用户发送消息）
-                self.socketio.emit('voice_user_speak', {
-                    'text': text,
-                    'state': 'PROCESSING',
-                    'session_id': session_id
-                })
-                
                 # ⭐ 只通过回调让app.py处理LLM调用和语音播报
                 # 不再在VoiceManager内部重复调用
                 if self.on_speech_recognized:
+                    # 当有回调时，由app.py处理，不再发送voice_user_speak事件
+                    # 避免重复处理
                     self.on_speech_recognized(text)
                 else:
                     # 如果没有回调，才在内部处理
+                    # 通知前端显示用户语音（模拟用户发送消息）
+                    self.socketio.emit('voice_user_speak', {
+                        'text': text,
+                        'state': 'PROCESSING',
+                        'session_id': session_id
+                    })
                     if self.system_core:
                         self._call_llm_and_respond(text, session_id)
                     else:
@@ -822,8 +892,8 @@ class VoiceManager:
                         'session_id': session_id
                     })
                     
-                    # 禁用后端播报，由前端统一负责播报
-                    # self._speak(response)
+                    # 启用后端播报
+                    self._speak(response)
             else:
                 # 如果没有process_message方法，直接复述
                 self._speak(f"您说: {user_text}")
@@ -891,8 +961,8 @@ class VoiceManager:
         self.is_playing = False
     
     def _speak(self, text):
-        """语音合成并播放（非阻塞）"""
-        if not text:
+        """语音合成并播放（非阻塞）- 后端使用VITS播报"""
+        if not text or not self.tts_engine:
             return
         
         print(f"[VoiceManager] 语音播报: {text}")
@@ -900,41 +970,32 @@ class VoiceManager:
         # 设置播放状态
         self.is_playing = True
         
-        # 通知前端
-        self.socketio.emit('voice_speaking', {
-            'status': 'start',
-            'text': text
-        })
-        
         # 在后台线程中播放，避免阻塞
         def play_thread():
             try:
-                # 每次创建新的tts实例，避免run loop冲突
-                import pyttsx3
-                tts = pyttsx3.init()
+                # 优化：使用更快的语速
+                actual_speed = max(1.2, self.tts_speed)  # 确保最小语速为1.2
                 
-                # 设置语音属性
-                voices = tts.getProperty('voices')
-                for voice in voices:
-                    if 'zh' in voice.id or 'Chinese' in voice.name:
-                        tts.setProperty('voice', voice.id)
-                        break
-                tts.setProperty('rate', 150)
-                tts.setProperty('volume', 1.0)
+                # 使用VITS生成语音
+                audio = self.tts_engine.generate(
+                    text, 
+                    sid=self.tts_sid, 
+                    speed=actual_speed
+                )
                 
-                # 添加短暂延迟确保初始化完成
-                time.sleep(0.2)
+                # 转换为numpy数组并应用音量
+                samples = np.array(audio.samples, dtype=np.float32) * self.tts_volume
                 
-                tts.say(text)
-                tts.runAndWait()
-                tts.stop()
+                # 播放音频
+                sd.play(samples, samplerate=audio.sample_rate)
+                sd.wait()
+                
             except Exception as e:
                 print(f"[VoiceManager] 语音播放错误: {e}")
+                import traceback
+                traceback.print_exc()
             finally:
                 self.is_playing = False
-                self.socketio.emit('voice_speaking', {
-                    'status': 'end'
-                })
         
         threading.Thread(target=play_thread, daemon=True).start()
     
@@ -945,6 +1006,75 @@ class VoiceManager:
     def set_speech_recognized_callback(self, callback: Callable):
         """设置语音识别回调"""
         self.on_speech_recognized = callback
+
+    def set_tts_sid(self, sid):
+        """设置TTS音色ID"""
+        try:
+            self.tts_sid = int(sid)
+            print(f"[VoiceManager] 设置TTS音色ID: {self.tts_sid}")
+            # 同步到system_core
+            if self.system_core:
+                try:
+                    self.system_core.update_tts_config({
+                        'sid': self.tts_sid,
+                        'speed': self.tts_speed,
+                        'volume': self.tts_volume
+                    })
+                except Exception as e:
+                    print(f"[VoiceManager] 同步TTS配置到system_core失败: {e}")
+            return True
+        except Exception as e:
+            print(f"[VoiceManager] 设置TTS音色失败: {e}")
+            return False
+
+    def set_tts_speed(self, speed):
+        """设置TTS语速"""
+        try:
+            self.tts_speed = float(speed)
+            print(f"[VoiceManager] 设置TTS语速: {self.tts_speed}")
+            # 同步到system_core
+            if self.system_core:
+                try:
+                    self.system_core.update_tts_config({
+                        'sid': self.tts_sid,
+                        'speed': self.tts_speed,
+                        'volume': self.tts_volume
+                    })
+                except Exception as e:
+                    print(f"[VoiceManager] 同步TTS配置到system_core失败: {e}")
+            return True
+        except Exception as e:
+            print(f"[VoiceManager] 设置TTS语速失败: {e}")
+            return False
+
+    def set_tts_volume(self, volume):
+        """设置TTS音量"""
+        try:
+            self.tts_volume = float(volume)
+            print(f"[VoiceManager] 设置TTS音量: {self.tts_volume}")
+            # 同步到system_core
+            if self.system_core:
+                try:
+                    self.system_core.update_tts_config({
+                        'sid': self.tts_sid,
+                        'speed': self.tts_speed,
+                        'volume': self.tts_volume
+                    })
+                except Exception as e:
+                    print(f"[VoiceManager] 同步TTS配置到system_core失败: {e}")
+            return True
+        except Exception as e:
+            print(f"[VoiceManager] 设置TTS音量失败: {e}")
+            return False
+
+    def get_tts_config(self):
+        """获取当前TTS配置"""
+        return {
+            'sid': self.tts_sid,
+            'speed': self.tts_speed,
+            'volume': self.tts_volume,
+            'voice_tones': self.voice_tones
+        }
 
 
 # 全局实例

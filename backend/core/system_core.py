@@ -132,6 +132,13 @@ class SystemCore:
                 'voiceSpeaking': True,
             },
             
+            # TTS配置
+            'tts': {
+                'sid': 0,
+                'speed': 1.0,
+                'volume': 1.0,
+            },
+            
             # 时间信息
             'timeInfo': {
                 'time': datetime.now().strftime('%H:%M'),
@@ -213,6 +220,9 @@ class SystemCore:
                         self._state['settings']['voiceWakeup'] = True
                     if 'voiceSpeaking' not in self._state['settings']:
                         self._state['settings']['voiceSpeaking'] = True
+                    # 加载TTS配置
+                    if 'tts' in saved:
+                        self._state['tts'].update(saved.get('tts', {}))
                     print(f'[SystemCore] 配置已加载: aiMode={self._state["aiMode"]}')
             else:
                 # ⭐ 配置文件不存在，创建默认配置
@@ -228,7 +238,8 @@ class SystemCore:
             with self._lock:
                 config = {
                     'aiMode': self._state['aiMode'],
-                    'settings': self._state['settings']
+                    'settings': self._state['settings'],
+                    'tts': self._state['tts']
                 }
             # 确保目录存在
             os.makedirs(os.path.dirname(self.config_file), exist_ok=True)
@@ -526,6 +537,19 @@ class SystemCore:
     def get_dwell_time(self) -> int:
         with self._lock:
             return self._state['game']['dwellTime']
+    
+    def update_tts_config(self, tts_config: Dict[str, Any]):
+        """更新TTS配置"""
+        with self._lock:
+            if 'sid' in tts_config:
+                self._state['tts']['sid'] = tts_config['sid']
+            if 'speed' in tts_config:
+                self._state['tts']['speed'] = tts_config['speed']
+            if 'volume' in tts_config:
+                self._state['tts']['volume'] = tts_config['volume']
+        self._save_config()
+        self._broadcast()
+        print(f'[SystemCore] TTS配置更新: {tts_config}')
     
     def is_game_active(self) -> bool:
         """游戏是否激活"""

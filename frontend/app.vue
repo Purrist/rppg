@@ -165,12 +165,7 @@ function setupVoiceSocketHandlers() {
     // 打开对话框
     ui.akon = true
     ball.status = 'full'
-    // 显示系统回应
-    akonMessages.value.push({ role: 'assistant', content: data.response })
-    // 显示用户说的话
-    if (data.user_text) {
-      akonMessages.value.push({ role: 'user', content: data.user_text })
-    }
+    // 不显示系统回应，只由systemStore处理
   })
   
   // ⭐ 用户说话识别结果 - 由systemStore.js处理，避免重复显示
@@ -181,23 +176,13 @@ function setupVoiceSocketHandlers() {
   //   // 不填充到输入框，避免重复显示
   // })
   
-  // ⭐ 语音播报指令（后端让前端播报）
+  // ⭐ 语音播报指令（后端直接播报，前端不播放）
   socket.on('voice_speaking', (data) => {
     if (data.status === 'start' && data.text) {
-      // 过滤掉[ACTION:]标记和表情符号，不播报action内容
-      let cleanText = data.text
-      // 移除[ACTION:]标记
-      cleanText = cleanText.replace(/\[ACTION:\]/g, '').trim()
-      // 移除表情符号（匹配常见的表情符号）
-      cleanText = cleanText.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '').trim()
-      if (cleanText) {
-        console.log('[语音] 开始播报:', cleanText)
-        isSpeaking.value = true
-        // 启用前端播报，由前端统一负责所有语音播报
-        speak(cleanText)
-      }
+      console.log('[语音] 后端开始播报:', data.text)
+      isSpeaking.value = true
     } else if (data.status === 'end') {
-      console.log('[语音] 播报结束')
+      console.log('[语音] 后端播报结束')
       isSpeaking.value = false
     }
   })
@@ -381,38 +366,95 @@ onUnmounted(() => {
 // ==================== 球体拖拽 ====================
 function updateDockPos() {
   const winW = window.innerWidth
+  const winH = window.innerHeight
+  const ballSize = 90
+  
+  // 确保球不会超出屏幕上下边界
+  ball.y = Math.max(20, Math.min(winH - ballSize - 20, ball.y))
+  
+  // 吸附到屏幕左右边缘
   if (ball.x < winW / 2) {
-    ball.x = ball.status === 'half' ? -45 : 20
+    // 左边缘
+    ball.x = ball.status === 'half' ? 0 : 20
   } else {
-    ball.x = ball.status === 'half' ? winW - 45 : winW - 110
+    // 右边缘
+    ball.x = ball.status === 'half' ? winW - ballSize : winW - ballSize - 20
   }
 }
 
 function handleDragStart(e) {
+  // 阻止默认行为，避免页面滚动
+  if (e.cancelable) {
+    e.preventDefault()
+  }
   ball.isDragging = true
   ball.moveDist = 0
   const event = e.touches ? e.touches[0] : e
   ball.startX = event.clientX - ball.x
   ball.startY = event.clientY - ball.y
+  
+  // 拖动开始时设置为完全显示状态
+  ball.status = 'full'
+  
+  // 添加拖动样式
+  const ballElement = e.currentTarget
+  if (ballElement) {
+    ballElement.style.transition = 'none' // 禁用过渡效果以提高拖动流畅度
+  }
 }
 
 function handleDragging(e) {
   if (!ball.isDragging) return
+  
+  // 阻止默认行为，避免页面滚动
+  if (e.cancelable) {
+    e.preventDefault()
+  }
+  
   const event = e.touches ? e.touches[0] : e
-  ball.x = event.clientX - ball.startX
-  ball.y = event.clientY - ball.startY
+  const winW = window.innerWidth
+  const winH = window.innerHeight
+  const ballSize = 90
+  
+  // 计算新位置，确保不会超出屏幕
+  let newX = event.clientX - ball.startX
+  let newY = event.clientY - ball.startY
+  
+  // 边界检查
+  newX = Math.max(0, Math.min(winW - ballSize, newX))
+  newY = Math.max(0, Math.min(winH - ballSize, newY))
+  
+  // 直接更新位置，不使用setTimeout，提高响应速度
+  ball.x = newX
+  ball.y = newY
   ball.moveDist++
 }
 
-function handleDragEnd() {
+function handleDragEnd(e) {
   if (!ball.isDragging) return
   ball.isDragging = false
-  if (ball.moveDist < 5) {
-    if (ball.status === 'half') ball.status = 'full'
-    else ui.akon = true
+  
+  // 恢复过渡效果
+  const ballElement = e?.currentTarget || document.querySelector('.akon-ball')
+  if (ballElement) {
+    ballElement.style.transition = 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
+  }
+  
+  if (ball.moveDist < 3) {
+    // 点击操作
+    if (ball.status === 'half') {
+      // 从半隐藏状态点击，变为完全显示
+      ball.status = 'full'
+    } else {
+      // 从完全显示状态点击，打开对话框
+      ui.akon = true
+    }
   } else {
+    // 拖动操作，吸附到边缘
     ball.status = 'half'
   }
+  
+  // 平滑动画吸附
   updateDockPos()
 }
 
@@ -451,8 +493,7 @@ async function sendAkonMessage() {
     // 添加回复到全局聊天记录
     addChatMessage({ role: 'assistant', content: processedResponse })
     
-    // 启用前端播报，确保手动输入时也能语音播报
-    speak(processedResponse)
+    // 后端会负责播报，前端不播放
     
   } catch (error) {
     addChatMessage({ role: 'assistant', content: '抱歉，网络出了点问题。' })
@@ -535,9 +576,19 @@ html, body {
   z-index: 500; cursor: pointer;
   transform: translate3d(0, 0, 0); 
   will-change: left, top;
-  transition: opacity 0.3s;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   box-shadow: 0 8px 25px rgba(255,114,34,0.4);
   touch-action: none;
+  user-select: none;
+}
+
+.akon-ball:hover {
+  transform: scale(1.05);
+  box-shadow: 0 10px 30px rgba(255,114,34,0.5);
+}
+
+.akon-ball.is-docked {
+  transform: scale(0.95);
 }
 .akon-icon { font-size: 45px; pointer-events: none; }
 

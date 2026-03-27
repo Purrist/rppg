@@ -2,6 +2,15 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "设备测试",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "device_test.py",
+      "cwd": "${workspaceFolder}",
+      "python": "D:/anaconda/envs/rppg/python.exe",
+      "console": "integratedTerminal"
+    },     
+    {
       "name": "进程清理",
       "type": "debugpy",
       "request": "launch",
@@ -9,7 +18,8 @@
       "cwd": "${workspaceFolder}",
       "python": "D:/anaconda/envs/rppg/python.exe",
       "console": "integratedTerminal"
-    },    {
+    },    
+    {
       "name": "后端 (Flask)",
       "type": "debugpy",
       "request": "launch",

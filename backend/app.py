@@ -181,6 +181,12 @@ def handle_voice_command(text: str):
     print(f"[语音命令] 收到: {text}")
 
     try:
+        # 通知前端显示用户语音（只发送一次）
+        socketio.emit('voice_user_speak', {
+            'text': text,
+            'state': 'PROCESSING'
+        })
+        
         # 获取当前系统上下文
         context = system_core.get_state()
         
@@ -189,16 +195,14 @@ def handle_voice_command(text: str):
         
         print(f"[语音命令] AI回复: {response}")
         
-        # 禁用后端播报，由前端统一负责所有语音播报
-        # if voice_manager:
-        #     voice_manager._speak(response)
-        
-        # 通知前端显示对话 - 使用voice_llm_response事件，与voice_manager_sherpa.py保持一致
+        # 通知前端显示AI回复
         socketio.emit('voice_llm_response', {
-            'text': response,
-            'state': 'PROCESSING',
-            'session_id': 0
+            'text': response
         })
+        
+        # 启用后端播报
+        if voice_manager:
+            voice_manager._speak(response)
         
         # 处理页面跳转
         if action and action.get('type') == 'navigate':
@@ -759,6 +763,35 @@ def handle_start_voice_input():
     # 通知语音管理器开始录音，跳过回应语
     if voice_manager:
         voice_manager.start_voice_input()
+
+@socketio.on('get_tts_config')
+def handle_get_tts_config():
+    """获取TTS配置"""
+    if voice_manager:
+        config = voice_manager.get_tts_config()
+        socketio.emit('tts_config', config)
+        print("[TTS] 发送TTS配置到前端")
+
+@socketio.on('set_tts_sid')
+def handle_set_tts_sid(sid):
+    """设置TTS音色ID"""
+    if voice_manager:
+        success = voice_manager.set_tts_sid(sid)
+        print(f"[TTS] 设置音色ID: {sid}, 成功: {success}")
+
+@socketio.on('set_tts_speed')
+def handle_set_tts_speed(speed):
+    """设置TTS语速"""
+    if voice_manager:
+        success = voice_manager.set_tts_speed(speed)
+        print(f"[TTS] 设置语速: {speed}, 成功: {success}")
+
+@socketio.on('set_tts_volume')
+def handle_set_tts_volume(volume):
+    """设置TTS音量"""
+    if voice_manager:
+        success = voice_manager.set_tts_volume(volume)
+        print(f"[TTS] 设置音量: {volume}, 成功: {success}")
 
 # ============================================================================
 # Socket事件 - 导航

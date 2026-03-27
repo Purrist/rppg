@@ -13,19 +13,6 @@
     "avg_emotion": "neutral"
   },
   {
-    "date": "2026-03-24T20:16:45.940160",
-    "mode": "processing_speed",
-    "module": "go_no_go",
-    "difficulty": 8,
-    "duration": 64,
-    "score": 127,
-    "correct_count": 7,
-    "total_count": 9,
-    "correct_rate": 0.7777777777777778,
-    "avg_bpm": "--",
-    "avg_emotion": "neutral"
-  },
-  {
     "date": "2026-03-24T20:23:59.798353",
     "mode": "processing_speed",
     "module": "go_no_go",
@@ -35,6 +22,19 @@
     "correct_count": 8,
     "total_count": 21,
     "correct_rate": 0.38095238095238093,
+    "avg_bpm": "--",
+    "avg_emotion": "neutral"
+  },
+  {
+    "date": "2026-03-27T21:17:37.584428",
+    "mode": "processing_speed",
+    "module": "go_no_go",
+    "difficulty": 8,
+    "duration": 187,
+    "score": 0,
+    "correct_count": 22,
+    "total_count": 26,
+    "correct_rate": 0.8461538461538461,
     "avg_bpm": "--",
     "avg_emotion": "neutral"
   }

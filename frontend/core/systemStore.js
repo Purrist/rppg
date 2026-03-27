@@ -123,13 +123,7 @@ export function initStore(socketInstance) {
   socket.on('voice_wake_up', (data) => {
     state.value.voice.isAwakened = true
     state.value.voice.state = data.state || 'RESPONDING'
-    // 添加系统消息（阿康的回应）
-    state.value.chatMessages.push({ 
-      role: 'assistant', 
-      content: data.response,
-      type: 'voice_wake',
-      timestamp: Date.now()
-    })
+    // 不添加系统回应到聊天记录，只显示用户的实际输入
     listeners.forEach(cb => cb(state.value))
   })
   

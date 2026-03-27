@@ -91,6 +91,63 @@
     </div>
     
     <div class="settings-section">
+      <h2>语音设置</h2>
+      <div class="setting-item">
+        <span class="label">
+          <div class="label-main">音色选择</div>
+          <div class="label-sub">
+            选择语音合成的音色
+          </div>
+        </span>
+        <div class="select-control">
+          <select v-model="selectedVoiceId" @change="updateVoiceTone">
+            <option v-for="tone in voiceTones" :key="tone.id" :value="tone.id">
+              {{ tone.name }}
+            </option>
+          </select>
+        </div>
+      </div>
+      <div class="setting-item">
+        <span class="label">
+          <div class="label-main">语速调节</div>
+          <div class="label-sub">
+            调整语音合成的语速
+          </div>
+        </span>
+        <div class="slider-control">
+          <input 
+            type="range" 
+            v-model="ttsSpeed" 
+            min="0.5" 
+            max="1.5" 
+            step="0.1"
+            @input="updateTtsSpeed"
+          >
+          <span class="slider-value">{{ ttsSpeed }}</span>
+        </div>
+      </div>
+      <div class="setting-item">
+        <span class="label">
+          <div class="label-main">音量调节</div>
+          <div class="label-sub">
+            调整语音合成的音量
+          </div>
+        </span>
+        <div class="slider-control">
+          <input 
+            type="range" 
+            v-model="ttsVolume" 
+            min="0" 
+            max="2" 
+            step="0.1"
+            @input="updateTtsVolume"
+          >
+          <span class="slider-value">{{ ttsVolume }}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="settings-section">
       <h2>系统管理</h2>
       <div class="setting-item clickable" @click="goToDeveloper">
         <span class="label">🛠 开发者后台</span>
@@ -134,6 +191,12 @@ const aiCompanionEnabled = ref(false)
 const voiceWakeupEnabled = ref(true)
 const voiceSpeakingEnabled = ref(true)
 
+// TTS设置
+const selectedVoiceId = ref(0)
+const ttsSpeed = ref(1.0)
+const ttsVolume = ref(1.0)
+const voiceTones = ref([])
+
 const getBackendHost = () => {
   if (typeof window === 'undefined') return 'localhost'
   return window.location.hostname || 'localhost'
@@ -156,6 +219,19 @@ onMounted(() => {
     console.log('[settings] 后端已连接')
     // 请求当前状态
     socket.emit('get_system_state')
+    // 请求TTS配置
+    socket.emit('get_tts_config')
+  })
+  
+  // 接收TTS配置
+  socket.on('tts_config', (config) => {
+    console.log('[settings] 收到TTS配置:', config)
+    if (config) {
+      selectedVoiceId.value = config.sid || 0
+      ttsSpeed.value = config.speed || 1.0
+      ttsVolume.value = config.volume || 1.0
+      voiceTones.value = config.voice_tones || []
+    }
   })
   
   // ⭐ 订阅后端状态更新
@@ -231,6 +307,30 @@ const goToDeveloper = () => {
 
 const goToProjection = () => {
   router.push('/projection')
+}
+
+// 更新语音音色
+const updateVoiceTone = () => {
+  socket.emit('set_tts_sid', selectedVoiceId.value)
+  console.log('[settings] 音色设置发送到后端:', selectedVoiceId.value)
+}
+
+// 更新语速
+const updateTtsSpeed = () => {
+  socket.emit('set_tts_speed', parseFloat(ttsSpeed.value))
+  console.log('[settings] 语速设置发送到后端:', ttsSpeed.value)
+}
+
+// 更新音量
+const updateTtsVolume = () => {
+  socket.emit('set_tts_volume', parseFloat(ttsVolume.value))
+  console.log('[settings] 音量设置发送到后端:', ttsVolume.value)
+}
+
+// 设置语音相关配置
+const setVoiceSetting = (type, value) => {
+  socket.emit('set_voice_setting', { type, value })
+  console.log('[settings] 语音设置发送到后端:', type, value)
 }
 </script>
 
@@ -411,5 +511,58 @@ const goToProjection = () => {
   font-weight: 600;
   color: #333;
   min-width: 60px;
+}
+
+.select-control select {
+  padding: 10px 15px;
+  font-size: 18px;
+  border: 2px solid #FF7222;
+  border-radius: 8px;
+  background: #FFF;
+  color: #333;
+  min-width: 200px;
+}
+
+.slider-control {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  min-width: 200px;
+}
+
+.slider-control input[type="range"] {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: #CCC;
+  outline: none;
+  -webkit-appearance: none;
+}
+
+.slider-control input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #FF7222;
+  cursor: pointer;
+}
+
+.slider-control input[type="range"]::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #FF7222;
+  cursor: pointer;
+  border: none;
+}
+
+.slider-value {
+  font-size: 18px;
+  font-weight: 600;
+  color: #FF7222;
+  min-width: 60px;
+  text-align: right;
 }
 </style>

@@ -3,6 +3,13 @@
   "settings": {
     "dwellTime": 3000,
     "soundEnabled": true,
-    "projectionEnabled": true
+    "projectionEnabled": true,
+    "voiceWakeup": true,
+    "voiceSpeaking": true
+  },
+  "tts": {
+    "sid": 0,
+    "speed": 1.1,
+    "volume": 1.5
   }
 }
