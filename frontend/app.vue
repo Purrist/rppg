@@ -51,11 +51,16 @@
           <div class="akon-messages" ref="messagesRef">
             <div v-for="(msg, idx) in akonMessages" :key="idx" class="akon-msg" :class="msg.role">
               <div class="msg-avatar">{{ msg.role === 'user' ? '👴' : '🤖' }}</div>
-              <div class="msg-text">{{ msg.content }}</div>
+              <div class="msg-text">
+                {{ msg.content }}
+                <span v-if="isTyping && idx === akonMessages.length - 1" class="cursor">|</span>
+              </div>
             </div>
             <div v-if="akonLoading" class="akon-msg assistant">
               <div class="msg-avatar">🤖</div>
-              <div class="msg-text loading">思考中...</div>
+              <div class="msg-text loading">
+                思考中<span class="dot dot1">.</span><span class="dot dot2">.</span><span class="dot dot3">.</span>
+              </div>
             </div>
           </div>
           <!-- 快捷按钮 -->
@@ -126,19 +131,33 @@ const ball = reactive({
 })
 
 // 阿康对话状态
-import { getState, addChatMessage } from './core/systemStore'
+import { getState, addChatMessage, setVoiceLoading } from './core/systemStore'
 const systemState = getState()
-const akonMessages = computed(() => systemState.value.chatMessages)  // ⭐ 使用全局聊天记录
+const globalMessages = computed(() => systemState.value.chatMessages)  // ⭐ 使用全局聊天记录
+const akonMessages = ref([])  // 本地聊天消息数组，用于实现打字机效果
 const akonInput = ref('')
-const akonLoading = ref(false)
+const akonLoading = computed(() => systemState.value.voice?.isLoading || false)  // ⭐ 使用全局loading状态
 const messagesRef = ref(null)
 const akonInputRef = ref(null)
+
+// 打字机效果
+const typingText = ref('')   // 正在逐字显示的文字
+const isTyping = ref(false)  // 是否正在打字
+
+// 监听全局消息变化，同步到本地（但在打字时不同步，避免覆盖打字效果）
+watch(globalMessages, (newMessages) => {
+  if (!isTyping.value) {
+    akonMessages.value = [...newMessages]
+  }
+}, { deep: true })
 
 // 监听消息变化，自动滚动到底部
 watch(akonMessages, async () => {
   await nextTick()
   scrollToBottom()
 }, { deep: true })
+
+
 
 // ==================== 语音功能（后端处理） ====================
 const isListening = ref(false)  // 后端监听状态
@@ -277,6 +296,26 @@ function goToSettings() {
   handleNavigate('/settings')
 }
 
+// ⭐ 统一处理AI回复（打字机效果 + 语音）
+async function handleAIResponse(event) {
+  const { text, source } = event.detail
+  console.log('[App] 收到AI回复:', text, '来源:', source)
+  
+  // 插入一条空的AI消息到本地数组
+  akonMessages.value.push({
+    role: 'assistant',
+    content: '',
+    typing: true
+  })
+  
+  // 滚动到底部
+  await nextTick()
+  scrollToBottom()
+  
+  // 开始逐字打字
+  await startTypeWriter(text, source)
+}
+
 // ==================== Socket ====================
 onMounted(() => {
   ball.x = window.innerWidth - 45
@@ -286,6 +325,9 @@ onMounted(() => {
   window.addEventListener('mouseup', handleDragEnd)
   window.addEventListener('touchmove', handleDragging, { passive: false })
   window.addEventListener('touchend', handleDragEnd)
+  
+  // 初始化本地消息数组
+  akonMessages.value = [...globalMessages.value]
   
   // 监听全局事件，打开Akon面板
   window.addEventListener('openAkon', async (event) => {
@@ -366,6 +408,9 @@ onMounted(() => {
   // ⭐ 设置语音Socket事件处理
   setupVoiceSocketHandlers()
   
+  // ⭐ 监听AI回复事件（统一处理所有来源的AI回复）
+  window.addEventListener('ai_response', handleAIResponse)
+  
   // ⭐ 监听路由变化，同步页面状态
   watch(() => route.path, (newPath) => {
     console.log('[App] 页面切换:', newPath)
@@ -380,8 +425,9 @@ onUnmounted(() => {
   if (socket) socket.disconnect()
   window.removeEventListener('mousemove', handleDragging)
   window.removeEventListener('mouseup', handleDragEnd)
-  window.removeEventListener('touchmove', handleDragging)
+  window.removeEventListener('touchmove', handleDragging, { passive: false })
   window.removeEventListener('touchend', handleDragEnd)
+  window.removeEventListener('ai_response', handleAIResponse)
 })
 
 // ==================== 球体拖拽 ====================
@@ -520,7 +566,7 @@ async function sendAkonMessage() {
   // 添加用户消息到全局聊天记录
   addChatMessage({ role: 'user', content: text })
   akonInput.value = ''
-  akonLoading.value = true
+  setVoiceLoading(true)  // ⭐ 设置思考中状态
   
   // 滚动到底部
   await nextTick()
@@ -538,19 +584,18 @@ async function sendAkonMessage() {
     
     // 移除[ACTION:]标记
     let processedResponse = data.response.replace(/\[ACTION:\]/g, '').trim()
-    // 添加回复到全局聊天记录
-    addChatMessage({ role: 'assistant', content: processedResponse })
     
-    // 后端会负责播报，前端不播放
+    // 触发ai_response事件，统一处理打字机和语音
+    window.dispatchEvent(new CustomEvent('ai_response', { 
+      detail: { text: processedResponse, source: 'text' } 
+    }))
     
   } catch (error) {
-    addChatMessage({ role: 'assistant', content: '抱歉，网络出了点问题。' })
-    speak('抱歉，网络出了点问题。')
+    // 触发ai_response事件
+    window.dispatchEvent(new CustomEvent('ai_response', { 
+      detail: { text: '抱歉，网络出了点问题。', source: 'text' } 
+    }))
   }
-  
-  akonLoading.value = false
-  await nextTick()
-  scrollToBottom()
 }
 
 function sendQuick(text) {
@@ -561,6 +606,34 @@ function sendQuick(text) {
 function scrollToBottom() {
   if (messagesRef.value) {
     messagesRef.value.scrollTop = messagesRef.value.scrollHeight
+  }
+}
+
+async function startTypeWriter(fullText, source = 'text') {
+  isTyping.value = true
+  typingText.value = ''
+
+  for (let i = 0; i < fullText.length; i++) {
+    typingText.value += fullText[i]
+    
+    // 把最新文字更新到本地消息列表
+    const lastMsg = akonMessages.value[akonMessages.value.length - 1]
+    if (lastMsg) {
+      lastMsg.content = typingText.value
+    }
+
+    // 每字延迟 80~150 ms（自己调速度）
+    await new Promise(r => setTimeout(r, 100))
+  }
+
+  isTyping.value = false
+  
+  // 打字完成后，添加完整的消息到全局记录
+  addChatMessage({ role: 'assistant', content: fullText })
+  
+  // 通知后端进行语音播报（只由后端播报，不做任何前端播报）
+  if (socket && socket.connected) {
+    socket.emit('speak_text', { text: fullText, source })
   }
 }
 </script>
@@ -681,4 +754,26 @@ html, body {
 .akon-input:focus { border-color: #FF7222; }
 .akon-send-btn { padding: 14px 28px; background: #FF7222; color: #FFF; border: none; border-radius: 24px; font-size: 20px; font-weight: bold; cursor: pointer; }
 .akon-send-btn:disabled { background: #CCC; cursor: not-allowed; }
+
+/* 思考中点闪烁 - 三个点依次出现 */
+.dot1, .dot2, .dot3 {
+  animation: dotFade 1.2s infinite;
+  opacity: 0;
+}
+.dot2 { animation-delay: 0.2s; }
+.dot3 { animation-delay: 0.4s; }
+
+@keyframes dotFade {
+  0%, 20% { opacity: 0; }
+  50% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* 打字光标 */
+.cursor {
+  animation: blink 1s step-end infinite;
+}
+@keyframes blink {
+  50% { opacity: 0; }
+}
 </style>

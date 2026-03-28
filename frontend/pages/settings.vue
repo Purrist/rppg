@@ -94,6 +94,20 @@
       <h2>语音设置</h2>
       <div class="setting-item">
         <span class="label">
+          <div class="label-main">语音引擎</div>
+          <div class="label-sub">
+            选择语音合成引擎（VITS更自然，pytts更稳定）
+          </div>
+        </span>
+        <div class="select-control">
+          <select v-model="selectedTtsEngine" @change="updateTtsEngine">
+            <option value="vits">VITS (推荐)</option>
+            <option value="pytts">pytts</option>
+          </select>
+        </div>
+      </div>
+      <div class="setting-item">
+        <span class="label">
           <div class="label-main">音色选择</div>
           <div class="label-sub">
             选择语音合成的音色
@@ -192,6 +206,7 @@ const voiceWakeupEnabled = ref(true)
 const voiceSpeakingEnabled = ref(true)
 
 // TTS设置
+const selectedTtsEngine = ref('vits')
 const selectedVoiceId = ref(0)
 const ttsSpeed = ref(1.0)
 const ttsVolume = ref(1.0)
@@ -227,6 +242,7 @@ onMounted(() => {
   socket.on('tts_config', (config) => {
     console.log('[settings] 收到TTS配置:', config)
     if (config) {
+      selectedTtsEngine.value = config.engine || 'vits'
       selectedVoiceId.value = config.sid || 0
       ttsSpeed.value = config.speed || 1.0
       ttsVolume.value = config.volume || 1.0
@@ -307,6 +323,12 @@ const goToDeveloper = () => {
 
 const goToProjection = () => {
   router.push('/projection')
+}
+
+// 更新语音引擎
+const updateTtsEngine = () => {
+  socket.emit('set_tts_engine', { engine: selectedTtsEngine.value })
+  console.log('[settings] 语音引擎设置发送到后端:', selectedTtsEngine.value)
 }
 
 // 更新语音音色
@@ -537,6 +559,7 @@ const setVoiceSetting = (type, value) => {
   background: #CCC;
   outline: none;
   -webkit-appearance: none;
+  appearance: none;
 }
 
 .slider-control input[type="range"]::-webkit-slider-thumb {

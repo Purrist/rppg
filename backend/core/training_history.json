@@ -37,5 +37,18 @@
     "correct_rate": 0.8461538461538461,
     "avg_bpm": "--",
     "avg_emotion": "neutral"
+  },
+  {
+    "date": "2026-03-28T20:45:01.162814",
+    "mode": "processing_speed",
+    "module": "go_no_go",
+    "difficulty": 1,
+    "duration": 364,
+    "score": 0,
+    "correct_count": 18,
+    "total_count": 26,
+    "correct_rate": 0.6923076923076923,
+    "avg_bpm": "--",
+    "avg_emotion": "neutral"
   }
 ]

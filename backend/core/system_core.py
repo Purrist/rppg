@@ -134,6 +134,7 @@ class SystemCore:
             
             # TTS配置
             'tts': {
+                'engine': 'vits',  # 'vits' 或 'pytts'
                 'sid': 0,
                 'speed': 1.0,
                 'volume': 1.0,
@@ -541,6 +542,8 @@ class SystemCore:
     def update_tts_config(self, tts_config: Dict[str, Any]):
         """更新TTS配置"""
         with self._lock:
+            if 'engine' in tts_config:
+                self._state['tts']['engine'] = tts_config['engine']
             if 'sid' in tts_config:
                 self._state['tts']['sid'] = tts_config['sid']
             if 'speed' in tts_config:
@@ -550,6 +553,28 @@ class SystemCore:
         self._save_config()
         self._broadcast()
         print(f'[SystemCore] TTS配置更新: {tts_config}')
+    
+    def set_tts_engine(self, engine: str) -> bool:
+        """设置TTS引擎: 'vits' 或 'pytts'"""
+        if engine not in ['vits', 'pytts']:
+            print(f'[SystemCore] 无效的TTS引擎: {engine}')
+            return False
+        
+        with self._lock:
+            old_engine = self._state['tts']['engine']
+            if old_engine == engine:
+                return True
+            self._state['tts']['engine'] = engine
+        
+        self._save_config()
+        self._broadcast()
+        print(f'[SystemCore] TTS引擎: {old_engine} -> {engine}')
+        return True
+    
+    def get_tts_engine(self) -> str:
+        """获取当前TTS引擎"""
+        with self._lock:
+            return self._state['tts']['engine']
     
     def is_game_active(self) -> bool:
         """游戏是否激活"""
@@ -744,7 +769,7 @@ class SystemCore:
             # 计算空闲时间
             idle_minutes = (now - self._last_activity_time) / 60
             
-            # 合并数据
+            # 合并数据 - 包含所有感知字段
             perception_update = {
                 'personDetected': data.get('personDetected', False),
                 'personCount': data.get('personCount', 0),
@@ -757,6 +782,11 @@ class SystemCore:
                 'activity': data.get('activity', 'unknown'),
                 'speaking': data.get('speaking', False),
                 'idleMinutes': round(idle_minutes, 1),
+                # 扩展字段用于developer页面显示
+                'physicalLoad': data.get('fatigue', 0),  # 身体负荷 = 疲劳度
+                'cognitiveLoad': 1 - data.get('attention', 0.5),  # 认知负荷 = 1 - 注意力
+                'engagement': data.get('attention', 0.5),  # 参与度 = 注意力
+                'lightLevel': data.get('lightLevel', 'normal'),
             }
             
             # 脚部位置单独处理

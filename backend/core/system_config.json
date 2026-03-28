@@ -8,8 +8,9 @@
     "voiceSpeaking": true
   },
   "tts": {
+    "engine": "pytts",
     "sid": 0,
-    "speed": 1.1,
-    "volume": 1.5
+    "speed": 1.0,
+    "volume": 1.0
   }
 }

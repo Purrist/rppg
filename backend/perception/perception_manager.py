@@ -2,6 +2,11 @@
 # 感知管理器 - 整合所有检测
 
 import cv2
+
+# 抑制OpenCV警告
+import logging
+logging.getLogger('cv2').setLevel(logging.ERROR)
+
 import numpy as np
 import threading
 from collections import deque

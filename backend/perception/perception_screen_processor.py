@@ -2,6 +2,11 @@
 # 投影摄像头处理 - 脚部检测
 
 import cv2
+
+# 抑制OpenCV警告
+import logging
+logging.getLogger('cv2').setLevel(logging.ERROR)
+
 import numpy as np
 import time
 import threading

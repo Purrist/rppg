@@ -18,6 +18,11 @@ from flask import Flask, Response, request, jsonify, send_from_directory
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 import cv2
+
+# 抑制OpenCV警告
+import logging
+logging.getLogger('cv2').setLevel(logging.ERROR)
+
 import numpy as np
 
 # ============================================================================# 配置# ============================================================================
@@ -174,12 +179,6 @@ def handle_voice_command(text: str):
     print(f"[语音命令] 收到: {text}")
 
     try:
-        # 通知前端显示用户语音（只发送一次）
-        socketio.emit('voice_user_speak', {
-            'text': text,
-            'state': 'PROCESSING'
-        })
-        
         # 获取当前系统上下文
         context = system_core.get_state()
         
@@ -188,14 +187,10 @@ def handle_voice_command(text: str):
         
         print(f"[语音命令] AI回复: {response}")
         
-        # 通知前端显示AI回复
+        # 通知前端显示AI回复（会触发打字机效果）
         socketio.emit('voice_llm_response', {
             'text': response
         })
-        
-        # 启用后端播报
-        if voice_manager:
-            voice_manager._speak(response)
         
         # 处理页面跳转
         if action and action.get('type') == 'navigate':
@@ -205,8 +200,6 @@ def handle_voice_command(text: str):
         print(f"[语音命令] 处理错误: {e}")
         import traceback
         traceback.print_exc()
-        if voice_manager:
-            voice_manager._speak('抱歉，我遇到了一点问题。')
 
 # 用户状态（保留用于兼容）
 user_state = {
@@ -421,7 +414,51 @@ def api_health():
 
 @app.route('/api/user_state')
 def api_user_state():
-    return jsonify(user_state)
+    """获取用户感知状态 - 返回前端期望的格式"""
+    # 从perception_manager获取最新状态
+    pm_state = perception_manager.get_state()
+    
+    # 转换为前端期望的格式
+    formatted_state = {
+        "person_detected": pm_state.get("environment", {}).get("person_present", False),
+        "face_detected": pm_state.get("environment", {}).get("face_detected", False),
+        "body_detected": pm_state.get("body_state", {}).get("posture") != "unknown",
+        "face_count": pm_state.get("environment", {}).get("person_count", 0),
+        "physical_load": {
+            "value": pm_state.get("overall", {}).get("fatigue_level", 0),
+            "heart_rate": pm_state.get("heart_rate", {}).get("bpm"),
+            "movement_intensity": pm_state.get("body_state", {}).get("activity_level", 0),
+            "fall_detected": False  # 暂时不支持摔倒检测
+        },
+        "cognitive_load": {
+            "value": 1 - pm_state.get("eye_state", {}).get("attention_score", 0.5),  # 注意力低则认知负荷高
+            "error_rate": 0,  # 暂时不支持错误率检测
+            "attention_stability": pm_state.get("eye_state", {}).get("attention_score", 0.5)
+        },
+        "engagement": {
+            "value": pm_state.get("overall", {}).get("engagement_level", 0.5),
+            "emotion_positive": 0.5 if pm_state.get("emotion", {}).get("primary") == "neutral" else (0.8 if pm_state.get("emotion", {}).get("primary") in ["happy", "excited"] else 0.2),
+            "initiative_level": pm_state.get("body_state", {}).get("activity_level", 0)
+        },
+        "emotion": {
+            "primary": pm_state.get("emotion", {}).get("primary", "neutral")
+        },
+        "posture": {
+            "type": pm_state.get("body_state", {}).get("posture", "unknown"),
+            "stability": 1.0 if pm_state.get("body_state", {}).get("posture") != "unknown" else 0
+        },
+        "activity": {
+            "level": pm_state.get("body_state", {}).get("activity_level", 0)
+        },
+        "environment": {
+            "light_level": pm_state.get("environment", {}).get("light_level", "normal")
+        },
+        "overall": {
+            "state_summary": pm_state.get("overall", {}).get("state_summary", "normal")
+        }
+    }
+    
+    return jsonify(formatted_state)
 
 @app.route('/api/world_state')
 def api_world_state():
@@ -785,6 +822,34 @@ def handle_set_tts_volume(volume):
     if voice_manager:
         success = voice_manager.set_tts_volume(volume)
         print(f"[TTS] 设置音量: {volume}, 成功: {success}")
+
+@socketio.on('set_tts_engine')
+def handle_set_tts_engine(data):
+    """设置TTS引擎 (vits 或 pytts)"""
+    if not isinstance(data, dict):
+        return
+    
+    engine = data.get('engine')
+    if engine in ['vits', 'pytts']:
+        # 更新VoiceManager
+        if voice_manager:
+            success = voice_manager.set_tts_engine(engine)
+            print(f"[TTS] 设置引擎: {engine}, 成功: {success}")
+        
+        # 更新SystemCore
+        system_core.set_tts_engine(engine)
+    else:
+        print(f"[TTS] 无效的引擎类型: {engine}")
+
+@socketio.on('speak_text')
+def handle_speak_text(data):
+    """语音播报文本（前端打字完成后调用）"""
+    text = data.get('text', '')
+    source = data.get('source', 'text')
+    
+    if text and voice_manager:
+        print(f"[语音播报] 来源: {source}, 文本: {text[:30]}...")
+        voice_manager._speak(text)
 
 # ============================================================================
 # Socket事件 - 导航

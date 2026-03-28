@@ -373,36 +373,36 @@ const userState = computed(() => ({
   body_detected: systemState.perception?.bodyDetected || false,
   face_count: systemState.perception?.faceCount || 0,
   physical_load: {
-    value: systemState.perception?.fatigue || 0,
+    value: systemState.perception?.physicalLoad ?? (systemState.perception?.fatigue || 0),
     heart_rate: systemState.perception?.heartRate || null,
-    movement_intensity: 0,
+    movement_intensity: systemState.perception?.activity === 'active' ? 0.8 : (systemState.perception?.activity === 'sitting' ? 0.2 : 0),
     fall_detected: false
   },
   cognitive_load: {
-    value: systemState.perception?.attention || 0,
+    value: systemState.perception?.cognitiveLoad ?? (1 - (systemState.perception?.attention || 0.5)),
     error_rate: 0,
-    attention_stability: 1
+    attention_stability: systemState.perception?.attention || 0.5
   },
   engagement: {
-    value: 0.5,
-    emotion_positive: 0.5,
-    initiative_level: 0.5
+    value: systemState.perception?.engagement ?? (systemState.perception?.attention || 0.5),
+    emotion_positive: systemState.perception?.emotion === 'happy' ? 0.8 : (systemState.perception?.emotion === 'neutral' ? 0.5 : 0.3),
+    initiative_level: systemState.perception?.activity === 'active' ? 0.7 : 0.3
   },
   emotion: {
     primary: systemState.perception?.emotion || 'neutral'
   },
   posture: {
     type: systemState.perception?.activity || 'unknown',
-    stability: 1
+    stability: systemState.perception?.bodyDetected ? 0.8 : 0
   },
   activity: {
-    level: 0
+    level: systemState.perception?.activity === 'active' ? 0.8 : (systemState.perception?.activity === 'sitting' ? 0.2 : 0)
   },
   environment: {
-    light_level: systemState.environment?.lightLevel || 'normal'
+    light_level: systemState.perception?.lightLevel || systemState.environment?.lightLevel || 'normal'
   },
   overall: {
-    state_summary: 'normal'
+    state_summary: systemState.perception?.fatigue > 0.6 ? 'fatigued' : (systemState.perception?.attention > 0.7 ? 'engaged' : 'normal')
   }
 }))
 

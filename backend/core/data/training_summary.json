@@ -43,5 +43,20 @@
     "accuracy": 0.8461538461538461,
     "avg_reaction_time_ms": 4707.231714175297,
     "duration": 187
+  },
+  {
+    "session_id": "processing_speed_20260328_204501",
+    "timestamp": "2026-03-28T20:45:01.162814",
+    "game_type": "processing_speed",
+    "module": "go_no_go",
+    "difficulty_range": "1-8",
+    "score": 0,
+    "total_trials": 26,
+    "correct_trials": 18,
+    "incorrect_trials": 8,
+    "missed_trials": 6,
+    "accuracy": 0.6923076923076923,
+    "avg_reaction_time_ms": 4804.557690253625,
+    "duration": 364
   }
 ]
