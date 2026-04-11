@@ -1,0 +1,34 @@
+{
+  "session_id": "processing_speed_20260328_231940",
+  "start_time": "2026-03-28T23:19:40.385888",
+  "end_time": "2026-03-28T23:19:56.951550",
+  "game_type": "processing_speed",
+  "module": "choice_reaction",
+  "difficulty_history": [
+    {
+      "timestamp": "2026-03-28T23:19:40.385888",
+      "difficulty": 5,
+      "reason": "基于历史表现的最佳初始难度"
+    }
+  ],
+  "trials": [
+    {
+      "trial_id": 1,
+      "timestamp": "2026-03-28T23:19:49.436667",
+      "module": "choice_reaction",
+      "difficulty": 3,
+      "question_type": "no_go",
+      "is_correct": false,
+      "reaction_time_ms": 7006.918907165527,
+      "target_zone": 5,
+      "selected_zone": null
+    }
+  ],
+  "final_score": 0,
+  "final_accuracy": 0.0,
+  "total_trials": 1,
+  "correct_trials": 0,
+  "avg_reaction_time_ms": 7006.918907165527,
+  "min_difficulty": 3,
+  "max_difficulty": 3
+}

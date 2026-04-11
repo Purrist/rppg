@@ -84,6 +84,10 @@ class VoiceManager:
         self._current_session_id = 0  # 正在运行的会话ID
         self._session_lock = threading.Lock()
         
+        # ⭐ 语音播报管理
+        self._speaking_lock = threading.Lock()  # 确保同一时间只有一个播报任务
+        self._current_speak_session = 0  # 当前播报会话ID
+        
         # 音频队列和录音数据
         self.audio_queue = queue.Queue()
         self.recorded_audio = []
@@ -685,24 +689,18 @@ class VoiceManager:
                     'text': text
                 })
                 
-                # 后端实际播放语音
-                def play_thread():
-                    try:
-                        # 调用_speak方法进行后端播放
-                        self._speak(text)
-                        # 等待播放完成 - 轮询is_playing状态
-                        start_time = time.time()
-                        while self.is_playing and time.time() - start_time < 10:  # 最多等待10秒
-                            time.sleep(0.1)
-                    except Exception as e:
-                        print(f"[VoiceManager] 播放错误: {e}")
-                    finally:
-                        # 确保播放状态被重置
-                        self.is_playing = False
-                        speak_event.set()
-                        self.socketio.emit('voice_speaking', {'status': 'end'})
+                # 直接调用_speak方法进行后端播放（现在是异步的）
+                self._speak(text)
                 
-                threading.Thread(target=play_thread, daemon=True).start()
+                # 等待播放完成 - 轮询is_playing状态
+                start_time = time.time()
+                while self.is_playing and time.time() - start_time < 10:  # 最多等待10秒
+                    time.sleep(0.1)
+                
+                # 确保播放状态被重置
+                self.is_playing = False
+                speak_event.set()
+                self.socketio.emit('voice_speaking', {'status': 'end'})
             
             # 通知前端播放回应
             speak_and_wait(response)
@@ -970,43 +968,161 @@ class VoiceManager:
         """打断处理，停止语音播报"""
         print("[VoiceManager] 打断: 停止处理")
         self.is_playing = False
+        
+        # 强制增加播报会话ID，中断当前播报
+        with self._speaking_lock:
+            self._current_speak_session += 1
+        
+        # 尝试停止音频流
+        try:
+            import sounddevice as sd
+            if sd.get_stream().active:
+                sd.stop()
+        except:
+            pass
     
     def _speak(self, text):
         """语音合成并播放（非阻塞）- 支持VITS和pytts"""
         if not text:
             return
         
-        print(f"[VoiceManager] 语音播报 ({self.tts_engine_type}): {text}")
+        # 生成新的播报会话ID，自动打断之前的播报
+        with self._speaking_lock:
+            self._current_speak_session += 1
+            current_session = self._current_speak_session
         
-        # 直接在当前线程中播放，避免线程嵌套
-        try:
+        print(f"[VoiceManager] 语音播报 ({self.tts_engine_type}): {text} [会话{current_session}]")
+        
+        # 在后台线程中播放，避免阻塞主线程
+        def play_thread():
             # 标记开始播放
             self.is_playing = True
             
-            if self.tts_engine_type == 'vits' and self.tts_engine:
-                # 使用VITS生成语音
-                self._speak_vits(text)
-            elif self.tts_engine_type == 'pytts' and self.pytts_engine:
-                # 使用pytts生成语音
-                self._speak_pytts(text)
-            else:
-                # 如果当前引擎不可用，尝试另一个
-                if self.tts_engine:
-                    print(f"[VoiceManager] 当前引擎 {self.tts_engine_type} 不可用，切换到VITS")
-                    self._speak_vits(text)
-                elif self.pytts_engine:
-                    print(f"[VoiceManager] 当前引擎 {self.tts_engine_type} 不可用，切换到pytts")
-                    self._speak_pytts(text)
-                else:
-                    print("[VoiceManager] 没有可用的TTS引擎")
+            try:
+                # 检查是否被新的播报任务打断
+                def is_speaking_session_valid():
+                    with self._speaking_lock:
+                        return self._current_speak_session == current_session
+                
+                if self.tts_engine_type == 'vits' and self.tts_engine:
+                    # 使用VITS生成语音
+                    audio = self.tts_engine.generate(
+                        text, 
+                        sid=self.tts_sid, 
+                        speed=max(1.2, self.tts_speed)
+                    )
                     
-        except Exception as e:
-            print(f"[VoiceManager] 语音播放错误: {e}")
-            import traceback
-            traceback.print_exc()
-        finally:
-            # 确保播放状态被重置
-            self.is_playing = False
+                    # 检查是否被打断
+                    if not is_speaking_session_valid():
+                        print(f"[VoiceManager] 播报被打断 [会话{current_session}]")
+                        return
+                    
+                    # 转换为numpy数组并应用音量
+                    samples = np.array(audio.samples, dtype=np.float32) * self.tts_volume
+                    
+                    # 检查是否被打断
+                    if not is_speaking_session_valid():
+                        print(f"[VoiceManager] 播报被打断 [会话{current_session}]")
+                        return
+                    
+                    # 播放音频
+                    try:
+                        sd.play(samples, samplerate=audio.sample_rate)
+                        # 设置超时，避免音频设备问题导致无限等待
+                        start_time = time.time()
+                        while sd.get_stream().active and time.time() - start_time < 10:
+                            if not is_speaking_session_valid():
+                                print(f"[VoiceManager] 播报被打断 [会话{current_session}]")
+                                sd.stop()
+                                return
+                            time.sleep(0.05)
+                        # 确保流被停止
+                        if sd.get_stream().active:
+                            sd.stop()
+                    except Exception as e:
+                        print(f"[VoiceManager] VITS播放错误: {e}")
+                        # 确保流被停止
+                        try:
+                            if sd.get_stream().active:
+                                sd.stop()
+                        except:
+                            pass
+                
+                elif self.tts_engine_type == 'pytts' and self.pytts_engine:
+                    # 使用pytts生成语音
+                    try:
+                        # 每次重新初始化引擎，避免run loop already started错误
+                        import pyttsx3
+                        engine = pyttsx3.init()
+                        
+                        # 设置语速 (pytts默认是200，我们根据tts_speed调整)
+                        rate = int(150 * self.tts_speed)
+                        engine.setProperty('rate', rate)
+                        
+                        # 设置音量
+                        engine.setProperty('volume', min(1.0, self.tts_volume))
+                        
+                        # 播放语音
+                        engine.say(text)
+                        
+                        # 检查是否被打断
+                        if not is_speaking_session_valid():
+                            print(f"[VoiceManager] 播报被打断 [会话{current_session}]")
+                            engine.stop()
+                            return
+                        
+                        engine.runAndWait()
+                        
+                        # 释放引擎
+                        engine.stop()
+                        
+                    except Exception as e:
+                        print(f"[VoiceManager] pytts播放错误: {e}")
+                        # 如果pytts失败，尝试使用VITS，但避免递归调用
+                        if self.tts_engine and self.tts_engine_type != 'vits' and is_speaking_session_valid():
+                            print("[VoiceManager] 尝试切换到VITS引擎")
+                            # 直接使用VITS引擎，不通过_speak方法
+                            actual_speed = max(1.2, self.tts_speed)
+                            audio = self.tts_engine.generate(text, sid=self.tts_sid, speed=actual_speed)
+                            samples = np.array(audio.samples, dtype=np.float32) * self.tts_volume
+                            sd.play(samples, samplerate=audio.sample_rate)
+                            sd.wait()
+                
+                else:
+                    # 如果当前引擎不可用，尝试另一个
+                    if self.tts_engine and is_speaking_session_valid():
+                        print(f"[VoiceManager] 当前引擎 {self.tts_engine_type} 不可用，切换到VITS")
+                        # 直接使用VITS引擎
+                        actual_speed = max(1.2, self.tts_speed)
+                        audio = self.tts_engine.generate(text, sid=self.tts_sid, speed=actual_speed)
+                        samples = np.array(audio.samples, dtype=np.float32) * self.tts_volume
+                        sd.play(samples, samplerate=audio.sample_rate)
+                        sd.wait()
+                    elif self.pytts_engine and is_speaking_session_valid():
+                        print(f"[VoiceManager] 当前引擎 {self.tts_engine_type} 不可用，切换到pytts")
+                        # 直接使用pytts引擎
+                        import pyttsx3
+                        engine = pyttsx3.init()
+                        rate = int(150 * self.tts_speed)
+                        engine.setProperty('rate', rate)
+                        engine.setProperty('volume', min(1.0, self.tts_volume))
+                        engine.say(text)
+                        engine.runAndWait()
+                        engine.stop()
+                    else:
+                        print("[VoiceManager] 没有可用的TTS引擎")
+                        
+            except Exception as e:
+                print(f"[VoiceManager] 语音播放错误: {e}")
+                import traceback
+                traceback.print_exc()
+            finally:
+                # 确保播放状态被重置
+                self.is_playing = False
+                print(f"[VoiceManager] 播报完成 [会话{current_session}]")
+        
+        # 启动播放线程
+        threading.Thread(target=play_thread, daemon=True).start()
     
     def _speak_vits(self, text):
         """使用VITS引擎播报"""

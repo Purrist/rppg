@@ -55,7 +55,7 @@ try:
 except:
     pass
 
-TABLET_VIDEO_URL = "http://192.168.3.94:8080/video"
+TABLET_VIDEO_URL = "http://10.158.8.65:8080/video"
 PROJECTION_CAMERA_SOURCE = 1
 
 if len(sys.argv) >= 2:
@@ -121,7 +121,7 @@ game_manager = GameManager(socketio, system_core)
 for game_id, game_class in GAME_REGISTRY.items():
     config = GAME_CONFIGS.get(game_id)
     game_manager.register(game_id, game_class, config)
-print(f"[游戏系统] 已注册游戏: {list(GAME_REGISTRY.keys())}")
+#print(f"[游戏系统] 已注册游戏: {list(GAME_REGISTRY.keys())}")
 
 # 4. 感知管理器
 perception_manager = PerceptionManager()
@@ -171,7 +171,7 @@ from core.training_analytics import init_training_analytics, get_training_analyt
 # ⭐ 使用绝对路径确保文件保存到正确位置
 core_data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "core")
 training_analytics = init_training_analytics(data_dir=core_data_dir)
-print(f"[训练系统] 训练分析器已初始化，数据目录: {core_data_dir}")
+#print(f"[训练系统] 训练分析器已初始化，数据目录: {core_data_dir}")
 
 # 语音命令处理函数
 def handle_voice_command(text: str):
@@ -218,75 +218,155 @@ _last_perception_time = 0
 PERCEPTION_INTERVAL = 0.5  # 500ms处理一次感知，平衡性能和实时性
 
 def perception_worker():
-    """感知处理线程 - 带指数退避重连机制"""
+    """感知处理线程 - 带指数退避重连机制和本地摄像头切换"""
     import urllib.request
     
     global perception_frame, user_state, _last_perception_time
     tablet_url = TABLET_VIDEO_URL
     
-    print(f"[感知线程] 启动，连接: {tablet_url}")
+    #print(f"[感知线程] 启动，连接: {tablet_url}")
     
     # ⭐ 指数退避重连参数
     retry_delay = 1
     max_retry_delay = 30
     consecutive_errors = 0
     
+    # 本地摄像头切换参数
+    use_local_camera = False
+    local_camera_cap = None
+    
     while True:
         try:
-            stream = urllib.request.urlopen(tablet_url, timeout=5)
-            bytes_data = bytes()
-            
-            # 连接成功，重置重连参数
-            if consecutive_errors > 0:
-                print(f"[感知线程] 连接恢复")
-                retry_delay = 1
-                consecutive_errors = 0
-            
-            while True:
-                bytes_data += stream.read(4096)
-                a = bytes_data.find(b'\xff\xd8')
-                b = bytes_data.find(b'\xff\xd9')
+            if not use_local_camera:
+                # 尝试连接网络摄像头
+                stream = urllib.request.urlopen(tablet_url, timeout=5)
+                bytes_data = bytes()
                 
-                if a != -1 and b != -1:
-                    jpg = bytes_data[a:b+2]
-                    bytes_data = bytes_data[b+2:]
+                # 连接成功，重置重连参数
+                if consecutive_errors > 0:
+                    print(f"[感知线程] 连接恢复")
+                    retry_delay = 1
+                    consecutive_errors = 0
+                
+                # 重置本地摄像头状态
+                if local_camera_cap:
+                    local_camera_cap.release()
+                    local_camera_cap = None
+                    print("[感知线程] 切换回网络摄像头")
+                
+                while True:
+                    bytes_data += stream.read(4096)
+                    a = bytes_data.find(b'\xff\xd8')
+                    b = bytes_data.find(b'\xff\xd9')
                     
-                    frame = cv2.imdecode(np.frombuffer(jpg, dtype=np.uint8), cv2.IMREAD_COLOR)
-                    
-                    if frame is None or frame.size == 0:
-                        continue
-                    
-                    now = time.time()
-                    
-                    # 视频帧始终更新（用于显示）
-                    with perception_frame_lock:
-                        _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-                        perception_frame = jpeg.tobytes()
-                    
-                    # 感知处理按频率限制
-                    if now - _last_perception_time >= PERCEPTION_INTERVAL:
-                        _last_perception_time = now
-                        user_state = perception_manager.process_frame(frame, "tablet")
+                    if a != -1 and b != -1:
+                        jpg = bytes_data[a:b+2]
+                        bytes_data = bytes_data[b+2:]
                         
-                        # 更新SystemCore的感知数据
-                        system_core.update_perception({
-                            'personDetected': user_state.get('environment', {}).get('person_present', False),
-                            'personCount': user_state.get('environment', {}).get('person_count', 0),
-                            'faceCount': user_state.get('environment', {}).get('person_count', 0),
-                            'bodyDetected': user_state.get('body_state', {}).get('posture') != 'unknown',
-                            'emotion': user_state.get('emotion', {}).get('primary', 'neutral'),
-                            'attention': user_state.get('eye_state', {}).get('attention_score', 0),
-                            'fatigue': user_state.get('overall', {}).get('fatigue_level', 0),
-                            'activity': user_state.get('body_state', {}).get('posture', 'unknown'),
-                        })
+                        frame = cv2.imdecode(np.frombuffer(jpg, dtype=np.uint8), cv2.IMREAD_COLOR)
+                        
+                        if frame is None or frame.size == 0:
+                            continue
+                        
+                        now = time.time()
+                        
+                        # 视频帧始终更新（用于显示）
+                        with perception_frame_lock:
+                            _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                            perception_frame = jpeg.tobytes()
+                        
+                        # 感知处理按频率限制
+                        if now - _last_perception_time >= PERCEPTION_INTERVAL:
+                            _last_perception_time = now
+                            user_state = perception_manager.process_frame(frame, "tablet")
+                            
+                            # 更新SystemCore的感知数据
+                            system_core.update_perception({
+                                'personDetected': user_state.get('environment', {}).get('person_present', False),
+                                'personCount': user_state.get('environment', {}).get('person_count', 0),
+                                'faceCount': user_state.get('environment', {}).get('person_count', 0),
+                                'bodyDetected': user_state.get('body_state', {}).get('posture') != 'unknown',
+                                'emotion': user_state.get('emotion', {}).get('primary', 'neutral'),
+                                'attention': user_state.get('eye_state', {}).get('attention_score', 0),
+                                'fatigue': user_state.get('overall', {}).get('fatigue_level', 0),
+                                'activity': user_state.get('body_state', {}).get('posture', 'unknown'),
+                            })
+            else:
+                # 使用本地摄像头
+                if not local_camera_cap:
+                    local_camera_cap = cv2.VideoCapture(0)
+                    if local_camera_cap.isOpened():
+                        print("[感知线程] 切换到本地摄像头 (ID: 0)")
+                    else:
+                        print("[感知线程] 本地摄像头打开失败，尝试重新连接网络摄像头")
+                        use_local_camera = False
+                        local_camera_cap = None
+                        continue
+                
+                ret, frame = local_camera_cap.read()
+                if not ret or frame is None or frame.size == 0:
+                    # 本地摄像头读取失败，尝试重新连接网络摄像头
+                    if local_camera_cap:
+                        local_camera_cap.release()
+                        local_camera_cap = None
+                    use_local_camera = False
+                    print("[感知线程] 本地摄像头读取失败，尝试重新连接网络摄像头")
+                    continue
+                
+                now = time.time()
+                
+                # 视频帧始终更新（用于显示）
+                with perception_frame_lock:
+                    _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                    perception_frame = jpeg.tobytes()
+                
+                # 感知处理按频率限制
+                if now - _last_perception_time >= PERCEPTION_INTERVAL:
+                    _last_perception_time = now
+                    
+                    # 获取屏幕处理器的脚部检测状态
+                    feet_detected = False
+                    try:
+                        screen_proc = get_screen_processor()
+                        if screen_proc:
+                            status = screen_proc.get_status()
+                            feet_detected = status.get('feet_detected', False)
+                    except Exception:
+                        pass
+                    
+                    user_state = perception_manager.process_frame(frame, "tablet", feet_detected=feet_detected)
+                    
+                    # 更新SystemCore的感知数据
+                    system_core.update_perception({
+                        'personDetected': user_state.get('environment', {}).get('person_present', False),
+                        'personCount': user_state.get('environment', {}).get('person_count', 0),
+                        'faceCount': user_state.get('environment', {}).get('person_count', 0),
+                        'bodyDetected': user_state.get('body_state', {}).get('posture') != 'unknown',
+                        'emotion': user_state.get('emotion', {}).get('primary', 'neutral'),
+                        'attention': user_state.get('eye_state', {}).get('attention_score', 0),
+                        'fatigue': user_state.get('overall', {}).get('fatigue_level', 0),
+                        'activity': user_state.get('body_state', {}).get('posture', 'unknown'),
+                    })
+                
+                # 本地摄像头模式下，短暂休眠以控制帧率
+                time.sleep(0.033)  # 约30fps
                 
         except Exception as e:
             consecutive_errors += 1
             print(f"[感知线程] 错误 ({consecutive_errors}): {e}")
-            print(f"[感知线程] {retry_delay}秒后重连...")
-            time.sleep(retry_delay)
-            # 指数退避，但不超过最大值
-            retry_delay = min(retry_delay * 2, max_retry_delay)
+            
+            # 当连续错误次数达到阈值时，切换到本地摄像头
+            if consecutive_errors >= 5 and not use_local_camera:
+                print("[感知线程] 网络摄像头连接失败，切换到本地摄像头")
+                use_local_camera = True
+                if local_camera_cap:
+                    local_camera_cap.release()
+                    local_camera_cap = None
+            else:
+                print(f"[感知线程] {retry_delay}秒后重连...")
+                time.sleep(retry_delay)
+                # 指数退避，但不超过最大值
+                retry_delay = min(retry_delay * 2, max_retry_delay)
 
 # ============================================================================
 # Agent循环 - 降低频率
@@ -915,10 +995,10 @@ if __name__ == '__main__':
     threading.Thread(target=main_worker, daemon=True).start()
     threading.Thread(target=perception_worker, daemon=True).start()
     threading.Thread(target=agent_loop, daemon=True).start()
-    
+"""    
     print("=" * 60)
     print("AI具身智能认知训练系统 - EAOS v3.0")
-    print("=" * 60)
+    print("============================================================")
     print()
     print(f"本机IP:     http://{LOCAL_IP}:{PORT}")
     print(f"平板访问:   http://{LOCAL_IP}:3000")
@@ -926,20 +1006,25 @@ if __name__ == '__main__':
     print(f"开发后台:   http://{LOCAL_IP}:3000/developer")
     print()
     print("已注册游戏:")
+    
     for game_id in GAME_REGISTRY:
         print(f"  - {game_id}")
     print()
+    
     print("系统模式:")
+    
     mode = system_core.get_ai_mode()
     if mode == 'companion':
         print("  🟢 智伴模式 - AI主动感知和交互")
     else:
         print("  ⚪ 基础模式 - 预设程序运行")
     print()
+    
     print("模块结构:")
     print("  core/       - SystemCore（统一状态管理）")
     print("  games/      - 游戏系统")
     print("  perception/ - 感知系统")
-    print("=" * 60)
-    
-    socketio.run(app, host='0.0.0.0', port=PORT, debug=False)
+    print("============================================================")
+    print()
+"""
+socketio.run(app, host='0.0.0.0', port=PORT, debug=False)
