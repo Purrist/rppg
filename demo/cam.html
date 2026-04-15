@@ -3,355 +3,103 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>rPPG 心率监测 - POS Algorithm</title>
+    <title>rPPG 心率监测 V3</title>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
     <style>
-        :root {
-            --bg: #050a12;
-            --card: #0b1320;
-            --border: #14243a;
-            --fg: #c4d4e4;
-            --muted: #3e5060;
-            --accent: #00e676;
-            --accent-dim: #00994d;
-            --accent-glow: rgba(0, 230, 118, 0.25);
-            --danger: #ff4757;
-            --warning: #ffa502;
-        }
-
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-
-        body {
-            font-family: 'Share Tech Mono', monospace;
-            background: var(--bg);
-            color: var(--fg);
-            min-height: 100vh;
-            overflow: hidden;
-        }
-
-        /* ====== 顶部栏 ====== */
-        .header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 10px 24px;
-            background: var(--card);
-            border-bottom: 1px solid var(--border);
-            height: 48px;
-        }
-        .header-left {
-            display: flex;
-            align-items: center;
-            gap: 14px;
-        }
-        .header-logo {
-            width: 28px; height: 28px;
-            border: 2px solid var(--accent);
-            border-radius: 50%;
-            display: flex; align-items: center; justify-content: center;
-            position: relative;
-        }
-        .header-logo::after {
-            content: '';
-            width: 10px; height: 10px;
-            background: var(--accent);
-            border-radius: 50%;
-        }
-        .header-logo-pulse {
-            position: absolute; inset: -4px;
-            border: 1px solid var(--accent);
-            border-radius: 50%;
-            animation: logo-ring 2s ease-out infinite;
-        }
-        @keyframes logo-ring {
-            0% { transform: scale(0.8); opacity: 0.8; }
-            100% { transform: scale(1.6); opacity: 0; }
-        }
-        .header-title {
-            font-family: 'Orbitron', sans-serif;
-            font-weight: 700;
-            font-size: 15px;
-            color: var(--accent);
-            letter-spacing: 3px;
-        }
-        .header-badge {
-            font-size: 10px;
-            color: var(--muted);
-            background: rgba(0,230,118,0.06);
-            border: 1px solid rgba(0,230,118,0.15);
-            padding: 3px 10px;
-            border-radius: 3px;
-            letter-spacing: 1px;
-        }
-
-        /* ====== 主布局 ====== */
-        .main {
-            display: grid;
-            grid-template-columns: 1fr 350px;
-            height: calc(100vh - 48px);
-        }
-
-        /* ====== 视频区 ====== */
-        .video-section {
-            position: relative;
-            background: #000;
-            overflow: hidden;
-        }
-        .video-section img {
-            width: 100%; height: 100%;
-            object-fit: contain;
-            display: block;
-        }
-        /* CRT 扫描线 */
-        .video-scanlines {
-            position: absolute; inset: 0;
-            pointer-events: none;
-            background: repeating-linear-gradient(
-                0deg, transparent, transparent 3px,
-                rgba(0,0,0,0.04) 3px, rgba(0,0,0,0.04) 4px
-            );
-        }
-        /* 四角标记 */
-        .corner { position: absolute; width: 28px; height: 28px; border-color: var(--accent); border-style: solid; border-width: 0; opacity: 0.5; }
-        .corner.tl { top: 12px; left: 12px; border-top-width: 2px; border-left-width: 2px; }
-        .corner.tr { top: 12px; right: 12px; border-top-width: 2px; border-right-width: 2px; }
-        .corner.bl { bottom: 12px; left: 12px; border-bottom-width: 2px; border-left-width: 2px; }
-        .corner.br { bottom: 12px; right: 12px; border-bottom-width: 2px; border-right-width: 2px; }
-        /* REC 指示 */
-        .rec-indicator {
-            position: absolute; top: 18px; right: 56px;
-            display: flex; align-items: center; gap: 6px;
-            font-size: 11px; color: var(--danger); letter-spacing: 2px;
-            opacity: 0.8;
-        }
-        .rec-dot {
-            width: 8px; height: 8px; border-radius: 50%;
-            background: var(--danger);
-            animation: rec-blink 1.2s ease-in-out infinite;
-        }
-        @keyframes rec-blink { 0%,100% { opacity: 1; } 50% { opacity: 0.2; } }
-        /* 无信号遮罩 */
-        .no-signal {
-            position: absolute; inset: 0;
-            background: rgba(0,0,0,0.85);
-            display: flex; flex-direction: column;
-            align-items: center; justify-content: center;
-            z-index: 5;
-            transition: opacity 0.5s;
-        }
-        .no-signal.hidden { opacity: 0; pointer-events: none; }
-        .no-signal-icon { font-size: 48px; color: var(--muted); margin-bottom: 16px; }
-        .no-signal-text { font-size: 14px; color: var(--muted); letter-spacing: 2px; }
-
-        /* ====== 右侧面板 ====== */
-        .panel {
-            background: var(--card);
-            border-left: 1px solid var(--border);
-            display: flex; flex-direction: column;
-            overflow-y: auto;
-            scrollbar-width: thin;
-            scrollbar-color: var(--border) transparent;
-        }
-        .panel-block {
-            padding: 14px 18px;
-            border-bottom: 1px solid var(--border);
-        }
-        .panel-label {
-            font-size: 9px;
-            text-transform: uppercase;
-            letter-spacing: 2.5px;
-            color: var(--muted);
-            margin-bottom: 10px;
-        }
-
-        /* 心率数字区 */
-        .hr-block {
-            text-align: center;
-            padding: 20px 18px 16px;
-            position: relative;
-        }
-        .hr-ring {
-            width: 140px; height: 140px;
-            margin: 0 auto 8px;
-            position: relative;
-        }
-        .hr-ring svg {
-            width: 100%; height: 100%;
-            transform: rotate(-90deg);
-        }
-        .hr-ring-bg {
-            fill: none;
-            stroke: var(--border);
-            stroke-width: 4;
-        }
-        .hr-ring-fill {
-            fill: none;
-            stroke: var(--accent);
-            stroke-width: 4;
-            stroke-linecap: round;
-            stroke-dasharray: 408;
-            stroke-dashoffset: 408;
-            transition: stroke-dashoffset 0.6s ease, stroke 0.3s ease;
-            filter: drop-shadow(0 0 6px var(--accent-glow));
-        }
-        .hr-ring-inner {
-            position: absolute; inset: 0;
-            display: flex; flex-direction: column;
-            align-items: center; justify-content: center;
-        }
-        .hr-icon {
-            font-size: 16px; color: var(--accent);
-            margin-bottom: 2px;
-            animation: hb 1.2s ease-in-out infinite;
-        }
-        @keyframes hb {
-            0%,100% { transform: scale(1); opacity: 0.7; }
-            14% { transform: scale(1.25); opacity: 1; }
-            28% { transform: scale(1); opacity: 0.7; }
-        }
-        .hr-value {
-            font-family: 'Orbitron', sans-serif;
-            font-size: 44px; font-weight: 900;
-            color: var(--accent); line-height: 1;
-            text-shadow: 0 0 20px var(--accent-glow);
-            transition: transform 0.12s ease;
-        }
-        .hr-value.beat { transform: scale(1.06); }
-        .hr-unit {
-            font-family: 'Orbitron', sans-serif;
-            font-size: 11px; font-weight: 400;
-            color: var(--accent-dim);
-            letter-spacing: 4px; margin-top: 2px;
-        }
-
-        /* 波形 Canvas 容器 */
-        .canvas-wrap {
-            position: relative;
-            background: rgba(0,230,118,0.015);
-            border: 1px solid var(--border);
-            border-radius: 5px;
-            overflow: hidden;
-        }
-        .canvas-wrap canvas {
-            display: block; width: 100%;
-        }
-        .canvas-label {
-            position: absolute; top: 6px; left: 8px;
-            font-size: 9px; color: var(--muted);
-            letter-spacing: 1px; z-index: 1;
-        }
-
-        /* 信号质量 */
-        .quality-row {
-            display: flex; align-items: center; gap: 10px;
-        }
-        .quality-bar {
-            flex: 1; height: 5px;
-            background: rgba(255,255,255,0.04);
-            border-radius: 3px; overflow: hidden;
-        }
-        .quality-fill {
-            height: 100%; border-radius: 3px;
-            background: var(--accent);
-            transition: width 0.4s ease, background 0.4s ease;
-        }
-        .quality-fill.low { background: var(--danger); }
-        .quality-fill.mid { background: var(--warning); }
-        .quality-val {
-            font-size: 13px; font-weight: 700;
-            min-width: 38px; text-align: right;
-            color: var(--accent);
-        }
-
-        /* 状态行 */
-        .status-rows { display: flex; flex-direction: column; gap: 7px; }
-        .status-row {
-            display: flex; align-items: center; gap: 8px;
-            font-size: 11px;
-        }
-        .dot {
-            width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
-        }
-        .dot.g { background: var(--accent); box-shadow: 0 0 5px var(--accent); }
-        .dot.r { background: var(--danger); box-shadow: 0 0 5px var(--danger); }
-        .dot.y { background: var(--warning); box-shadow: 0 0 5px var(--warning); }
-        .dot.g.blink { animation: dot-blink 2s ease-in-out infinite; }
-        @keyframes dot-blink { 0%,100%{opacity:1}50%{opacity:0.3} }
-
-        /* 缓冲区进度 */
-        .buffer-wrap { margin-top: 4px; }
-        .buffer-bar {
-            height: 3px; background: rgba(255,255,255,0.04);
-            border-radius: 2px; overflow: hidden;
-        }
-        .buffer-fill {
-            height: 100%; background: var(--accent-dim);
-            border-radius: 2px; transition: width 0.3s ease;
-        }
-        .buffer-text {
-            font-size: 10px; color: var(--muted); margin-top: 4px;
-        }
-
-        /* 算法信息 */
-        .algo-info {
-            font-size: 10px; color: var(--muted); line-height: 2;
-        }
-        .algo-info em { font-style: normal; color: var(--fg); }
-
-        /* ====== 响应式 ====== */
-        @media (max-width: 860px) {
-            .main {
-                grid-template-columns: 1fr;
-                grid-template-rows: 55vh 1fr;
-            }
-            .panel { border-left: none; border-top: 1px solid var(--border); }
-            .hr-ring { width: 110px; height: 110px; }
-            .hr-value { font-size: 34px; }
-        }
-
-        @media (prefers-reduced-motion: reduce) {
-            *, *::before, *::after {
-                animation-duration: 0.01ms !important;
-                transition-duration: 0.01ms !important;
-            }
-        }
+        :root{--bg:#050a12;--card:#0b1320;--border:#14243a;--fg:#c4d4e4;--muted:#3e5060;--accent:#00e676;--accent-dim:#00994d;--accent-glow:rgba(0,230,118,0.25);--danger:#ff4757;--warning:#ffa502}
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{font-family:'Share Tech Mono',monospace;background:var(--bg);color:var(--fg);min-height:100vh;overflow:hidden}
+        .header{display:flex;align-items:center;justify-content:space-between;padding:10px 24px;background:var(--card);border-bottom:1px solid var(--border);height:48px}
+        .header-left{display:flex;align-items:center;gap:14px}
+        .header-logo{width:28px;height:28px;border:2px solid var(--accent);border-radius:50%;display:flex;align-items:center;justify-content:center;position:relative}
+        .header-logo::after{content:'';width:10px;height:10px;background:var(--accent);border-radius:50%}
+        .header-logo-pulse{position:absolute;inset:-4px;border:1px solid var(--accent);border-radius:50%;animation:lr 2s ease-out infinite}
+        @keyframes lr{0%{transform:scale(.8);opacity:.8}100%{transform:scale(1.6);opacity:0}}
+        .header-title{font-family:'Orbitron',sans-serif;font-weight:700;font-size:15px;color:var(--accent);letter-spacing:3px}
+        .header-badge{font-size:10px;color:var(--muted);background:rgba(0,230,118,.06);border:1px solid rgba(0,230,118,.15);padding:3px 10px;border-radius:3px;letter-spacing:1px}
+        .main{display:grid;grid-template-columns:1fr 350px;height:calc(100vh - 48px)}
+        .video-section{position:relative;background:#000;overflow:hidden}
+        .video-section img{width:100%;height:100%;object-fit:contain;display:block}
+        .video-scanlines{position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,0,0,.04) 3px,rgba(0,0,0,.04) 4px)}
+        .corner{position:absolute;width:28px;height:28px;border-color:var(--accent);border-style:solid;border-width:0;opacity:.5}
+        .corner.tl{top:12px;left:12px;border-top-width:2px;border-left-width:2px}
+        .corner.tr{top:12px;right:12px;border-top-width:2px;border-right-width:2px}
+        .corner.bl{bottom:12px;left:12px;border-bottom-width:2px;border-left-width:2px}
+        .corner.br{bottom:12px;right:12px;border-bottom-width:2px;border-right-width:2px}
+        .rec-indicator{position:absolute;top:18px;right:56px;display:flex;align-items:center;gap:6px;font-size:11px;color:var(--danger);letter-spacing:2px;opacity:.8}
+        .rec-dot{width:8px;height:8px;border-radius:50%;background:var(--danger);animation:rb 1.2s ease-in-out infinite}
+        @keyframes rb{0%,100%{opacity:1}50%{opacity:.2}}
+        .no-signal{position:absolute;inset:0;background:rgba(0,0,0,.85);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:5;transition:opacity .5s}
+        .no-signal.hidden{opacity:0;pointer-events:none}
+        .no-signal-icon{font-size:48px;color:var(--muted);margin-bottom:16px}
+        .no-signal-text{font-size:14px;color:var(--muted);letter-spacing:2px}
+        .panel{background:var(--card);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--border) transparent}
+        .panel-block{padding:14px 18px;border-bottom:1px solid var(--border)}
+        .panel-label{font-size:9px;text-transform:uppercase;letter-spacing:2.5px;color:var(--muted);margin-bottom:10px}
+        .hr-block{text-align:center;padding:20px 18px 16px}
+        .hr-ring{width:140px;height:140px;margin:0 auto 8px;position:relative}
+        .hr-ring svg{width:100%;height:100%;transform:rotate(-90deg)}
+        .hr-ring-bg{fill:none;stroke:var(--border);stroke-width:4}
+        .hr-ring-fill{fill:none;stroke:var(--accent);stroke-width:4;stroke-linecap:round;stroke-dasharray:408;stroke-dashoffset:408;transition:stroke-dashoffset .6s ease,stroke .3s ease;filter:drop-shadow(0 0 6px var(--accent-glow))}
+        .hr-ring-inner{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+        .hr-icon{font-size:16px;color:var(--accent);margin-bottom:2px;animation:hb 1.2s ease-in-out infinite}
+        @keyframes hb{0%,100%{transform:scale(1);opacity:.7}14%{transform:scale(1.25);opacity:1}28%{transform:scale(1);opacity:.7}}
+        .hr-value{font-family:'Orbitron',sans-serif;font-size:44px;font-weight:900;color:var(--accent);line-height:1;text-shadow:0 0 20px var(--accent-glow);transition:transform .12s ease}
+        .hr-value.beat{transform:scale(1.06)}
+        .hr-unit{font-family:'Orbitron',sans-serif;font-size:11px;font-weight:400;color:var(--accent-dim);letter-spacing:4px;margin-top:2px}
+        .canvas-wrap{position:relative;background:rgba(0,230,118,.015);border:1px solid var(--border);border-radius:5px;overflow:hidden}
+        .canvas-wrap canvas{display:block;width:100%}
+        .canvas-label{position:absolute;top:6px;left:8px;font-size:9px;color:var(--muted);letter-spacing:1px;z-index:1}
+        .quality-row{display:flex;align-items:center;gap:10px}
+        .quality-bar{flex:1;height:5px;background:rgba(255,255,255,.04);border-radius:3px;overflow:hidden}
+        .quality-fill{height:100%;border-radius:3px;background:var(--accent);transition:width .4s ease,background .4s ease}
+        .quality-fill.low{background:var(--danger)}.quality-fill.mid{background:var(--warning)}
+        .quality-val{font-size:13px;font-weight:700;min-width:38px;text-align:right;color:var(--accent)}
+        .status-rows{display:flex;flex-direction:column;gap:7px}
+        .status-row{display:flex;align-items:center;gap:8px;font-size:11px}
+        .dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+        .dot.g{background:var(--accent);box-shadow:0 0 5px var(--accent)}
+        .dot.r{background:var(--danger);box-shadow:0 0 5px var(--danger)}
+        .dot.y{background:var(--warning);box-shadow:0 0 5px var(--warning)}
+        .dot.g.blink{animation:db 2s ease-in-out infinite}
+        @keyframes db{0%,100%{opacity:1}50%{opacity:.3}}
+        .buffer-wrap{margin-top:4px}
+        .buffer-bar{height:3px;background:rgba(255,255,255,.04);border-radius:2px;overflow:hidden}
+        .buffer-fill{height:100%;background:var(--accent-dim);border-radius:2px;transition:width .3s ease}
+        .buffer-text{font-size:10px;color:var(--muted);margin-top:4px}
+        .algo-info{font-size:10px;color:var(--muted);line-height:2}
+        .algo-info em{font-style:normal;color:var(--fg)}
+        .pipeline{display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin-top:8px}
+        .pipe-step{font-size:9px;color:var(--accent-dim);background:rgba(0,230,118,.06);border:1px solid rgba(0,230,118,.12);padding:2px 7px;border-radius:2px;letter-spacing:.5px}
+        .pipe-arrow{font-size:9px;color:var(--muted)}
+        .fix-list{margin-top:6px;font-size:10px;line-height:1.9}
+        .fix-item{color:var(--muted)}.fix-item strong{color:var(--accent);font-weight:400}
+        @media(max-width:860px){.main{grid-template-columns:1fr;grid-template-rows:55vh 1fr}.panel{border-left:none;border-top:1px solid var(--border)}.hr-ring{width:110px;height:110px}.hr-value{font-size:34px}}
+        @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
     </style>
 </head>
 <body>
-
-<!-- 顶部栏 -->
 <header class="header">
     <div class="header-left">
-        <div class="header-logo">
-            <div class="header-logo-pulse"></div>
-        </div>
+        <div class="header-logo"><div class="header-logo-pulse"></div></div>
         <span class="header-title">rPPG MONITOR</span>
     </div>
-    <span class="header-badge">POS Algorithm &middot; Wang 2015</span>
+    <span class="header-badge">V3 Stable &amp; Accurate</span>
 </header>
-
-<!-- 主体 -->
 <main class="main">
-    <!-- 视频区 -->
     <section class="video-section" aria-label="摄像头视频流">
         <img id="videoImg" src="/video_feed" alt="摄像头视频流">
         <div class="video-scanlines"></div>
-        <div class="corner tl"></div>
-        <div class="corner tr"></div>
-        <div class="corner bl"></div>
-        <div class="corner br"></div>
+        <div class="corner tl"></div><div class="corner tr"></div>
+        <div class="corner bl"></div><div class="corner br"></div>
         <div class="rec-indicator"><div class="rec-dot"></div>LIVE</div>
         <div class="no-signal" id="noSignal">
             <i class="fa-solid fa-video-slash no-signal-icon"></i>
             <div class="no-signal-text">等待视频流...</div>
         </div>
     </section>
-
-    <!-- 右侧面板 -->
     <aside class="panel" aria-label="心率数据面板">
-
-        <!-- 心率数字 -->
         <div class="hr-block">
             <div class="hr-ring">
                 <svg viewBox="0 0 140 140">
@@ -365,28 +113,22 @@
                 </div>
             </div>
         </div>
-
-        <!-- 脉搏波形 -->
         <div class="panel-block">
-            <div class="panel-label">Pulse Waveform</div>
+            <div class="panel-label">Pulse Waveform (Filtered)</div>
             <div class="canvas-wrap">
                 <span class="canvas-label">PPG Signal</span>
                 <canvas id="pulseCanvas" width="630" height="140"></canvas>
             </div>
         </div>
-
-        <!-- 心率趋势 -->
         <div class="panel-block">
-            <div class="panel-label">Heart Rate Trend</div>
+            <div class="panel-label">Heart Rate Trend (Rate-Limited)</div>
             <div class="canvas-wrap">
                 <span class="canvas-label">BPM History</span>
                 <canvas id="trendCanvas" width="630" height="120"></canvas>
             </div>
         </div>
-
-        <!-- 信号质量 -->
         <div class="panel-block">
-            <div class="panel-label">Signal Quality</div>
+            <div class="panel-label">Signal Quality (SNR)</div>
             <div class="quality-row">
                 <div class="quality-bar">
                     <div class="quality-fill" id="qualityFill" style="width:0%"></div>
@@ -394,8 +136,6 @@
                 <span class="quality-val" id="qualityVal">0%</span>
             </div>
         </div>
-
-        <!-- 系统状态 -->
         <div class="panel-block">
             <div class="panel-label">System Status</div>
             <div class="status-rows">
@@ -420,344 +160,106 @@
                 <div class="buffer-bar">
                     <div class="buffer-fill" id="bufferFill" style="width:0%"></div>
                 </div>
-                <div class="buffer-text" id="bufferText">Buffer: 0 / 300 frames</div>
+                <div class="buffer-text" id="bufferText">Buffer: 0 / 180 frames</div>
             </div>
         </div>
-
-        <!-- 算法信息 -->
-        <div class="panel-block" style="border-bottom:none;">
-            <div class="panel-label">Algorithm Info</div>
-            <div class="algo-info">
-                Method: <em>POS (Plane-Orthogonal-to-Skin)</em><br>
-                Reference: <em>Wang et al., IEEE TBIOM 2015</em><br>
-                ROI: <em>Forehead region (15%-45% height)</em><br>
-                Window: <em>48 frames (~1.6s @30fps)</em><br>
-                HR Range: <em>45 - 180 BPM</em><br>
-                Analysis: <em>Hanning-windowed FFT</em>
+        <div class="panel-block" style="border-bottom:none">
+            <div class="panel-label">V3 Fixes</div>
+            <div class="fix-list">
+                <div class="fix-item"><strong>HR Jump:</strong> +Butterworth +Median +Rate Limit (±15/s)</div>
+                <div class="fix-item"><strong>Face:</strong> Far model (0.5-5m) + bbox EMA smooth</div>
+                <div class="fix-item"><strong>ROI:</strong> Core zone 20-40% × 30-70% + size check</div>
+            </div>
+            <div class="pipeline" style="margin-top:10px">
+                <span class="pipe-step">RGB</span><span class="pipe-arrow">→</span>
+                <span class="pipe-step">POS</span><span class="pipe-arrow">→</span>
+                <span class="pipe-step">Median</span><span class="pipe-arrow">→</span>
+                <span class="pipe-step">Detrend</span><span class="pipe-arrow">→</span>
+                <span class="pipe-step">Butterworth</span><span class="pipe-arrow">→</span>
+                <span class="pipe-step">FFT</span><span class="pipe-arrow">→</span>
+                <span class="pipe-step">Median HR</span><span class="pipe-arrow">→</span>
+                <span class="pipe-step">Rate Limit</span>
             </div>
         </div>
-
     </aside>
 </main>
-
 <script>
-    // ============================================================
-    //  前端逻辑：数据轮询 + Canvas 波形绘制
-    // ============================================================
+const $=id=>document.getElementById(id);
+const videoImg=$('videoImg'),noSignal=$('noSignal'),hrValue=$('hrValue'),hrRing=$('hrRing');
+const pulseCanvas=$('pulseCanvas'),trendCanvas=$('trendCanvas');
+const qualityFill=$('qualityFill'),qualityVal=$('qualityVal');
+const dotFace=$('dotFace'),dotSignal=$('dotSignal'),dotCam=$('dotCam');
+const statusFace=$('statusFace'),statusSignal=$('statusSignal'),statusCam=$('statusCam'),statusFps=$('statusFps');
+const bufferFill=$('bufferFill'),bufferText=$('bufferText');
+const pulseCtx=pulseCanvas.getContext('2d'),trendCtx=trendCanvas.getContext('2d');
+let lastHr=0,pulseData=[],trendData=[],videoReady=false;
+const RC=2*Math.PI*65;
 
-    const $ = id => document.getElementById(id);
+videoImg.addEventListener('load',()=>{if(!videoReady){videoReady=true;noSignal.classList.add('hidden');dotCam.className='dot g blink';statusCam.textContent='Camera: Active'}});
+videoImg.addEventListener('error',()=>{videoReady=false;noSignal.classList.remove('hidden');dotCam.className='dot r';statusCam.textContent='Camera: Error'});
 
-    // --- DOM 元素引用 ---
-    const videoImg      = $('videoImg');
-    const noSignal      = $('noSignal');
-    const hrValue       = $('hrValue');
-    const hrRing        = $('hrRing');
-    const hrIcon        = $('hrIcon');
-    const pulseCanvas   = $('pulseCanvas');
-    const trendCanvas   = $('trendCanvas');
-    const qualityFill   = $('qualityFill');
-    const qualityVal    = $('qualityVal');
-    const dotFace       = $('dotFace');
-    const dotSignal     = $('dotSignal');
-    const dotCam        = $('dotCam');
-    const statusFace    = $('statusFace');
-    const statusSignal  = $('statusSignal');
-    const statusCam     = $('statusCam');
-    const statusFps     = $('statusFps');
-    const bufferFill    = $('bufferFill');
-    const bufferText    = $('bufferText');
+function triggerBeat(){hrValue.classList.add('beat');setTimeout(()=>hrValue.classList.remove('beat'),130)}
+function updateRing(hr){const p=Math.max(0,Math.min(1,(hr-45)/135));hrRing.style.strokeDashoffset=RC*(1-p);let c='#00e676';if(hr>150)c='#ffa502';if(hr>170||hr<50)c='#ff4757';hrRing.style.stroke=c;hrValue.style.color=c;hrValue.style.textShadow='0 0 20px '+c+'44'}
 
-    const pulseCtx = pulseCanvas.getContext('2d');
-    const trendCtx = trendCanvas.getContext('2d');
+function drawPulse(data){
+    const w=pulseCanvas.width,h=pulseCanvas.height;
+    pulseCtx.clearRect(0,0,w,h);
+    pulseCtx.strokeStyle='rgba(0,230,118,0.05)';pulseCtx.lineWidth=.5;
+    for(let x=0;x<w;x+=30){pulseCtx.beginPath();pulseCtx.moveTo(x,0);pulseCtx.lineTo(x,h);pulseCtx.stroke()}
+    for(let y=0;y<h;y+=28){pulseCtx.beginPath();pulseCtx.moveTo(0,y);pulseCtx.lineTo(w,y);pulseCtx.stroke()}
+    pulseCtx.strokeStyle='rgba(0,230,118,0.12)';pulseCtx.lineWidth=1;
+    pulseCtx.beginPath();pulseCtx.moveTo(0,h/2);pulseCtx.lineTo(w,h/2);pulseCtx.stroke();
+    if(data.length<2)return;
+    const step=w/(data.length-1),amp=h*.38;
+    pulseCtx.save();pulseCtx.shadowColor='#00e676';pulseCtx.shadowBlur=12;
+    pulseCtx.strokeStyle='rgba(0,230,118,0.3)';pulseCtx.lineWidth=4;pulseCtx.beginPath();
+    for(let i=0;i<data.length;i++){const x=i*step,y=h/2-data[i]*amp;i===0?pulseCtx.moveTo(x,y):pulseCtx.lineTo(x,y)}
+    pulseCtx.stroke();pulseCtx.restore();
+    pulseCtx.strokeStyle='#00e676';pulseCtx.lineWidth=1.8;pulseCtx.beginPath();
+    for(let i=0;i<data.length;i++){const x=i*step,y=h/2-data[i]*amp;i===0?pulseCtx.moveTo(x,y):pulseCtx.lineTo(x,y)}
+    pulseCtx.stroke();
+    const gR=pulseCtx.createLinearGradient(w-60,0,w,0);gR.addColorStop(0,'rgba(5,10,18,0)');gR.addColorStop(1,'rgba(5,10,18,0.7)');pulseCtx.fillStyle=gR;pulseCtx.fillRect(w-60,0,60,h);
+    const gL=pulseCtx.createLinearGradient(0,0,40,0);gL.addColorStop(0,'rgba(5,10,18,0.8)');gL.addColorStop(1,'rgba(5,10,18,0)');pulseCtx.fillStyle=gL;pulseCtx.fillRect(0,0,40,h);
+}
 
-    // --- 状态 ---
-    let lastHr = 0;
-    let pulseData = [];
-    let trendData = [];
-    let videoReady = false;
+function drawTrend(data){
+    const w=trendCanvas.width,h=trendCanvas.height;
+    trendCtx.clearRect(0,0,w,h);
+    trendCtx.strokeStyle='rgba(0,230,118,0.04)';trendCtx.lineWidth=.5;
+    for(let x=0;x<w;x+=30){trendCtx.beginPath();trendCtx.moveTo(x,0);trendCtx.lineTo(x,h);trendCtx.stroke()}
+    for(let y=0;y<h;y+=24){trendCtx.beginPath();trendCtx.moveTo(0,y);trendCtx.lineTo(w,y);trendCtx.stroke()}
+    if(data.length<2){trendCtx.fillStyle='rgba(62,80,96,0.5)';trendCtx.font='11px Share Tech Mono';trendCtx.textAlign='center';trendCtx.fillText('Waiting for data...',w/2,h/2+4);return}
+    const minHr=40,maxHr=180,range=maxHr-minHr,pad=10;
+    trendCtx.fillStyle='rgba(62,80,96,0.5)';trendCtx.font='9px Share Tech Mono';trendCtx.textAlign='left';
+    [60,90,120,150].forEach(v=>{const y=pad+(1-(v-minHr)/range)*(h-pad*2);trendCtx.fillText(v,4,y+3);trendCtx.strokeStyle='rgba(0,230,118,0.06)';trendCtx.lineWidth=.5;trendCtx.beginPath();trendCtx.moveTo(26,y);trendCtx.lineTo(w,y);trendCtx.stroke()});
+    const step=(w-30)/(data.length-1);
+    trendCtx.beginPath();
+    for(let i=0;i<data.length;i++){const x=30+i*step,y=pad+(1-(data[i]-minHr)/range)*(h-pad*2);i===0?trendCtx.moveTo(x,y):trendCtx.lineTo(x,y)}
+    trendCtx.lineTo(30+(data.length-1)*step,h);trendCtx.lineTo(30,h);trendCtx.closePath();
+    const fg=trendCtx.createLinearGradient(0,0,0,h);fg.addColorStop(0,'rgba(0,230,118,0.12)');fg.addColorStop(1,'rgba(0,230,118,0)');trendCtx.fillStyle=fg;trendCtx.fill();
+    trendCtx.save();trendCtx.shadowColor='#00e676';trendCtx.shadowBlur=6;trendCtx.strokeStyle='#00e676';trendCtx.lineWidth=1.5;trendCtx.lineJoin='round';trendCtx.beginPath();
+    for(let i=0;i<data.length;i++){const x=30+i*step,y=pad+(1-(data[i]-minHr)/range)*(h-pad*2);i===0?trendCtx.moveTo(x,y):trendCtx.lineTo(x,y)}
+    trendCtx.stroke();trendCtx.restore();
+    if(data.length>0){const lx=30+(data.length-1)*step,ly=pad+(1-(data[data.length-1]-minHr)/range)*(h-pad*2);trendCtx.beginPath();trendCtx.arc(lx,ly,3,0,Math.PI*2);trendCtx.fillStyle='#00e676';trendCtx.fill()}
+}
 
-    // 视频加载检测
-    videoImg.addEventListener('load', () => {
-        if (!videoReady) {
-            videoReady = true;
-            noSignal.classList.add('hidden');
-            dotCam.className = 'dot g blink';
-            statusCam.textContent = 'Camera: Active';
-        }
-    });
-    videoImg.addEventListener('error', () => {
-        videoReady = false;
-        noSignal.classList.remove('hidden');
-        dotCam.className = 'dot r';
-        statusCam.textContent = 'Camera: Error';
-    });
+function updateQuality(q){const p=Math.round(Math.max(0,Math.min(100,q)));qualityFill.style.width=p+'%';qualityVal.textContent=p+'%';qualityFill.className='quality-fill'+(p<25?' low':p<50?' mid':'');qualityVal.style.color=p<25?'var(--danger)':p<50?'var(--warning)':'var(--accent)'}
 
-    // --- 心跳动画控制 ---
-    function triggerBeat() {
-        hrValue.classList.add('beat');
-        setTimeout(() => hrValue.classList.remove('beat'), 130);
-    }
+async function fetchHR(){
+    try{
+        const r=await fetch('/api/hr');if(!r.ok)throw 0;const d=await r.json();
+        if(d.hr>0){const v=Math.round(d.hr);if(v!==lastHr){hrValue.textContent=v;updateRing(v);triggerBeat();lastHr=v}}else{hrValue.textContent='--';updateRing(0);lastHr=0}
+        updateQuality(d.quality);
+        if(d.face){dotFace.className='dot g blink';statusFace.textContent='Face: Detected ('+Math.round(d.confidence*100)+'%)'}else{dotFace.className='dot r';statusFace.textContent='Face: Not detected'}
+        if(d.quality>35&&d.face){dotSignal.className='dot g';statusSignal.textContent='Signal: Good'}else if(d.quality>20&&d.face){dotSignal.className='dot y blink';statusSignal.textContent='Signal: Weak'}else{dotSignal.className='dot r';statusSignal.textContent='Signal: No valid signal'}
+        statusFps.textContent='FPS: '+d.fps;
+        const bp=Math.round((d.buffer/d.buffer_max)*100);bufferFill.style.width=bp+'%';bufferText.textContent='Buffer: '+d.buffer+' / '+d.buffer_max+' frames';
+        if(d.pulse&&d.pulse.length>1){pulseData=d.pulse;drawPulse(pulseData)}
+        if(d.hr_history&&d.hr_history.length>1){trendData=d.hr_history;drawTrend(trendData)}
+    }catch(e){}
+}
 
-    // --- 心率环更新 ---
-    const RING_CIRCUMFERENCE = 2 * Math.PI * 65; // ≈ 408
-    function updateRing(hr) {
-        // 将心率映射到 0-100%（45-180 BPM 范围）
-        const pct = Math.max(0, Math.min(1, (hr - 45) / (180 - 45)));
-        const offset = RING_CIRCUMFERENCE * (1 - pct);
-        hrRing.style.strokeDashoffset = offset;
-
-        // 颜色
-        let color = '#00e676';
-        if (hr > 150) color = '#ffa502';
-        if (hr > 170 || hr < 50) color = '#ff4757';
-        hrRing.style.stroke = color;
-        hrValue.style.color = color;
-        hrValue.style.textShadow = `0 0 20px ${color}44`;
-    }
-
-    // --- 脉搏波形绘制（心电图风格）---
-    function drawPulseWave(data) {
-        const w = pulseCanvas.width;
-        const h = pulseCanvas.height;
-        pulseCtx.clearRect(0, 0, w, h);
-
-        // 网格
-        pulseCtx.strokeStyle = 'rgba(0,230,118,0.05)';
-        pulseCtx.lineWidth = 0.5;
-        for (let x = 0; x < w; x += 30) {
-            pulseCtx.beginPath(); pulseCtx.moveTo(x, 0); pulseCtx.lineTo(x, h); pulseCtx.stroke();
-        }
-        for (let y = 0; y < h; y += 28) {
-            pulseCtx.beginPath(); pulseCtx.moveTo(0, y); pulseCtx.lineTo(w, y); pulseCtx.stroke();
-        }
-        // 中线
-        pulseCtx.strokeStyle = 'rgba(0,230,118,0.12)';
-        pulseCtx.lineWidth = 1;
-        pulseCtx.beginPath(); pulseCtx.moveTo(0, h / 2); pulseCtx.lineTo(w, h / 2); pulseCtx.stroke();
-
-        if (data.length < 2) return;
-
-        const step = w / (data.length - 1);
-        const amp = h * 0.38;
-
-        // 发光层（宽线、低透明度）
-        pulseCtx.save();
-        pulseCtx.shadowColor = '#00e676';
-        pulseCtx.shadowBlur = 12;
-        pulseCtx.strokeStyle = 'rgba(0,230,118,0.3)';
-        pulseCtx.lineWidth = 4;
-        pulseCtx.beginPath();
-        for (let i = 0; i < data.length; i++) {
-            const x = i * step;
-            const y = h / 2 - data[i] * amp;
-            i === 0 ? pulseCtx.moveTo(x, y) : pulseCtx.lineTo(x, y);
-        }
-        pulseCtx.stroke();
-        pulseCtx.restore();
-
-        // 主线
-        pulseCtx.strokeStyle = '#00e676';
-        pulseCtx.lineWidth = 1.8;
-        pulseCtx.beginPath();
-        for (let i = 0; i < data.length; i++) {
-            const x = i * step;
-            const y = h / 2 - data[i] * amp;
-            i === 0 ? pulseCtx.moveTo(x, y) : pulseCtx.lineTo(x, y);
-        }
-        pulseCtx.stroke();
-
-        // 右侧渐隐扫描效果
-        const grad = pulseCtx.createLinearGradient(w - 60, 0, w, 0);
-        grad.addColorStop(0, 'rgba(5,10,18,0)');
-        grad.addColorStop(1, 'rgba(5,10,18,0.7)');
-        pulseCtx.fillStyle = grad;
-        pulseCtx.fillRect(w - 60, 0, 60, h);
-
-        // 左侧渐隐
-        const gradL = pulseCtx.createLinearGradient(0, 0, 40, 0);
-        gradL.addColorStop(0, 'rgba(5,10,18,0.8)');
-        gradL.addColorStop(1, 'rgba(5,10,18,0)');
-        pulseCtx.fillStyle = gradL;
-        pulseCtx.fillRect(0, 0, 40, h);
-    }
-
-    // --- 心率趋势图绘制 ---
-    function drawTrend(data) {
-        const w = trendCanvas.width;
-        const h = trendCanvas.height;
-        trendCtx.clearRect(0, 0, w, h);
-
-        // 网格
-        trendCtx.strokeStyle = 'rgba(0,230,118,0.04)';
-        trendCtx.lineWidth = 0.5;
-        for (let x = 0; x < w; x += 30) {
-            trendCtx.beginPath(); trendCtx.moveTo(x, 0); trendCtx.lineTo(x, h); trendCtx.stroke();
-        }
-        for (let y = 0; y < h; y += 24) {
-            trendCtx.beginPath(); trendCtx.moveTo(0, y); trendCtx.lineTo(w, y); trendCtx.stroke();
-        }
-
-        if (data.length < 2) {
-            trendCtx.fillStyle = 'rgba(62,80,96,0.5)';
-            trendCtx.font = '11px Share Tech Mono';
-            trendCtx.textAlign = 'center';
-            trendCtx.fillText('Waiting for data...', w / 2, h / 2 + 4);
-            return;
-        }
-
-        const minHr = 40;
-        const maxHr = 180;
-        const range = maxHr - minHr;
-        const pad = 10;
-
-        // Y 轴刻度
-        trendCtx.fillStyle = 'rgba(62,80,96,0.5)';
-        trendCtx.font = '9px Share Tech Mono';
-        trendCtx.textAlign = 'left';
-        [60, 90, 120, 150].forEach(v => {
-            const y = pad + (1 - (v - minHr) / range) * (h - pad * 2);
-            trendCtx.fillText(v, 4, y + 3);
-            trendCtx.strokeStyle = 'rgba(0,230,118,0.06)';
-            trendCtx.lineWidth = 0.5;
-            trendCtx.beginPath(); trendCtx.moveTo(26, y); trendCtx.lineTo(w, y); trendCtx.stroke();
-        });
-
-        const step = (w - 30) / (data.length - 1);
-
-        // 填充区域
-        trendCtx.beginPath();
-        for (let i = 0; i < data.length; i++) {
-            const x = 30 + i * step;
-            const y = pad + (1 - (data[i] - minHr) / range) * (h - pad * 2);
-            i === 0 ? trendCtx.moveTo(x, y) : trendCtx.lineTo(x, y);
-        }
-        trendCtx.lineTo(30 + (data.length - 1) * step, h);
-        trendCtx.lineTo(30, h);
-        trendCtx.closePath();
-        const fillGrad = trendCtx.createLinearGradient(0, 0, 0, h);
-        fillGrad.addColorStop(0, 'rgba(0,230,118,0.12)');
-        fillGrad.addColorStop(1, 'rgba(0,230,118,0)');
-        trendCtx.fillStyle = fillGrad;
-        trendCtx.fill();
-
-        // 折线
-        trendCtx.save();
-        trendCtx.shadowColor = '#00e676';
-        trendCtx.shadowBlur = 6;
-        trendCtx.strokeStyle = '#00e676';
-        trendCtx.lineWidth = 1.5;
-        trendCtx.lineJoin = 'round';
-        trendCtx.beginPath();
-        for (let i = 0; i < data.length; i++) {
-            const x = 30 + i * step;
-            const y = pad + (1 - (data[i] - minHr) / range) * (h - pad * 2);
-            i === 0 ? trendCtx.moveTo(x, y) : trendCtx.lineTo(x, y);
-        }
-        trendCtx.stroke();
-        trendCtx.restore();
-
-        // 最新值标记点
-        if (data.length > 0) {
-            const lastX = 30 + (data.length - 1) * step;
-            const lastY = pad + (1 - (data[data.length - 1] - minHr) / range) * (h - pad * 2);
-            trendCtx.beginPath();
-            trendCtx.arc(lastX, lastY, 3, 0, Math.PI * 2);
-            trendCtx.fillStyle = '#00e676';
-            trendCtx.fill();
-        }
-    }
-
-    // --- 信号质量更新 ---
-    function updateQuality(q) {
-        const pct = Math.round(Math.max(0, Math.min(100, q)));
-        qualityFill.style.width = pct + '%';
-        qualityVal.textContent = pct + '%';
-        qualityFill.className = 'quality-fill' + (pct < 25 ? ' low' : pct < 50 ? ' mid' : '');
-        qualityVal.style.color = pct < 25 ? 'var(--danger)' : pct < 50 ? 'var(--warning)' : 'var(--accent)';
-    }
-
-    // --- 数据轮询 ---
-    const POLL_INTERVAL = 200; // 毫秒
-
-    async function fetchHR() {
-        try {
-            const resp = await fetch('/api/hr');
-            if (!resp.ok) throw new Error('API error');
-            const d = await resp.json();
-
-            // 心率
-            if (d.hr > 0) {
-                const display = Math.round(d.hr);
-                if (display !== lastHr) {
-                    hrValue.textContent = display;
-                    updateRing(display);
-                    triggerBeat();
-                    lastHr = display;
-                }
-            } else {
-                hrValue.textContent = '--';
-                updateRing(0);
-                lastHr = 0;
-            }
-
-            // 信号质量
-            updateQuality(d.quality);
-
-            // 人脸状态
-            if (d.face) {
-                dotFace.className = 'dot g blink';
-                statusFace.textContent = `Face: Detected (${Math.round(d.confidence * 100)}%)`;
-            } else {
-                dotFace.className = 'dot r';
-                statusFace.textContent = 'Face: Not detected';
-            }
-
-            // 信号状态
-            if (d.quality > 35 && d.face) {
-                dotSignal.className = 'dot g';
-                statusSignal.textContent = 'Signal: Good';
-            } else if (d.quality > 15 && d.face) {
-                dotSignal.className = 'dot y blink';
-                statusSignal.textContent = 'Signal: Weak';
-            } else {
-                dotSignal.className = 'dot r';
-                statusSignal.textContent = 'Signal: No valid signal';
-            }
-
-            // FPS
-            statusFps.textContent = `FPS: ${d.fps}`;
-
-            // 缓冲区
-            const bPct = Math.round((d.buffer / d.buffer_max) * 100);
-            bufferFill.style.width = bPct + '%';
-            bufferText.textContent = `Buffer: ${d.buffer} / ${d.buffer_max} frames`;
-
-            // 脉搏波形
-            if (d.pulse && d.pulse.length > 1) {
-                pulseData = d.pulse;
-                drawPulseWave(pulseData);
-            }
-
-            // 心率趋势
-            if (d.hr_history && d.hr_history.length > 1) {
-                trendData = d.hr_history;
-                drawTrend(trendData);
-            }
-
-        } catch (e) {
-            // 静默失败，下次重试
-        }
-    }
-
-    // 初始绘制空波形
-    drawPulseWave([]);
-    drawTrend([]);
-
-    // 启动轮询
-    setInterval(fetchHR, POLL_INTERVAL);
-    // 立即请求一次
-    fetchHR();
-
+drawPulse([]);drawTrend([]);setInterval(fetchHR,200);fetchHR();
 </script>
 </body>
 </html>
