@@ -1,24 +1,25 @@
 """
-rPPG 心率监测 V5 (信号融合版)
+rPPG 心率监测 V6 (鲁棒增强版)
 
-V4.1 → V5 改动:
-  1. 多 ROI 加权融合替代"选一个"（消除 ROI 跳变，SNR 更高）
-  2. 自适应运动阈值（暗光下噪声更大）
-  3. 光照突变检测（开灯/关灯时保护信号）
-  4. CSV 数据记录（自动保存到 rppg_log.csv）
-  5. 心跳动画与真实心率同步（前端 CSS）
+V5 → V6:
+  1. 多帧运动累积（取 max 而非单帧，捕捉往复运动）
+  2. 光照/运动解耦（开灯不误判为运动）
+  3. FFT + 峰值检测双路融合（两种方法互补）
+  4. bbox 丢失后保留状态（短暂侧脸不丢信号）
+  5. MediaPipe 侧脸容错（检测丢失后 30 帧内继续用旧 bbox）
 """
 
 import cv2
 import numpy as np
 from flask import Flask, Response, jsonify, send_file
-from scipy.signal import butter, filtfilt
+from scipy.signal import butter, filtfilt, find_peaks
 import mediapipe as mp
 import threading
 import time
 import os
 import csv
 from datetime import datetime
+from collections import deque
 
 app = Flask(__name__)
 
@@ -35,23 +36,26 @@ BW_LOW             = 0.7
 BW_HIGH            = 3.5
 MEDIAN_KERNEL      = 5
 HR_MEDIAN_WIN      = 5
-HR_MAX_DELTA_SEC   = 15
+HR_MAX_DELTA_SEC   = 12      # V5是15，收紧一点减少响应延迟
 DETECT_INTERVAL    = 2
 COMPUTE_INTERVAL   = 4
 MIN_BUFFER_COMPUTE = POS_WINDOW * 3
 MIN_ROI_PIXELS     = 300
 BASE_MOTION_THRESH = 12.0
-MOTION_PATIENCE    = 8
-LIGHT_CHANGE_THRESH = 25.0  # 亮度变化超过此值视为光照突变
-CSV_LOG_INTERVAL   = 10     # 每 N 次计算写入一次 CSV
+MOTION_PATIENCE    = 10      # V5是8，多给2帧宽容度
+LIGHT_CHANGE_THRESH = 25.0
+CSV_LOG_INTERVAL   = 10
+
+# V6 新增
+MOTION_HISTORY_LEN = 5       # 运动历史帧数
+BBOX_RETAIN_FRAMES = 30      # bbox 丢失后保留状态的帧数（~1秒）
+PEAK_MIN_DISTANCE   = 12     # 峰值最小间隔帧（0.4s@30fps）
 
 
 # ============================================================
 #  数据记录器
 # ============================================================
 class DataLogger:
-    """将心率数据自动保存到 CSV 文件"""
-
     def __init__(self, filename='rppg_log.csv'):
         self.filename = os.path.join(
             os.path.dirname(os.path.abspath(__file__)), filename
@@ -65,20 +69,19 @@ class DataLogger:
             writer = csv.writer(f)
             writer.writerow([
                 'time', 'hr', 'quality', 'roi_name',
-                'skin_ratio', 'motion', 'fps'
+                'skin_ratio', 'motion', 'fps',
+                'hr_method', 'hr_peak', 'hr_fft',
             ])
-        print(f"[OK] 日志文件: {self.filename}")
+        print(f"[OK] 日志: {self.filename}")
 
-    def log(self, hr, quality, roi_name, skin_ratio, motion, fps):
+    def log(self, hr, quality, roi_name, skin_ratio,
+            motion, fps, method, hr_peak, hr_fft):
         self.counter += 1
         self.buffer.append([
             datetime.now().strftime('%H:%M:%S'),
-            round(hr, 1),
-            round(quality, 0),
-            roi_name,
-            round(skin_ratio, 3),
-            round(motion, 1),
-            round(fps, 1),
+            round(hr, 1), round(quality, 0), roi_name,
+            round(skin_ratio, 3), round(motion, 1), round(fps, 1),
+            method, round(hr_peak, 1), round(hr_fft, 1),
         ])
         if self.counter % CSV_LOG_INTERVAL == 0:
             self._flush()
@@ -118,7 +121,7 @@ class BBoxSmoother:
 
 
 # ============================================================
-#  rPPG 处理器 V5
+#  rPPG 处理器 V6
 # ============================================================
 class RPPGProcessor:
 
@@ -129,14 +132,12 @@ class RPPGProcessor:
         self.bbox_smoother = BBoxSmoother(alpha=0.4)
         self.logger = DataLogger()
 
-        # 缓冲区
         self.rgb_buffer = []
         self.time_buffer = []
         self.hr_raw_history = []
         self.hr_output_history = []
         self.pulse_history = []
 
-        # 状态
         self.hr = 0.0
         self.signal_quality = 0.0
         self.face_detected = False
@@ -149,24 +150,35 @@ class RPPGProcessor:
         self.actual_fs = 0.0
         self.last_hr_time = 0.0
 
-        # ROI 融合状态
+        # ROI 融合
         self.current_roi_name = "none"
-        self.best_roi_rect = None  # 用于视频框显示
+        self.best_roi_rect = None
         self.best_skin_ratio = 0.0
         self.active_roi_count = 0
         self.fusion_weights = {}
 
-        # 运动检测
+        # V6: 运动检测升级
         self.prev_roi_gray = None
+        self.motion_history = deque(maxlen=MOTION_HISTORY_LEN)
         self.motion_score = 0.0
         self.motion_threshold = BASE_MOTION_THRESH
         self.motion_frames = 0
         self.signal_paused = False
         self.paused_reason = ""
 
-        # 光照检测（V5 新增）
+        # V6: 光照/运动解耦
         self.prev_roi_brightness = None
         self.light_change_detected = False
+        self.light_change_counter = 0   # 光照恢复计数器
+
+        # V6: bbox 丢失后保留状态
+        self.bbox_lost_frames = 0
+        self.bbox_lost = False
+
+        # V6: 双路心率
+        self.last_hr_fft = 0.0
+        self.last_hr_peak = 0.0
+        self.hr_method = "--"
 
         self.lock = threading.Lock()
         self.running = True
@@ -183,21 +195,21 @@ class RPPGProcessor:
 
         self.face_detector = mp.solutions.face_detection.FaceDetection(
             model_selection=1,
-            min_detection_confidence=0.4,
+            min_detection_confidence=0.3,  # V5是0.4，降低以提高侧脸检测率
         )
 
         print(f"[OK] 摄像头 {self.camera_id} 已打开")
-        print(f"[OK] MediaPipe 远距离人脸模型 (0.5-5m)")
-        print(f"[OK] Butterworth {BW_LOW}-{BW_HIGH}Hz order={BW_ORDER}")
-        print(f"[OK] 多ROI信号融合 + 光照突变检测 + CSV记录")
+        print(f"[OK] MediaPipe confidence=0.3 (侧脸容错)")
+        print(f"[OK] 多帧运动累积 + 光照/运动解耦")
+        print(f"[OK] FFT + 峰值检测双路心率")
 
     def stop(self):
         self.running = False
         if self.cap and self.cap.isOpened():
             self.cap.release()
-        self.logger._flush()  # 关闭时写入剩余数据
+        self.logger._flush()
 
-    # -------------------- 多 ROI 定义 --------------------
+    # -------------------- ROI 定义 --------------------
     def define_rois(self, frame, bbox):
         h, w = frame.shape[:2]
         x_min = int(bbox.xmin * w)
@@ -240,13 +252,8 @@ class RPPGProcessor:
         mask = cv2.inRange(hsv, lower, upper)
         return np.sum(mask > 0) / mask.size
 
-    # -------------------- 核心：多 ROI 信号融合 --------------------
+    # -------------------- 多 ROI 融合 --------------------
     def extract_all_rois(self, frame, rois):
-        """
-        提取所有候选 ROI 的信息
-        返回: (fused_rgb, best_rect, skin_ratio, active_count, weights)
-        fused_rgb: 所有合格 ROI 的加权融合 RGB 均值
-        """
         h, w = frame.shape[:2]
         candidates = []
 
@@ -263,11 +270,7 @@ class RPPGProcessor:
                 continue
 
             skin_ratio = self.compute_skin_ratio(roi)
-
-            # BGR → RGB 空间平均
             mean_rgb = np.mean(roi.reshape(-1, 3), axis=0)[::-1].copy()
-
-            # 每个候选的权重 = 皮肤比例 × 区域权重
             score = skin_ratio * roi_info["weight"]
 
             candidates.append({
@@ -283,62 +286,57 @@ class RPPGProcessor:
         if not candidates:
             return None, None, 0.0, 0, {}
 
-        # --- 加权融合（核心改动） ---
-        # 每个候选的贡献权重 = max(0, skin_ratio) * weight
-        # 即使皮肤比例很低也参与融合（权重自然就低）
         total_weight = 0.0
         fused_rgb = np.zeros(3, dtype=np.float64)
 
         for c in candidates:
-            w = max(c["skin_ratio"], 0.05) * c["weight"]
-            fused_rgb += w * c["mean_rgb"]
-            total_weight += w
+            wt = max(c["skin_ratio"], 0.05) * c["weight"]
+            fused_rgb += wt * c["mean_rgb"]
+            total_weight += wt
 
         if total_weight > 0:
             fused_rgb /= total_weight
 
-        # 选得分最高的 ROI 用于视频框显示
         best = max(candidates, key=lambda c: c["score"])
-
-        # 收集权重信息
         weight_info = {c["name"]: round(c["skin_ratio"], 2)
                        for c in candidates}
 
         return (fused_rgb, best["rect"], best["skin_ratio"],
                 len(candidates), weight_info)
 
-    # -------------------- 自适应运动阈值 --------------------
-    def compute_motion_threshold(self, roi_gray):
-        """暗光下噪声更大，需要更高的运动阈值"""
-        mean_brightness = float(np.mean(roi_gray))
-        if mean_brightness < 50:
-            return BASE_MOTION_THRESH * 1.5
-        elif mean_brightness > 200:
-            return BASE_MOTION_THRESH * 0.8
-        return BASE_MOTION_THRESH
-
-    # -------------------- 运动检测 --------------------
+    # -------------------- V6: 多帧运动累积 --------------------
     def detect_motion(self, roi_gray):
+        """
+        V5: 单帧差分 → 快速往复运动互相抵消
+        V6: 保存最近 5 帧差分，取 max → 捕捉任何方向的突发运动
+        """
         if self.prev_roi_gray is None:
             self.prev_roi_gray = roi_gray.copy()
+            self.motion_history.clear()
             return 0.0
 
         h, w = roi_gray.shape[:2]
         ph, pw = self.prev_roi_gray.shape[:2]
         if h != ph or w != pw:
             self.prev_roi_gray = roi_gray.copy()
+            self.motion_history.clear()
             return 0.0
 
         diff = cv2.absdiff(roi_gray, self.prev_roi_gray)
-        motion = float(np.mean(diff))
-        self.prev_roi_gray = roi_gray.copy()
-        return motion
+        current_motion = float(np.mean(diff))
 
-    # -------------------- 光照突变检测 --------------------
+        self.prev_roi_gray = roi_gray.copy()
+        self.motion_history.append(current_motion)
+
+        # 取历史最大值（而非当前值），捕捉任何突发运动
+        return max(self.motion_history) if self.motion_history else 0.0
+
+    # -------------------- V6: 光照/运动解耦 --------------------
     def detect_lighting_change(self, roi_gray):
         """
-        检测 ROI 整体亮度突变（开灯/关灯/遮挡）
-        光照突变不暂停信号，但降低质量评分
+        V5: 光照突变和运动检测独立，可能双重惩罚
+        V6: 光照突变时临时提高运动阈值（避免误判为运动）
+             同时给光照恢复一个渐退期
         """
         current_brightness = float(np.mean(roi_gray))
         changed = False
@@ -348,11 +346,32 @@ class RPPGProcessor:
             if delta > LIGHT_CHANGE_THRESH:
                 changed = True
                 self.light_change_detected = True
+                self.light_change_counter = 30  # 30 帧恢复期
+                # 关键：光照突变时提高运动阈值，避免误判
+                self.motion_threshold = self._base_motion_threshold(roi_gray) * 2.5
             else:
-                self.light_change_detected = False
+                # 渐退恢复：计数器递减，到 0 时恢复正常阈值
+                if self.light_change_counter > 0:
+                    self.light_change_counter -= 1
+                    # 恢复期间阈值仍然偏高
+                    factor = 1.0 + 1.5 * (self.light_change_counter / 30)
+                    self.motion_threshold = self._base_motion_threshold(roi_gray) * factor
+                    if self.light_change_counter == 0:
+                        self.light_change_detected = False
+                else:
+                    self.light_change_detected = False
 
         self.prev_roi_brightness = current_brightness
         return changed
+
+    def _base_motion_threshold(self, roi_gray):
+        """基础运动阈值（根据亮度自适应）"""
+        mean_b = float(np.mean(roi_gray))
+        if mean_b < 50:
+            return BASE_MOTION_THRESH * 1.5
+        elif mean_b > 200:
+            return BASE_MOTION_THRESH * 0.8
+        return BASE_MOTION_THRESH
 
     # -------------------- POS 投影 --------------------
     def pos_extract(self, rgb_signals):
@@ -409,8 +428,9 @@ class RPPGProcessor:
         except Exception:
             return signal
 
-    # -------------------- 心率估计 --------------------
-    def estimate_hr(self, pulse_signal, timestamps):
+    # -------------------- V6: FFT 心率估计 --------------------
+    def estimate_hr_fft(self, pulse_signal, timestamps):
+        """FFT 频域心率估计"""
         if pulse_signal is None:
             return 0.0, 0.0
         n = len(pulse_signal)
@@ -456,9 +476,124 @@ class RPPGProcessor:
 
         return hr_bpm, quality
 
+    # -------------------- V6: 峰值检测心率 --------------------
+    def estimate_hr_peak(self, pulse_signal, timestamps):
+        """
+        基于波峰检测的心率估计
+        与 FFT 互补：FFT 擅长稳态信号，峰值检测擅长捕捉瞬态变化
+        """
+        if pulse_signal is None:
+            return 0.0, 0.0
+        n = len(pulse_signal)
+        if n < POS_WINDOW * 2:
+            return 0.0, 0.0
+
+        valid_ts = timestamps[-n:]
+        dt = np.median(np.diff(valid_ts))
+        if dt <= 0.005 or dt > 0.15:
+            return 0.0, 0.0
+
+        signal = pulse_signal.copy()
+        signal = self.median_filter(signal, MEDIAN_KERNEL)
+        signal = self.detrend(signal)
+        signal = self.butter_bandpass(signal, 1.0 / dt)
+
+        if np.std(signal) < 1e-8:
+            return 0.0, 0.0
+
+        # 自适应最小峰间距：根据当前采样率计算
+        # 最小心率 45 BPM → 最大间距 = 60/45/fs 帧
+        # 最小心率 45 BPM → 最小间距 = fs/45 帧（即 0.67s@30fps）
+        min_dist = max(PEAK_MIN_DISTANCE, int(dt * 60 / 45))
+
+        # 找峰
+        peaks, properties = find_peaks(signal, distance=min_dist, height=0)
+
+        if len(peaks) < 3:
+            return 0.0, 0.0
+
+        # 计算峰间间隔（以秒为单位）
+        peak_times = np.array([valid_ts[-n + p] for p in peaks])
+        rr_intervals = np.diff(peak_times)
+
+        # 去除异常间隔（偏离中位数超过 40%）
+        median_rr = np.median(rr_intervals)
+        if median_rr <= 0:
+            return 0.0, 0.0
+        clean_rr = rr_intervals[np.abs(rr_intervals - median_rr) / median_rr < 0.4]
+
+        if len(clean_rr) < 2:
+            return 0.0, 0.0
+
+        hr_bpm = 60.0 / np.median(clean_rr)
+
+        # 质量：峰间间隔的一致性（变异系数越小越好）
+        cv = np.std(clean_rr) / (np.mean(clean_rr) + 1e-10)
+        quality = np.clip(100 - cv * 200, 0, 100)
+
+        if hr_bpm < 45 or hr_bpm > 180:
+            quality *= 0.1
+            hr_bpm = 0.0
+
+        return hr_bpm, quality
+
+    # -------------------- V6: 双路心率融合 --------------------
+    def estimate_hr_combined(self, pulse_signal, timestamps):
+        """
+        FFT + 峰值检测融合策略:
+        - 两者接近（<8 BPM）→ 取平均，质量取最大
+        - 两者差异大 → 取质量高的，质量惩罚
+        - 只有一个有效 → 直接用那个
+        """
+        hr_fft, q_fft = self.estimate_hr_fft(pulse_signal, timestamps)
+        hr_peak, q_peak = self.estimate_hr_peak(pulse_signal, timestamps)
+
+        self.last_hr_fft = hr_fft
+        self.last_hr_peak = hr_peak
+
+        fft_valid = hr_fft > 0
+        peak_valid = hr_peak > 0
+
+        if fft_valid and peak_valid:
+            delta = abs(hr_fft - hr_peak)
+            if delta < 8:
+                # 一致：取平均
+                hr = (hr_fft + hr_peak) / 2
+                quality = max(q_fft, q_peak)
+                method = "avg"
+            elif delta < 20:
+                # 轻微分歧：取质量高的
+                if q_fft >= q_peak:
+                    hr, quality = hr_fft, q_fft * 0.9
+                    method = "fft"
+                else:
+                    hr, quality = hr_peak, q_peak * 0.9
+                    method = "peak"
+            else:
+                # 严重分歧：只取质量明显更高的
+                if q_fft > q_peak * 1.3:
+                    hr, quality = hr_fft, q_fft * 0.7
+                    method = "fft"
+                elif q_peak > q_fft * 1.3:
+                    hr, quality = hr_peak, q_peak * 0.7
+                    method = "peak"
+                else:
+                    # 都不确定，保持上次值
+                    return 0.0, 0.0, "none"
+        elif fft_valid:
+            hr, quality = hr_fft, q_fft
+            method = "fft"
+        elif peak_valid:
+            hr, quality = hr_peak, q_peak
+            method = "peak"
+        else:
+            return 0.0, 0.0, "none"
+
+        return hr, quality, method
+
     # -------------------- 心率输出限制 --------------------
     def apply_hr_limits(self, raw_hr, quality, now):
-        if quality < 20:
+        if quality < 15:   # V5是20，稍微放宽避免长时间不更新
             return self.hr
 
         self.hr_raw_history.append(raw_hr)
@@ -470,9 +605,9 @@ class RPPGProcessor:
             hr_smooth = raw_hr
 
         if self.hr > 0 and self.last_hr_time > 0:
-            dt = now - self.last_hr_time
-            if dt > 0:
-                max_delta = HR_MAX_DELTA_SEC * dt
+            dt_sec = now - self.last_hr_time
+            if dt_sec > 0:
+                max_delta = HR_MAX_DELTA_SEC * dt_sec
                 delta = hr_smooth - self.hr
                 if abs(delta) > max_delta:
                     hr_smooth = self.hr + np.sign(delta) * max_delta
@@ -487,20 +622,63 @@ class RPPGProcessor:
     def get_diagnostics(self):
         diags = []
         if not self.face_detected:
-            diags.append("NO_FACE")
+            if self.bbox_lost:
+                diags.append("FACE_PARTIAL")
+            else:
+                diags.append("NO_FACE")
         elif self.signal_paused and self.paused_reason == "motion":
             diags.append("MOTION")
         elif self.light_change_detected:
             diags.append("LIGHT_CHANGE")
         elif self.best_skin_ratio < 0.3:
             diags.append("LOW_SKIN")
-        elif self.signal_quality < 20:
+        elif self.signal_quality < 15:
             diags.append("LOW_SNR")
         elif len(self.rgb_buffer) < MIN_BUFFER_COMPUTE:
             diags.append("BUFFERING")
         else:
             diags.append("OK")
         return diags
+
+    # -------------------- V6: bbox 丢失处理 --------------------
+    def _handle_face_detection(self, frame, rgb_frame):
+        """
+        V5: 丢检测 → 立即清空所有状态
+        V6: 丢检测 → 保留 bbox 最多 BBOX_RETAIN_FRAMES 帧
+             短暂侧脸/遮挡不会中断信号采集
+        """
+        if self.processed_frames % DETECT_INTERVAL == 1:
+            results = self.face_detector.process(rgb_frame)
+
+            if results.detections:
+                det = results.detections[0]
+                raw_bbox = det.location_data.relative_bounding_box
+                smoothed = self.bbox_smoother.update(raw_bbox)
+                self.last_bbox = smoothed
+                self.face_confidence = det.score[0] if det.score else 0
+                self.face_detected = True
+                self.bbox_lost = False
+                self.bbox_lost_frames = 0
+            else:
+                # 检测丢失
+                if self.last_bbox is not None and self.bbox_lost_frames < BBOX_RETAIN_FRAMES:
+                    # 保留上次 bbox，继续工作
+                    self.bbox_lost_frames += 1
+                    self.bbox_lost = True
+                    self.face_detected = True  # 逻辑上仍视为"有脸"
+                    self.face_confidence = max(0, self.face_confidence - 0.05)
+                else:
+                    # 超时，彻底丢失
+                    self.last_bbox = None
+                    self.face_detected = False
+                    self.bbox_lost = False
+                    self.bbox_lost_frames = 0
+                    self.current_roi_name = "none"
+                    self.best_skin_ratio = 0
+                    self.active_roi_count = 0
+                    self.fusion_weights = {}
+                    self.prev_roi_gray = None
+                    self.prev_roi_brightness = None
 
     # -------------------- 单帧处理 --------------------
     def process_frame(self, frame):
@@ -516,37 +694,16 @@ class RPPGProcessor:
         self.processed_frames += 1
         roi_rect = None
 
-        # 人脸检测
-        if self.processed_frames % DETECT_INTERVAL == 1:
-            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            results = self.face_detector.process(rgb_frame)
-            if results.detections:
-                det = results.detections[0]
-                raw_bbox = det.location_data.relative_bounding_box
-                smoothed = self.bbox_smoother.update(raw_bbox)
-                self.last_bbox = smoothed
-                self.face_confidence = det.score[0] if det.score else 0
-                self.face_detected = True
-            else:
-                self.bbox_smoother.bbox = None
-                self.last_bbox = None
-                self.face_detected = False
-                self.current_roi_name = "none"
-                self.best_skin_ratio = 0
-                self.active_roi_count = 0
-                self.fusion_weights = {}
-                self.prev_roi_gray = None
-                self.prev_roi_brightness = None
+        # V6: 改进的人脸检测（带丢失容错）
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        self._handle_face_detection(frame, rgb_frame)
 
         if self.last_bbox is not None:
             candidates = self.define_rois(frame, self.last_bbox)
-
-            # V5 核心：多 ROI 加权融合
             result = self.extract_all_rois(frame, candidates)
 
             if result[0] is not None:
                 fused_rgb, best_rect, best_skin, active_cnt, weights = result
-
                 roi_rect = best_rect
                 self.current_roi_name = "fused"
                 self.best_roi_rect = best_rect
@@ -554,13 +711,15 @@ class RPPGProcessor:
                 self.active_roi_count = active_cnt
                 self.fusion_weights = weights
 
-                # 运动检测（用得分最高的 ROI）
+                # 运动检测
                 best_roi = frame[best_rect[1]:best_rect[3],
                                  best_rect[0]:best_rect[2]]
                 roi_gray = cv2.cvtColor(best_roi, cv2.COLOR_BGR2GRAY)
 
-                # 自适应运动阈值
-                self.motion_threshold = self.compute_motion_threshold(roi_gray)
+                # V6: 光照检测（在运动检测之前，解耦两者）
+                self.detect_lighting_change(roi_gray)
+
+                # V6: 多帧运动累积
                 self.motion_score = self.detect_motion(roi_gray)
 
                 if self.motion_score > self.motion_threshold:
@@ -574,9 +733,6 @@ class RPPGProcessor:
                     if self.motion_frames == 0:
                         self.signal_paused = False
                         self.paused_reason = ""
-
-                # 光照突变检测
-                self.detect_lighting_change(roi_gray)
 
                 # 采集信号
                 if not self.signal_paused:
@@ -596,11 +752,11 @@ class RPPGProcessor:
                             )
 
                             if pulse is not None and len(pulse) > POS_WINDOW * 2:
-                                hr_raw, quality = self.estimate_hr(
+                                # V6: 双路融合心率估计
+                                hr_raw, quality, method = self.estimate_hr_combined(
                                     pulse, self.time_buffer
                                 )
 
-                                # 光照突变时降低质量
                                 if self.light_change_detected:
                                     quality *= 0.5
 
@@ -610,6 +766,7 @@ class RPPGProcessor:
                                     )
                                     self.hr = new_hr
                                     self.signal_quality = quality
+                                    self.hr_method = method
 
                                     self.hr_output_history.append(
                                         round(new_hr, 1)
@@ -617,11 +774,12 @@ class RPPGProcessor:
                                     if len(self.hr_output_history) > 120:
                                         self.hr_output_history.pop(0)
 
-                                    # CSV 记录
                                     self.logger.log(
-                                        new_hr, quality, "fused",
+                                        new_hr, quality, method,
                                         best_skin, self.motion_score,
-                                        self.fps
+                                        self.fps, method,
+                                        self.last_hr_peak,
+                                        self.last_hr_fft
                                     )
 
                                 if len(pulse) > 48:
@@ -647,23 +805,24 @@ class RPPGProcessor:
         h, w = frame.shape[:2]
 
         overlay = frame.copy()
-        cv2.rectangle(overlay, (0, 0), (w, 68), (0, 0, 0), -1)
+        cv2.rectangle(overlay, (0, 0), (w, 78), (0, 0, 0), -1)
         cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
 
-        # ROI 框
         if roi_rect:
             x1, y1, x2, y2 = roi_rect
             if self.signal_paused:
                 box_color = (0, 80, 255)
-                label = "FUSED [MOTION]"
+                label = f"FUSED [MOTION]"
             elif self.light_change_detected:
                 box_color = (0, 180, 255)
-                label = f"FUSED [LIGHT] skin:{self.best_skin_ratio:.0%}"
+                label = f"FUSED [LIGHT]"
+            elif self.bbox_lost:
+                box_color = (0, 180, 100)
+                label = f"FUSED [RETAIN {self.bbox_lost_frames}]"
             else:
                 box_color = (0, 230, 118)
                 label = (f"FUSED x{self.active_roi_count} "
-                         f"skin:{self.best_skin_ratio:.0%} "
-                         f"thresh:{self.motion_threshold:.0f}")
+                         f"skin:{self.best_skin_ratio:.0%}")
             cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 2)
             cv2.putText(frame, label, (x1, y1 - 6),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.35, box_color, 1)
@@ -677,7 +836,7 @@ class RPPGProcessor:
                 hr_color = (0, 180, 255)
             elif self.signal_quality >= 30:
                 hr_color = (0, 230, 118)
-            elif self.signal_quality >= 20:
+            elif self.signal_quality >= 15:
                 hr_color = (0, 180, 100)
             else:
                 hr_color = (0, 130, 80)
@@ -688,28 +847,27 @@ class RPPGProcessor:
         cv2.putText(frame, hr_str, (16, 38),
                     cv2.FONT_HERSHEY_SIMPLEX, 1.0, hr_color, 2)
 
-        # 状态
+        # 方法标签
+        method_str = f"[{self.hr_method}]"
+        cv2.putText(frame, method_str, (16, 56),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (100, 100, 100), 1)
+
+        # 状态信息（第三行）
         if self.face_detected:
             line1 = (f"Q:{self.signal_quality:.0f}% "
                      f"motion:{self.motion_score:.1f}/{self.motion_threshold:.0f} "
-                     f"ROIs:{self.active_roi_count}")
-            cv2.putText(frame, line1, (16, 56),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 200, 100), 1)
-
-            # 融合权重（第二行右侧）
-            if self.fusion_weights:
-                w_str = " ".join(
-                    f"{k[:3]}:{v:.0%}" for k, v in self.fusion_weights.items()
-                )
-                cv2.putText(frame, w_str, (w - len(w_str) * 6 - 10, 56),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.3, (80, 80, 80), 1)
+                     f"ROIs:{self.active_roi_count} "
+                     f"fft:{self.last_hr_fft:.0f} "
+                     f"peak:{self.last_hr_peak:.0f}")
+            cv2.putText(frame, line1, (100, 56),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.3, (0, 180, 100), 1)
         else:
-            cv2.putText(frame, "NO FACE DETECTED", (16, 56),
+            cv2.putText(frame, "NO FACE DETECTED", (100, 56),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 80, 255), 1)
 
         # FPS
         fps_str = f"{self.fps:.0f}fps buf:{len(self.rgb_buffer)}/{BUFFER_SIZE}"
-        cv2.putText(frame, fps_str, (w - 180, 38),
+        cv2.putText(frame, fps_str, (w - 200, 38),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.35, (80, 80, 80), 1)
 
         # 底部进度条
@@ -723,7 +881,7 @@ class RPPGProcessor:
 
 
 # ============================================================
-#  Flask 路由
+#  Flask
 # ============================================================
 
 processor = RPPGProcessor(camera_id=0)
@@ -798,8 +956,13 @@ def get_hr():
             'motion_threshold': round(processor.motion_threshold, 1),
             'motion_paused': processor.signal_paused,
             'light_change': processor.light_change_detected,
+            'bbox_lost': processor.bbox_lost,
+            'bbox_lost_frames': processor.bbox_lost_frames,
             'active_rois': processor.active_roi_count,
             'fusion_weights': processor.fusion_weights,
+            'hr_method': processor.hr_method,
+            'hr_fft': round(processor.last_hr_fft, 1),
+            'hr_peak': round(processor.last_hr_peak, 1),
             'diagnostics': processor.get_diagnostics(),
         })
 
@@ -807,10 +970,11 @@ def get_hr():
 if __name__ == '__main__':
     try:
         print("=" * 58)
-        print("  rPPG Monitor V5 (Multi-ROI Fusion)")
-        print("  ROI: 4 candidates → weighted fusion (no switching)")
-        print("  Motion: adaptive threshold + lighting change detect")
-        print("  Log: auto-save to rppg_log.csv")
+        print("  rPPG Monitor V6 (Robust Edition)")
+        print("  Motion: multi-frame max (not single-frame)")
+        print("  Light:  decoupled from motion (threshold boost)")
+        print("  HR:     FFT + peak detection fusion")
+        print("  Face:   bbox retain 30 frames on detection loss")
         print("-" * 58)
         print("  http://localhost:5000")
         print("=" * 58)

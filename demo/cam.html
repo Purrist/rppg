@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>rPPG 心率监测 V5</title>
+    <title>rPPG 心率监测 V6</title>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
     <style>
@@ -35,10 +35,10 @@
         .no-signal-icon{font-size:48px;color:var(--muted);margin-bottom:16px}
         .no-signal-text{font-size:14px;color:var(--muted);letter-spacing:2px}
         .panel{background:var(--card);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--border) transparent}
-        .panel-block{padding:14px 18px;border-bottom:1px solid var(--border)}
-        .panel-label{font-size:9px;text-transform:uppercase;letter-spacing:2.5px;color:var(--muted);margin-bottom:10px}
-        .hr-block{text-align:center;padding:20px 18px 16px}
-        .hr-ring{width:140px;height:140px;margin:0 auto 8px;position:relative}
+        .panel-block{padding:12px 16px;border-bottom:1px solid var(--border)}
+        .panel-label{font-size:9px;text-transform:uppercase;letter-spacing:2.5px;color:var(--muted);margin-bottom:8px}
+        .hr-block{text-align:center;padding:18px 16px 14px}
+        .hr-ring{width:140px;height:140px;margin:0 auto 6px;position:relative}
         .hr-ring svg{width:100%;height:100%;transform:rotate(-90deg)}
         .hr-ring-bg{fill:none;stroke:var(--border);stroke-width:4}
         .hr-ring-fill{fill:none;stroke:var(--accent);stroke-width:4;stroke-linecap:round;stroke-dasharray:408;stroke-dashoffset:408;transition:stroke-dashoffset .6s ease,stroke .3s ease;filter:drop-shadow(0 0 6px var(--accent-glow))}
@@ -46,11 +46,10 @@
         .hr-icon{font-size:16px;color:var(--accent);margin-bottom:2px}
         .hr-icon.paused{color:var(--blue)!important;animation:none!important}
         .hr-icon.light{color:var(--cyan)!important;animation:none!important}
+        .hr-icon.retain{color:var(--warning)!important}
         @keyframes hb{0%,100%{transform:scale(1);opacity:.7}14%{transform:scale(1.25);opacity:1}28%{transform:scale(1);opacity:.7}}
         .hr-value{font-family:'Orbitron',sans-serif;font-size:44px;font-weight:900;color:var(--accent);line-height:1;text-shadow:0 0 20px var(--accent-glow);transition:transform .12s ease,color .3s ease}
         .hr-value.beat{transform:scale(1.06)}
-        .hr-value.paused-val{color:var(--blue)!important;text-shadow:0 0 20px rgba(30,144,255,.25)!important}
-        .hr-value.light-val{color:var(--cyan)!important;text-shadow:0 0 20px rgba(0,188,212,.25)!important}
         .hr-unit{font-family:'Orbitron',sans-serif;font-size:11px;font-weight:400;color:var(--accent-dim);letter-spacing:4px;margin-top:2px}
         .canvas-wrap{position:relative;background:rgba(0,230,118,.015);border:1px solid var(--border);border-radius:5px;overflow:hidden}
         .canvas-wrap canvas{display:block;width:100%}
@@ -60,25 +59,31 @@
         .quality-fill{height:100%;border-radius:3px;background:var(--accent);transition:width .4s ease,background .4s ease}
         .quality-fill.low{background:var(--danger)}.quality-fill.mid{background:var(--warning)}.quality-fill.paused-fill{background:var(--blue)}.quality-fill.light-fill{background:var(--cyan)}
         .quality-val{font-size:13px;font-weight:700;min-width:38px;text-align:right;color:var(--accent)}
-        .diag-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
-        .diag-item{display:flex;align-items:center;gap:6px;font-size:10px;padding:4px 8px;background:rgba(255,255,255,.02);border-radius:3px;border:1px solid var(--border)}
-        .diag-label{color:var(--muted);min-width:48px}
+        /* 双路心率对比 */
+        .dual-hr{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px}
+        .dual-item{display:flex;align-items:center;gap:6px;font-size:11px;padding:4px 8px;background:rgba(255,255,255,.02);border-radius:3px;border:1px solid var(--border)}
+        .dual-label{color:var(--muted);font-size:9px;min-width:30px}
+        .dual-val{font-weight:700}
+        .dual-val.match{color:var(--accent)}.dual-val.diff{color:var(--warning)}.dual-val.miss{color:var(--muted)}
+        /* 诊断面板 */
+        .diag-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px}
+        .diag-item{display:flex;align-items:center;gap:6px;font-size:10px;padding:3px 8px;background:rgba(255,255,255,.02);border-radius:3px;border:1px solid var(--border)}
+        .diag-label{color:var(--muted);min-width:46px}
         .diag-value{font-weight:700;color:var(--fg)}
-        .diag-value.good{color:var(--accent)}.diag-value.warn{color:var(--warning)}.diag-value.bad{color:var(--danger)}.diag-value.paused{color:var(--blue)}.diag-value.light-v{color:var(--cyan)}
+        .diag-value.good{color:var(--accent)}.diag-value.warn{color:var(--warning)}.diag-value.bad{color:var(--danger)}.diag-value.paused{color:var(--blue)}.diag-value.light-v{color:var(--cyan)}.diag-value.retain{color:var(--warning)}
         .buffer-wrap{margin-top:4px}
         .buffer-bar{height:3px;background:rgba(255,255,255,.04);border-radius:2px;overflow:hidden}
         .buffer-fill{height:100%;background:var(--accent-dim);border-radius:2px;transition:width .3s ease}
         .buffer-text{font-size:10px;color:var(--muted);margin-top:4px}
-        /* 融合权重条 */
-        .fusion-bar{display:flex;height:8px;border-radius:4px;overflow:hidden;margin-top:6px}
+        .fusion-bar{display:flex;height:6px;border-radius:3px;overflow:hidden;margin-top:4px}
         .fusion-seg{transition:width .4s ease;min-width:2px}
-        .fusion-legend{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;font-size:9px}
+        .fusion-legend{display:flex;flex-wrap:wrap;gap:6px;margin-top:3px;font-size:9px}
         .fusion-legend-item{display:flex;align-items:center;gap:3px;color:var(--muted)}
-        .fusion-legend-item .dot-s{width:6px;height:6px;border-radius:50%;flex-shrink:0}
-        .pipeline{display:flex;align-items:center;gap:3px;flex-wrap:wrap;margin-top:8px}
-        .pipe-step{font-size:8px;color:var(--accent-dim);background:rgba(0,230,118,.06);border:1px solid rgba(0,230,118,.12);padding:2px 5px;border-radius:2px;letter-spacing:.3px}
-        .pipe-arrow{font-size:8px;color:var(--muted)}
-        .fix-list{margin-top:6px;font-size:10px;line-height:1.9}
+        .fusion-legend-item .dot-s{width:5px;height:5px;border-radius:50%;flex-shrink:0}
+        .pipeline{display:flex;align-items:center;gap:2px;flex-wrap:wrap;margin-top:6px}
+        .pipe-step{font-size:7px;color:var(--accent-dim);background:rgba(0,230,118,.06);border:1px solid rgba(0,230,118,.12);padding:2px 4px;border-radius:2px;letter-spacing:.2px}
+        .pipe-arrow{font-size:7px;color:var(--muted)}
+        .fix-list{margin-top:4px;font-size:9px;line-height:1.8}
         .fix-item{color:var(--muted)}.fix-item strong{color:var(--accent);font-weight:400}
         @media(max-width:860px){.main{grid-template-columns:1fr;grid-template-rows:55vh 1fr}.panel{border-left:none;border-top:1px solid var(--border)}.hr-ring{width:110px;height:110px}.hr-value{font-size:34px}}
         @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
@@ -90,7 +95,7 @@
         <div class="header-logo"><div class="header-logo-pulse"></div></div>
         <span class="header-title">rPPG MONITOR</span>
     </div>
-    <span class="header-badge">V5 Fusion</span>
+    <span class="header-badge">V6 Robust</span>
 </header>
 <main class="main">
     <section class="video-section" aria-label="摄像头视频流">
@@ -119,30 +124,37 @@
             </div>
         </div>
         <div class="panel-block">
-            <div class="panel-label">Pulse Waveform (Filtered)</div>
+            <div class="panel-label">Dual HR: FFT vs Peak</div>
+            <div class="dual-hr">
+                <div class="dual-item"><span class="dual-label">FFT</span><span class="dual-val" id="dualFft">--</span></div>
+                <div class="dual-item"><span class="dual-label">Peak</span><span class="dual-val" id="dualPeak">--</span></div>
+                <div class="dual-item"><span class="dual-label">Δ</span><span class="dual-val" id="dualDelta">--</span></div>
+                <div class="dual-item"><span class="dual-label">Use</span><span class="dual-val" id="dualMethod" style="color:var(--accent)">--</span></div>
+            </div>
+        </div>
+        <div class="panel-block">
+            <div class="panel-label">Pulse Waveform</div>
             <div class="canvas-wrap">
                 <span class="canvas-label">PPG Signal</span>
-                <canvas id="pulseCanvas" width="630" height="140"></canvas>
+                <canvas id="pulseCanvas" width="630" height="120"></canvas>
             </div>
         </div>
         <div class="panel-block">
             <div class="panel-label">Heart Rate Trend</div>
             <div class="canvas-wrap">
                 <span class="canvas-label">BPM History</span>
-                <canvas id="trendCanvas" width="630" height="120"></canvas>
+                <canvas id="trendCanvas" width="630" height="100"></canvas>
             </div>
         </div>
         <div class="panel-block">
             <div class="panel-label">Signal Quality</div>
             <div class="quality-row">
-                <div class="quality-bar">
-                    <div class="quality-fill" id="qualityFill" style="width:0%"></div>
-                </div>
+                <div class="quality-bar"><div class="quality-fill" id="qualityFill" style="width:0%"></div></div>
                 <span class="quality-val" id="qualityVal">0%</span>
             </div>
         </div>
         <div class="panel-block">
-            <div class="panel-label">ROI Fusion Weights</div>
+            <div class="panel-label">ROI Fusion</div>
             <div class="fusion-bar" id="fusionBar"></div>
             <div class="fusion-legend" id="fusionLegend"></div>
         </div>
@@ -151,9 +163,9 @@
             <div class="diag-grid">
                 <div class="diag-item"><span class="diag-label">Mode</span><span class="diag-value" id="diagMode">--</span></div>
                 <div class="diag-item"><span class="diag-label">ROIs</span><span class="diag-value" id="diagRois">0</span></div>
-                <div class="diag-item"><span class="diag-label">Skin</span><span class="diag-value" id="diagSkin">0%</span></div>
-                <div class="diag-item"><span class="diag-label">Motion</span><span class="diag-value" id="diagMotion">0</span></div>
-                <div class="diag-item"><span class="diag-label">Status</span><span class="diag-value" id="diagStatus">--</span></div>
+                <div class="diag-item"><span class="diag-label">Motion</span><span class="diag-value" id="diagMotion">--</span></div>
+                <div class="diag-item"><span class="diag-label">Light</span><span class="diag-value" id="diagLight">--</span></div>
+                <div class="diag-item"><span class="diag-label">Face</span><span class="diag-value" id="diagFace">--</span></div>
                 <div class="diag-item"><span class="diag-label">FPS</span><span class="diag-value" id="diagFps">--</span></div>
             </div>
             <div class="buffer-wrap">
@@ -162,27 +174,23 @@
             </div>
         </div>
         <div class="panel-block" style="border-bottom:none">
-            <div class="panel-label">V5 Pipeline</div>
+            <div class="panel-label">V6 Changes</div>
             <div class="fix-list">
-                <div class="fix-item"><strong>Fusion:</strong> 4 ROIs → weighted RGB average</div>
-                <div class="fix-item"><strong>Motion:</strong> adaptive threshold by brightness</div>
-                <div class="fix-item"><strong>Light:</strong> sudden change detection (quality penalty)</div>
-                <div class="fix-item"><strong>Log:</strong> auto CSV (rppg_log.csv)</div>
-                <div class="fix-item"><strong>Beat:</strong> heartbeat synced to real HR</div>
+                <div class="fix-item"><strong>Motion:</strong> multi-frame max (catches oscillation)</div>
+                <div class="fix-item"><strong>Light:</strong> decoupled from motion (threshold boost)</div>
+                <div class="fix-item"><strong>HR:</strong> FFT + peak detection fusion</div>
+                <div class="fix-item"><strong>Face:</strong> bbox retain 30 frames on loss</div>
             </div>
             <div class="pipeline">
                 <span class="pipe-step">4 ROIs</span><span class="pipe-arrow">→</span>
-                <span class="pipe-step">HSV</span><span class="pipe-arrow">→</span>
-                <span class="pipe-step">Weight</span><span class="pipe-arrow">→</span>
                 <span class="pipe-step">Fuse</span><span class="pipe-arrow">→</span>
-                <span class="pipe-step">Motion?</span><span class="pipe-arrow">→</span>
+                <span class="pipe-step">Motion5f</span><span class="pipe-arrow">→</span>
                 <span class="pipe-step">Light?</span><span class="pipe-arrow">→</span>
                 <span class="pipe-step">POS</span><span class="pipe-arrow">→</span>
                 <span class="pipe-step">BW</span><span class="pipe-arrow">→</span>
-                <span class="pipe-step">FFT</span><span class="pipe-arrow">→</span>
+                <span class="pipe-step">FFT+Peak</span><span class="pipe-arrow">→</span>
+                <span class="pipe-step">FuseHR</span><span class="pipe-arrow">→</span>
                 <span class="pipe-step">Limit</span>
-                <span class="pipe-arrow">→</span>
-                <span class="pipe-step">CSV</span>
             </div>
         </div>
     </aside>
@@ -192,91 +200,68 @@ const $=id=>document.getElementById(id);
 const videoImg=$('videoImg'),noSignal=$('noSignal'),hrValue=$('hrValue'),hrRing=$('hrRing'),hrIcon=$('hrIcon');
 const pulseCanvas=$('pulseCanvas'),trendCanvas=$('trendCanvas');
 const qualityFill=$('qualityFill'),qualityVal=$('qualityVal');
-const diagMode=$('diagMode'),diagRois=$('diagRois'),diagSkin=$('diagSkin'),diagMotion=$('diagMotion');
-const diagStatus=$('diagStatus'),diagFps=$('diagFps');
+const dualFft=$('dualFft'),dualPeak=$('dualPeak'),dualDelta=$('dualDelta'),dualMethod=$('dualMethod');
+const diagMode=$('diagMode'),diagRois=$('diagRois'),diagMotion=$('diagMotion'),diagLight=$('diagLight'),diagFace=$('diagFace'),diagFps=$('diagFps');
 const bufferFill=$('bufferFill'),bufferText=$('bufferText');
 const fusionBar=$('fusionBar'),fusionLegend=$('fusionLegend');
-const pulseCtx=pulseCanvas.getContext('2d'),trendCtx=trendCanvas.getContext('2d');
+const pCtx=pulseCanvas.getContext('2d'),tCtx=trendCanvas.getContext('2d');
 let lastHr=0,pulseData=[],trendData=[],videoReady=false;
 const RC=2*Math.PI*65;
-
-const ROI_COLORS={'forehead_wide':'#00e676','forehead_core':'#00c853','left_cheek':'#ffa502','right_cheek':'#ff6348'};
-const ROI_LABELS={'forehead_wide':'Fhd-W','forehead_core':'Fhd-C','left_cheek':'L-Cheek','right_cheek':'R-Cheek'};
+const ROI_C={'forehead_wide':'#00e676','forehead_core':'#00c853','left_cheek':'#ffa502','right_cheek':'#ff6348'};
+const ROI_L={'forehead_wide':'Fhd-W','forehead_core':'Fhd-C','left_cheek':'L-Ch','right_cheek':'R-Ch'};
 
 videoImg.addEventListener('load',()=>{if(!videoReady){videoReady=true;noSignal.classList.add('hidden')}});
 videoImg.addEventListener('error',()=>{videoReady=false;noSignal.classList.remove('hidden')});
 
 function triggerBeat(){hrValue.classList.add('beat');setTimeout(()=>hrValue.classList.remove('beat'),130)}
-
-/* V5: 心跳动画与真实心率同步 */
-function syncHeartbeat(hr){
-    if(hr>0){
-        const period=60/hr;
-        hrIcon.style.animationDuration=period.toFixed(2)+'s';
-        hrIcon.style.animationName='hb';
-        hrIcon.className='fa-solid fa-heart-pulse hr-icon';
-    }else{
-        hrIcon.style.animationName='none';
-    }
-}
+function syncHB(hr){if(hr>0){hrIcon.style.animationDuration=(60/hr).toFixed(2)+'s';hrIcon.style.animationName='hb';hrIcon.className='fa-solid fa-heart-pulse hr-icon'}else{hrIcon.style.animationName='none'}}
 
 function updateRing(hr,state){
     const p=Math.max(0,Math.min(1,(hr-45)/135));hrRing.style.strokeDashoffset=RC*(1-p);
-    if(state==='motion'){hrRing.style.stroke='var(--blue)';hrValue.style.color='var(--blue)';hrValue.style.textShadow='0 0 20px rgba(30,144,255,0.25)';hrIcon.className='fa-solid fa-heart-pulse hr-icon paused';hrValue.classList.add('paused-val');hrValue.classList.remove('light-val')}
-    else if(state==='light'){hrRing.style.stroke='var(--cyan)';hrValue.style.color='var(--cyan)';hrValue.style.textShadow='0 0 20px rgba(0,188,212,0.25)';hrIcon.className='fa-solid fa-heart-pulse hr-icon light';hrValue.classList.add('light-val');hrValue.classList.remove('paused-val')}
-    else{let c='#00e676';if(hr>150)c='#ffa502';if(hr>170||hr<50)c='#ff4757';hrRing.style.stroke=c;hrValue.style.color=c;hrValue.style.textShadow='0 0 20px '+c+'44';hrIcon.className='fa-solid fa-heart-pulse hr-icon';hrValue.classList.remove('paused-val','light-val')}
+    if(state==='motion'){hrRing.style.stroke='var(--blue)';hrValue.style.color='var(--blue)';hrValue.style.textShadow='0 0 20px rgba(30,144,255,.25)';hrIcon.className='fa-solid fa-heart-pulse hr-icon paused'}
+    else if(state==='light'){hrRing.style.stroke='var(--cyan)';hrValue.style.color='var(--cyan)';hrValue.style.textShadow='0 0 20px rgba(0,188,212,.25)';hrIcon.className='fa-solid fa-heart-pulse hr-icon light'}
+    else{let c='#00e676';if(hr>150)c='#ffa502';if(hr>170||hr<50)c='#ff4757';hrRing.style.stroke=c;hrValue.style.color=c;hrValue.style.textShadow='0 0 20px '+c+'44';hrIcon.className='fa-solid fa-heart-pulse hr-icon'}
 }
 
-/* V5: 融合权重可视化 */
-function updateFusion(weights){
-    if(!weights||Object.keys(weights).length===0){fusionBar.innerHTML='';fusionLegend.innerHTML='<span style="color:var(--muted)">No ROIs</span>';return}
-    const entries=Object.entries(weights);
-    const total=entries.reduce((s,[,v])=>s+Math.max(v,0.05),0);
-    let barHTML='',legendHTML='';
-    entries.forEach(([name,val])=>{
-        const pct=Math.max(val,0.05)/total*100;
-        const color=ROI_COLORS[name]||'#666';
-        const label=ROI_LABELS[name]||name;
-        barHTML+=`<div class="fusion-seg" style="width:${pct}%;background:${color}" title="${label}: ${(val*100).toFixed(0)}%"></div>`;
-        legendHTML+=`<div class="fusion-legend-item"><span class="dot-s" style="background:${color}"></span>${label} ${(val*100).toFixed(0)}%</div>`;
-    });
-    fusionBar.innerHTML=barHTML;
-    fusionLegend.innerHTML=legendHTML;
+function updateFusion(w){
+    if(!w||!Object.keys(w).length){fusionBar.innerHTML='';fusionLegend.innerHTML='<span style="color:var(--muted)">No ROIs</span>';return}
+    const e=Object.entries(w),total=e.reduce((s,[,v])=>s+Math.max(v,.05),0);
+    let bH='',lH='';
+    e.forEach(([n,v])=>{const p=Math.max(v,.05)/total*100,c=ROI_C[n]||'#666',l=ROI_L[n]||n;
+        bH+=`<div class="fusion-seg" style="width:${p}%;background:${c}"></div>`;
+        lH+=`<div class="fusion-legend-item"><span class="dot-s" style="background:${c}"></span>${l} ${(v*100).toFixed(0)}%</div>`;
+    });fusionBar.innerHTML=bH;fusionLegend.innerHTML=lH;
 }
 
 function drawPulse(data){
-    const w=pulseCanvas.width,h=pulseCanvas.height;pulseCtx.clearRect(0,0,w,h);
-    pulseCtx.strokeStyle='rgba(0,230,118,0.05)';pulseCtx.lineWidth=.5;
-    for(let x=0;x<w;x+=30){pulseCtx.beginPath();pulseCtx.moveTo(x,0);pulseCtx.lineTo(x,h);pulseCtx.stroke()}
-    for(let y=0;y<h;y+=28){pulseCtx.beginPath();pulseCtx.moveTo(0,y);pulseCtx.lineTo(w,y);pulseCtx.stroke()}
-    pulseCtx.strokeStyle='rgba(0,230,118,0.12)';pulseCtx.lineWidth=1;pulseCtx.beginPath();pulseCtx.moveTo(0,h/2);pulseCtx.lineTo(w,h/2);pulseCtx.stroke();
+    const w=pulseCanvas.width,h=pulseCanvas.height;pCtx.clearRect(0,0,w,h);
+    pCtx.strokeStyle='rgba(0,230,118,0.05)';pCtx.lineWidth=.5;
+    for(let x=0;x<w;x+=30){pCtx.beginPath();pCtx.moveTo(x,0);pCtx.lineTo(x,h);pCtx.stroke()}
+    for(let y=0;y<h;y+=24){pCtx.beginPath();pCtx.moveTo(0,y);pCtx.lineTo(w,y);pCtx.stroke()}
+    pCtx.strokeStyle='rgba(0,230,118,0.1)';pCtx.lineWidth=1;pCtx.beginPath();pCtx.moveTo(0,h/2);pCtx.lineTo(w,h/2);pCtx.stroke();
     if(data.length<2)return;
     const step=w/(data.length-1),amp=h*.38;
-    pulseCtx.save();pulseCtx.shadowColor='#00e676';pulseCtx.shadowBlur=12;pulseCtx.strokeStyle='rgba(0,230,118,0.3)';pulseCtx.lineWidth=4;pulseCtx.beginPath();
-    for(let i=0;i<data.length;i++){const x=i*step,y=h/2-data[i]*amp;i===0?pulseCtx.moveTo(x,y):pulseCtx.lineTo(x,y)}pulseCtx.stroke();pulseCtx.restore();
-    pulseCtx.strokeStyle='#00e676';pulseCtx.lineWidth=1.8;pulseCtx.beginPath();
-    for(let i=0;i<data.length;i++){const x=i*step,y=h/2-data[i]*amp;i===0?pulseCtx.moveTo(x,y):pulseCtx.lineTo(x,y)}pulseCtx.stroke();
-    const gR=pulseCtx.createLinearGradient(w-60,0,w,0);gR.addColorStop(0,'rgba(5,10,18,0)');gR.addColorStop(1,'rgba(5,10,18,0.7)');pulseCtx.fillStyle=gR;pulseCtx.fillRect(w-60,0,60,h);
-    const gL=pulseCtx.createLinearGradient(0,0,40,0);gL.addColorStop(0,'rgba(5,10,18,0.8)');gL.addColorStop(1,'rgba(5,10,18,0)');pulseCtx.fillStyle=gL;pulseCtx.fillRect(0,0,40,h);
+    pCtx.save();pCtx.shadowColor='#00e676';pCtx.shadowBlur=10;pCtx.strokeStyle='rgba(0,230,118,0.3)';pCtx.lineWidth=3;pCtx.beginPath();
+    for(let i=0;i<data.length;i++){const x=i*step,y=h/2-data[i]*amp;i===0?pCtx.moveTo(x,y):pCtx.lineTo(x,y)}pCtx.stroke();pCtx.restore();
+    pCtx.strokeStyle='#00e676';pCtx.lineWidth=1.5;pCtx.beginPath();
+    for(let i=0;i<data.length;i++){const x=i*step,y=h/2-data[i]*amp;i===0?pCtx.moveTo(x,y):pCtx.lineTo(x,y)}pCtx.stroke();
 }
 
 function drawTrend(data){
-    const w=trendCanvas.width,h=trendCanvas.height;trendCtx.clearRect(0,0,w,h);
-    trendCtx.strokeStyle='rgba(0,230,118,0.04)';trendCtx.lineWidth=.5;
-    for(let x=0;x<w;x+=30){trendCtx.beginPath();trendCtx.moveTo(x,0);trendCtx.lineTo(x,h);trendCtx.stroke()}
-    for(let y=0;y<h;y+=24){trendCtx.beginPath();trendCtx.moveTo(0,y);trendCtx.lineTo(w,y);trendCtx.stroke()}
-    if(data.length<2){trendCtx.fillStyle='rgba(62,80,96,0.5)';trendCtx.font='11px Share Tech Mono';trendCtx.textAlign='center';trendCtx.fillText('Waiting...',w/2,h/2+4);return}
-    const minHr=40,maxHr=180,range=maxHr-minHr,pad=10;
-    trendCtx.fillStyle='rgba(62,80,96,0.5)';trendCtx.font='9px Share Tech Mono';trendCtx.textAlign='left';
-    [60,90,120,150].forEach(v=>{const y=pad+(1-(v-minHr)/range)*(h-pad*2);trendCtx.fillText(v,4,y+3);trendCtx.strokeStyle='rgba(0,230,118,0.06)';trendCtx.lineWidth=.5;trendCtx.beginPath();trendCtx.moveTo(26,y);trendCtx.lineTo(w,y);trendCtx.stroke()});
-    const step=(w-30)/(data.length-1);
-    trendCtx.beginPath();
-    for(let i=0;i<data.length;i++){const x=30+i*step,y=pad+(1-(data[i]-minHr)/range)*(h-pad*2);i===0?trendCtx.moveTo(x,y):trendCtx.lineTo(x,y)}
-    trendCtx.lineTo(30+(data.length-1)*step,h);trendCtx.lineTo(30,h);trendCtx.closePath();
-    const fg=trendCtx.createLinearGradient(0,0,0,h);fg.addColorStop(0,'rgba(0,230,118,0.12)');fg.addColorStop(1,'rgba(0,230,118,0)');trendCtx.fillStyle=fg;trendCtx.fill();
-    trendCtx.save();trendCtx.shadowColor='#00e676';trendCtx.shadowBlur=6;trendCtx.strokeStyle='#00e676';trendCtx.lineWidth=1.5;trendCtx.lineJoin='round';trendCtx.beginPath();
-    for(let i=0;i<data.length;i++){const x=30+i*step,y=pad+(1-(data[i]-minHr)/range)*(h-pad*2);i===0?trendCtx.moveTo(x,y):trendCtx.lineTo(x,y)}trendCtx.stroke();trendCtx.restore();
-    if(data.length>0){const lx=30+(data.length-1)*step,ly=pad+(1-(data[data.length-1]-minHr)/range)*(h-pad*2);trendCtx.beginPath();trendCtx.arc(lx,ly,3,0,Math.PI*2);trendCtx.fillStyle='#00e676';trendCtx.fill()}
+    const w=trendCanvas.width,h=trendCanvas.height;tCtx.clearRect(0,0,w,h);
+    tCtx.strokeStyle='rgba(0,230,118,0.04)';tCtx.lineWidth=.5;
+    for(let x=0;x<w;x+=30){tCtx.beginPath();tCtx.moveTo(x,0);tCtx.lineTo(x,h);tCtx.stroke()}
+    for(let y=0;y<h;y+=20){tCtx.beginPath();tCtx.moveTo(0,y);tCtx.lineTo(w,y);tCtx.stroke()}
+    if(data.length<2){tCtx.fillStyle='rgba(62,80,96,0.5)';tCtx.font='10px Share Tech Mono';tCtx.textAlign='center';tCtx.fillText('Waiting...',w/2,h/2+4);return}
+    const mn=40,mx=180,rng=mx-mn,pd=8;
+    tCtx.fillStyle='rgba(62,80,96,0.5)';tCtx.font='8px Share Tech Mono';tCtx.textAlign='left';
+    [60,90,120,150].forEach(v=>{const y=pd+(1-(v-mn)/rng)*(h-pd*2);tCtx.fillText(v,4,y+3)});
+    const step=(w-26)/(data.length-1);
+    tCtx.beginPath();for(let i=0;i<data.length;i++){const x=26+i*step,y=pd+(1-(data[i]-mn)/rng)*(h-pd*2);i===0?tCtx.moveTo(x,y):tCtx.lineTo(x,y)}
+    tCtx.lineTo(26+(data.length-1)*step,h);tCtx.lineTo(26,h);tCtx.closePath();
+    const fg=tCtx.createLinearGradient(0,0,0,h);fg.addColorStop(0,'rgba(0,230,118,0.12)');fg.addColorStop(1,'rgba(0,230,118,0)');tCtx.fillStyle=fg;tCtx.fill();
+    tCtx.save();tCtx.shadowColor='#00e676';tCtx.shadowBlur=5;tCtx.strokeStyle='#00e676';tCtx.lineWidth=1.2;tCtx.lineJoin='round';tCtx.beginPath();
+    for(let i=0;i<data.length;i++){const x=26+i*step,y=pd+(1-(data[i]-mn)/rng)*(h-pd*2);i===0?tCtx.moveTo(x,y):tCtx.lineTo(x,y)}tCtx.stroke();tCtx.restore();
 }
 
 function updateQuality(q,state){
@@ -289,27 +274,29 @@ function updateQuality(q,state){
 async function fetchHR(){
     try{
         const r=await fetch('/api/hr');if(!r.ok)throw 0;const d=await r.json();
-        const paused=d.motion_paused||false;
-        const light=d.light_change||false;
-        const state=paused?'motion':light?'light':'ok';
+        const paused=d.motion_paused||false,light=d.light_change||false,lost=d.bbox_lost||false;
+        const state=paused?'motion':light?'light':lost?'retain':'ok';
 
-        if(d.hr>0){const v=Math.round(d.hr);if(v!==lastHr){hrValue.textContent=v;updateRing(v,state);syncHeartbeat(v);triggerBeat();lastHr=v}}else{hrValue.textContent='--';updateRing(0,state);syncHeartbeat(0);lastHr=0}
+        if(d.hr>0){const v=Math.round(d.hr);if(v!==lastHr){hrValue.textContent=v;updateRing(v,state);syncHB(v);triggerBeat();lastHr=v}}else{hrValue.textContent='--';updateRing(0,state);syncHB(0);lastHr=0}
         updateQuality(d.quality,state);
 
+        // 双路心率
+        const fft=d.hr_fft||0,pk=d.hr_peak||0;
+        dualFft.textContent=fft>0?fft.toFixed(0):'--';
+        dualPeak.textContent=pk>0?pk.toFixed(0):'--';
+        const delta=fft>0&&pk>0?Math.abs(fft-pk).toFixed(0):'--';
+        dualDelta.textContent=delta!=='--'?delta+' BPM':'--';
+        dualDelta.className='dual-val '+(delta==='--'?'miss':parseInt(delta)<8?'match':parseInt(delta)<20?'match':'diff');
+        dualMethod.textContent=d.hr_method||'--';
+        if(d.hr_method==='avg'){dualMethod.style.color='var(--accent)'}else if(d.hr_method==='none'){dualMethod.style.color='var(--muted)'}else{dualMethod.style.color='var(--warning)'}
+
         diagMode.textContent='FUSION';diagMode.className='diag-value good';
-        diagRois.textContent=d.active_rois||0;diagRois.className='diag-value '+(d.active_rois>=3?'good':d.active_rois>=2?'warn':'bad');
-        const sk=(d.skin_ratio*100).toFixed(0)+'%';diagSkin.textContent=sk;diagSkin.className='diag-value '+(d.skin_ratio>=.4?'good':d.skin_ratio>=.2?'warn':'bad');
-        const mot=d.motion_score.toFixed(1)+'/'+d.motion_threshold.toFixed(0);diagMotion.textContent=mot;diagMotion.className='diag-value '+(d.motion_score>d.motion_threshold?'bad':'good');
-
-        const diags=d.diagnostics||[];
-        diagStatus.textContent=diags.join(', ');
-        if(diags.includes('OK'))diagStatus.className='diag-value good';
-        else if(diags.includes('MOTION'))diagStatus.className='diag-value paused';
-        else if(diags.includes('LIGHT_CHANGE'))diagStatus.className='diag-value light-v';
-        else if(diags.includes('NO_FACE'))diagStatus.className='diag-value bad';
-        else diagStatus.className='diag-value warn';
-
+        diagRois.textContent=d.active_rois||0;diagRois.className='diag-value '+(d.active_rois>=3?'good':d.active_rois>=1?'warn':'bad');
+        diagMotion.textContent=d.motion_score.toFixed(1)+'/'+d.motion_threshold.toFixed(0);diagMotion.className='diag-value '+(d.motion_score>d.motion_threshold?'bad':'good');
+        diagLight.textContent=light?'CHANGE':'stable';diagLight.className='diag-value '+(light?'light-v':'good');
+        diagFace.textContent=lost?'RETAIN '+d.bbox_lost_frames+'f':'detected';diagFace.className='diag-value '+(lost?'retain':'good');
         diagFps.textContent=d.fps.toFixed(0);diagFps.className='diag-value '+(d.fps>=20?'good':'warn');
+
         const bp=Math.round((d.buffer/d.buffer_max)*100);bufferFill.style.width=bp+'%';bufferText.textContent='Buffer: '+d.buffer+' / '+d.buffer_max;
         updateFusion(d.fusion_weights);
 
