@@ -105,7 +105,7 @@ from core.core_tools import ActionExecutor
 from games import GameManager, GAME_REGISTRY, GAME_CONFIGS
 
 # 感知模块
-from perception import PerceptionManager, init_screen_processor, draw_detection_info
+from perception import PerceptionManager, init_screen_processor, get_screen_processor, draw_detection_info
 
 # ============================================================================
 # 初始化
