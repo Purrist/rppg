@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>rPPG 心率监测 V4</title>
+    <title>rPPG 心率监测 V5</title>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
     <style>
-        :root{--bg:#050a12;--card:#0b1320;--border:#14243a;--fg:#c4d4e4;--muted:#3e5060;--accent:#00e676;--accent-dim:#00994d;--accent-glow:rgba(0,230,118,0.25);--danger:#ff4757;--warning:#ffa502;--blue:#1e90ff}
+        :root{--bg:#050a12;--card:#0b1320;--border:#14243a;--fg:#c4d4e4;--muted:#3e5060;--accent:#00e676;--accent-dim:#00994d;--accent-glow:rgba(0,230,118,0.25);--danger:#ff4757;--warning:#ffa502;--blue:#1e90ff;--cyan:#00bcd4}
         *{margin:0;padding:0;box-sizing:border-box}
         body{font-family:'Share Tech Mono',monospace;background:var(--bg);color:var(--fg);min-height:100vh;overflow:hidden}
         .header{display:flex;align-items:center;justify-content:space-between;padding:10px 24px;background:var(--card);border-bottom:1px solid var(--border);height:48px}
@@ -43,12 +43,14 @@
         .hr-ring-bg{fill:none;stroke:var(--border);stroke-width:4}
         .hr-ring-fill{fill:none;stroke:var(--accent);stroke-width:4;stroke-linecap:round;stroke-dasharray:408;stroke-dashoffset:408;transition:stroke-dashoffset .6s ease,stroke .3s ease;filter:drop-shadow(0 0 6px var(--accent-glow))}
         .hr-ring-inner{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
-        .hr-icon{font-size:16px;color:var(--accent);margin-bottom:2px;animation:hb 1.2s ease-in-out infinite}
+        .hr-icon{font-size:16px;color:var(--accent);margin-bottom:2px}
         .hr-icon.paused{color:var(--blue)!important;animation:none!important}
+        .hr-icon.light{color:var(--cyan)!important;animation:none!important}
         @keyframes hb{0%,100%{transform:scale(1);opacity:.7}14%{transform:scale(1.25);opacity:1}28%{transform:scale(1);opacity:.7}}
         .hr-value{font-family:'Orbitron',sans-serif;font-size:44px;font-weight:900;color:var(--accent);line-height:1;text-shadow:0 0 20px var(--accent-glow);transition:transform .12s ease,color .3s ease}
         .hr-value.beat{transform:scale(1.06)}
         .hr-value.paused-val{color:var(--blue)!important;text-shadow:0 0 20px rgba(30,144,255,.25)!important}
+        .hr-value.light-val{color:var(--cyan)!important;text-shadow:0 0 20px rgba(0,188,212,.25)!important}
         .hr-unit{font-family:'Orbitron',sans-serif;font-size:11px;font-weight:400;color:var(--accent-dim);letter-spacing:4px;margin-top:2px}
         .canvas-wrap{position:relative;background:rgba(0,230,118,.015);border:1px solid var(--border);border-radius:5px;overflow:hidden}
         .canvas-wrap canvas{display:block;width:100%}
@@ -56,31 +58,23 @@
         .quality-row{display:flex;align-items:center;gap:10px}
         .quality-bar{flex:1;height:5px;background:rgba(255,255,255,.04);border-radius:3px;overflow:hidden}
         .quality-fill{height:100%;border-radius:3px;background:var(--accent);transition:width .4s ease,background .4s ease}
-        .quality-fill.low{background:var(--danger)}.quality-fill.mid{background:var(--warning)}.quality-fill.paused-fill{background:var(--blue)}
+        .quality-fill.low{background:var(--danger)}.quality-fill.mid{background:var(--warning)}.quality-fill.paused-fill{background:var(--blue)}.quality-fill.light-fill{background:var(--cyan)}
         .quality-val{font-size:13px;font-weight:700;min-width:38px;text-align:right;color:var(--accent)}
-        .status-rows{display:flex;flex-direction:column;gap:7px}
-        .status-row{display:flex;align-items:center;gap:8px;font-size:11px}
-        .dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
-        .dot.g{background:var(--accent);box-shadow:0 0 5px var(--accent)}
-        .dot.r{background:var(--danger);box-shadow:0 0 5px var(--danger)}
-        .dot.y{background:var(--warning);box-shadow:0 0 5px var(--warning)}
-        .dot.b{background:var(--blue);box-shadow:0 0 5px var(--blue)}
-        .dot.g.blink{animation:db 2s ease-in-out infinite}
-        .dot.b.blink{animation:db 2s ease-in-out infinite}
-        @keyframes db{0%,100%{opacity:1}50%{opacity:.3}}
+        .diag-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+        .diag-item{display:flex;align-items:center;gap:6px;font-size:10px;padding:4px 8px;background:rgba(255,255,255,.02);border-radius:3px;border:1px solid var(--border)}
+        .diag-label{color:var(--muted);min-width:48px}
+        .diag-value{font-weight:700;color:var(--fg)}
+        .diag-value.good{color:var(--accent)}.diag-value.warn{color:var(--warning)}.diag-value.bad{color:var(--danger)}.diag-value.paused{color:var(--blue)}.diag-value.light-v{color:var(--cyan)}
         .buffer-wrap{margin-top:4px}
         .buffer-bar{height:3px;background:rgba(255,255,255,.04);border-radius:2px;overflow:hidden}
         .buffer-fill{height:100%;background:var(--accent-dim);border-radius:2px;transition:width .3s ease}
         .buffer-text{font-size:10px;color:var(--muted);margin-top:4px}
-        /* 诊断面板 */
-        .diag-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
-        .diag-item{display:flex;align-items:center;gap:6px;font-size:10px;padding:4px 8px;background:rgba(255,255,255,.02);border-radius:3px;border:1px solid var(--border)}
-        .diag-item .diag-label{color:var(--muted);min-width:48px}
-        .diag-item .diag-value{color:var(--fg);font-weight:700}
-        .diag-item .diag-value.good{color:var(--accent)}
-        .diag-item .diag-value.warn{color:var(--warning)}
-        .diag-item .diag-value.bad{color:var(--danger)}
-        .diag-item .diag-value.paused{color:var(--blue)}
+        /* 融合权重条 */
+        .fusion-bar{display:flex;height:8px;border-radius:4px;overflow:hidden;margin-top:6px}
+        .fusion-seg{transition:width .4s ease;min-width:2px}
+        .fusion-legend{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;font-size:9px}
+        .fusion-legend-item{display:flex;align-items:center;gap:3px;color:var(--muted)}
+        .fusion-legend-item .dot-s{width:6px;height:6px;border-radius:50%;flex-shrink:0}
         .pipeline{display:flex;align-items:center;gap:3px;flex-wrap:wrap;margin-top:8px}
         .pipe-step{font-size:8px;color:var(--accent-dim);background:rgba(0,230,118,.06);border:1px solid rgba(0,230,118,.12);padding:2px 5px;border-radius:2px;letter-spacing:.3px}
         .pipe-arrow{font-size:8px;color:var(--muted)}
@@ -96,7 +90,7 @@
         <div class="header-logo"><div class="header-logo-pulse"></div></div>
         <span class="header-title">rPPG MONITOR</span>
     </div>
-    <span class="header-badge">V4 Multi-ROI + Motion</span>
+    <span class="header-badge">V5 Fusion</span>
 </header>
 <main class="main">
     <section class="video-section" aria-label="摄像头视频流">
@@ -111,7 +105,6 @@
         </div>
     </section>
     <aside class="panel" aria-label="心率数据面板">
-        <!-- 心率 -->
         <div class="hr-block">
             <div class="hr-ring">
                 <svg viewBox="0 0 140 140">
@@ -119,13 +112,12 @@
                     <circle class="hr-ring-fill" id="hrRing" cx="70" cy="70" r="65"/>
                 </svg>
                 <div class="hr-ring-inner">
-                    <i class="fa-solid fa-heart-pulse hr-icon" id="hrIcon"></i>
+                    <i class="fa-solid fa-heart-pulse hr-icon" id="hrIcon" style="animation:hb 1s ease-in-out infinite"></i>
                     <div class="hr-value" id="hrValue">--</div>
                     <div class="hr-unit">BPM</div>
                 </div>
             </div>
         </div>
-        <!-- 脉搏波形 -->
         <div class="panel-block">
             <div class="panel-label">Pulse Waveform (Filtered)</div>
             <div class="canvas-wrap">
@@ -133,17 +125,15 @@
                 <canvas id="pulseCanvas" width="630" height="140"></canvas>
             </div>
         </div>
-        <!-- 心率趋势 -->
         <div class="panel-block">
-            <div class="panel-label">Heart Rate Trend (Rate-Limited)</div>
+            <div class="panel-label">Heart Rate Trend</div>
             <div class="canvas-wrap">
                 <span class="canvas-label">BPM History</span>
                 <canvas id="trendCanvas" width="630" height="120"></canvas>
             </div>
         </div>
-        <!-- 信号质量 -->
         <div class="panel-block">
-            <div class="panel-label">Signal Quality (SNR)</div>
+            <div class="panel-label">Signal Quality</div>
             <div class="quality-row">
                 <div class="quality-bar">
                     <div class="quality-fill" id="qualityFill" style="width:0%"></div>
@@ -151,62 +141,48 @@
                 <span class="quality-val" id="qualityVal">0%</span>
             </div>
         </div>
-        <!-- 诊断面板（V4 新增） -->
+        <div class="panel-block">
+            <div class="panel-label">ROI Fusion Weights</div>
+            <div class="fusion-bar" id="fusionBar"></div>
+            <div class="fusion-legend" id="fusionLegend"></div>
+        </div>
         <div class="panel-block">
             <div class="panel-label">Diagnostics</div>
             <div class="diag-grid">
-                <div class="diag-item">
-                    <span class="diag-label">ROI</span>
-                    <span class="diag-value" id="diagRoi">none</span>
-                </div>
-                <div class="diag-item">
-                    <span class="diag-label">Skin</span>
-                    <span class="diag-value" id="diagSkin">0%</span>
-                </div>
-                <div class="diag-item">
-                    <span class="diag-label">Motion</span>
-                    <span class="diag-value" id="diagMotion">0.0</span>
-                </div>
-                <div class="diag-item">
-                    <span class="diag-label">Status</span>
-                    <span class="diag-value" id="diagStatus">--</span>
-                </div>
-                <div class="diag-item">
-                    <span class="diag-label">Camera</span>
-                    <span class="diag-value" id="diagCam">--</span>
-                </div>
-                <div class="diag-item">
-                    <span class="diag-label">FPS</span>
-                    <span class="diag-value" id="diagFps">--</span>
-                </div>
+                <div class="diag-item"><span class="diag-label">Mode</span><span class="diag-value" id="diagMode">--</span></div>
+                <div class="diag-item"><span class="diag-label">ROIs</span><span class="diag-value" id="diagRois">0</span></div>
+                <div class="diag-item"><span class="diag-label">Skin</span><span class="diag-value" id="diagSkin">0%</span></div>
+                <div class="diag-item"><span class="diag-label">Motion</span><span class="diag-value" id="diagMotion">0</span></div>
+                <div class="diag-item"><span class="diag-label">Status</span><span class="diag-value" id="diagStatus">--</span></div>
+                <div class="diag-item"><span class="diag-label">FPS</span><span class="diag-value" id="diagFps">--</span></div>
             </div>
             <div class="buffer-wrap">
-                <div class="buffer-bar">
-                    <div class="buffer-fill" id="bufferFill" style="width:0%"></div>
-                </div>
-                <div class="buffer-text" id="bufferText">Buffer: 0 / 180 frames</div>
+                <div class="buffer-bar"><div class="buffer-fill" id="bufferFill" style="width:0%"></div></div>
+                <div class="buffer-text" id="bufferText">Buffer: 0 / 180</div>
             </div>
         </div>
-        <!-- 算法说明 -->
         <div class="panel-block" style="border-bottom:none">
-            <div class="panel-label">V4 Improvements</div>
+            <div class="panel-label">V5 Pipeline</div>
             <div class="fix-list">
-                <div class="fix-item"><strong>ROI:</strong> 4 candidates + HSV skin auto-select</div>
-                <div class="fix-item"><strong>Motion:</strong> Frame-diff detection, pause on movement</div>
-                <div class="fix-item"><strong>Camera:</strong> Lock exposure &amp; white balance</div>
-                <div class="fix-item"><strong>Diag:</strong> Real-time skin% + motion + status</div>
+                <div class="fix-item"><strong>Fusion:</strong> 4 ROIs → weighted RGB average</div>
+                <div class="fix-item"><strong>Motion:</strong> adaptive threshold by brightness</div>
+                <div class="fix-item"><strong>Light:</strong> sudden change detection (quality penalty)</div>
+                <div class="fix-item"><strong>Log:</strong> auto CSV (rppg_log.csv)</div>
+                <div class="fix-item"><strong>Beat:</strong> heartbeat synced to real HR</div>
             </div>
             <div class="pipeline">
-                <span class="pipe-step">Detect</span><span class="pipe-arrow">→</span>
                 <span class="pipe-step">4 ROIs</span><span class="pipe-arrow">→</span>
-                <span class="pipe-step">HSV Skin</span><span class="pipe-arrow">→</span>
+                <span class="pipe-step">HSV</span><span class="pipe-arrow">→</span>
+                <span class="pipe-step">Weight</span><span class="pipe-arrow">→</span>
+                <span class="pipe-step">Fuse</span><span class="pipe-arrow">→</span>
                 <span class="pipe-step">Motion?</span><span class="pipe-arrow">→</span>
+                <span class="pipe-step">Light?</span><span class="pipe-arrow">→</span>
                 <span class="pipe-step">POS</span><span class="pipe-arrow">→</span>
-                <span class="pipe-step">Median</span><span class="pipe-arrow">→</span>
-                <span class="pipe-step">Detrend</span><span class="pipe-arrow">→</span>
-                <span class="pipe-step">Butterworth</span><span class="pipe-arrow">→</span>
+                <span class="pipe-step">BW</span><span class="pipe-arrow">→</span>
                 <span class="pipe-step">FFT</span><span class="pipe-arrow">→</span>
                 <span class="pipe-step">Limit</span>
+                <span class="pipe-arrow">→</span>
+                <span class="pipe-step">CSV</span>
             </div>
         </div>
     </aside>
@@ -216,21 +192,56 @@ const $=id=>document.getElementById(id);
 const videoImg=$('videoImg'),noSignal=$('noSignal'),hrValue=$('hrValue'),hrRing=$('hrRing'),hrIcon=$('hrIcon');
 const pulseCanvas=$('pulseCanvas'),trendCanvas=$('trendCanvas');
 const qualityFill=$('qualityFill'),qualityVal=$('qualityVal');
-const diagRoi=$('diagRoi'),diagSkin=$('diagSkin'),diagMotion=$('diagMotion'),diagStatus=$('diagStatus');
-const diagCam=$('diagCam'),diagFps=$('diagFps');
+const diagMode=$('diagMode'),diagRois=$('diagRois'),diagSkin=$('diagSkin'),diagMotion=$('diagMotion');
+const diagStatus=$('diagStatus'),diagFps=$('diagFps');
 const bufferFill=$('bufferFill'),bufferText=$('bufferText');
+const fusionBar=$('fusionBar'),fusionLegend=$('fusionLegend');
 const pulseCtx=pulseCanvas.getContext('2d'),trendCtx=trendCanvas.getContext('2d');
 let lastHr=0,pulseData=[],trendData=[],videoReady=false;
 const RC=2*Math.PI*65;
 
-videoImg.addEventListener('load',()=>{if(!videoReady){videoReady=true;noSignal.classList.add('hidden');diagCam.textContent='Active';diagCam.className='diag-value good'}});
-videoImg.addEventListener('error',()=>{videoReady=false;noSignal.classList.remove('hidden');diagCam.textContent='Error';diagCam.className='diag-value bad'});
+const ROI_COLORS={'forehead_wide':'#00e676','forehead_core':'#00c853','left_cheek':'#ffa502','right_cheek':'#ff6348'};
+const ROI_LABELS={'forehead_wide':'Fhd-W','forehead_core':'Fhd-C','left_cheek':'L-Cheek','right_cheek':'R-Cheek'};
+
+videoImg.addEventListener('load',()=>{if(!videoReady){videoReady=true;noSignal.classList.add('hidden')}});
+videoImg.addEventListener('error',()=>{videoReady=false;noSignal.classList.remove('hidden')});
 
 function triggerBeat(){hrValue.classList.add('beat');setTimeout(()=>hrValue.classList.remove('beat'),130)}
-function updateRing(hr,paused){
+
+/* V5: 心跳动画与真实心率同步 */
+function syncHeartbeat(hr){
+    if(hr>0){
+        const period=60/hr;
+        hrIcon.style.animationDuration=period.toFixed(2)+'s';
+        hrIcon.style.animationName='hb';
+        hrIcon.className='fa-solid fa-heart-pulse hr-icon';
+    }else{
+        hrIcon.style.animationName='none';
+    }
+}
+
+function updateRing(hr,state){
     const p=Math.max(0,Math.min(1,(hr-45)/135));hrRing.style.strokeDashoffset=RC*(1-p);
-    if(paused){hrRing.style.stroke='var(--blue)';hrValue.style.color='var(--blue)';hrValue.style.textShadow='0 0 20px rgba(30,144,255,0.25)';hrIcon.className='fa-solid fa-heart-pulse hr-icon paused';hrValue.classList.add('paused-val')}
-    else{let c='#00e676';if(hr>150)c='#ffa502';if(hr>170||hr<50)c='#ff4757';hrRing.style.stroke=c;hrValue.style.color=c;hrValue.style.textShadow='0 0 20px '+c+'44';hrIcon.className='fa-solid fa-heart-pulse hr-icon';hrValue.classList.remove('paused-val')}
+    if(state==='motion'){hrRing.style.stroke='var(--blue)';hrValue.style.color='var(--blue)';hrValue.style.textShadow='0 0 20px rgba(30,144,255,0.25)';hrIcon.className='fa-solid fa-heart-pulse hr-icon paused';hrValue.classList.add('paused-val');hrValue.classList.remove('light-val')}
+    else if(state==='light'){hrRing.style.stroke='var(--cyan)';hrValue.style.color='var(--cyan)';hrValue.style.textShadow='0 0 20px rgba(0,188,212,0.25)';hrIcon.className='fa-solid fa-heart-pulse hr-icon light';hrValue.classList.add('light-val');hrValue.classList.remove('paused-val')}
+    else{let c='#00e676';if(hr>150)c='#ffa502';if(hr>170||hr<50)c='#ff4757';hrRing.style.stroke=c;hrValue.style.color=c;hrValue.style.textShadow='0 0 20px '+c+'44';hrIcon.className='fa-solid fa-heart-pulse hr-icon';hrValue.classList.remove('paused-val','light-val')}
+}
+
+/* V5: 融合权重可视化 */
+function updateFusion(weights){
+    if(!weights||Object.keys(weights).length===0){fusionBar.innerHTML='';fusionLegend.innerHTML='<span style="color:var(--muted)">No ROIs</span>';return}
+    const entries=Object.entries(weights);
+    const total=entries.reduce((s,[,v])=>s+Math.max(v,0.05),0);
+    let barHTML='',legendHTML='';
+    entries.forEach(([name,val])=>{
+        const pct=Math.max(val,0.05)/total*100;
+        const color=ROI_COLORS[name]||'#666';
+        const label=ROI_LABELS[name]||name;
+        barHTML+=`<div class="fusion-seg" style="width:${pct}%;background:${color}" title="${label}: ${(val*100).toFixed(0)}%"></div>`;
+        legendHTML+=`<div class="fusion-legend-item"><span class="dot-s" style="background:${color}"></span>${label} ${(val*100).toFixed(0)}%</div>`;
+    });
+    fusionBar.innerHTML=barHTML;
+    fusionLegend.innerHTML=legendHTML;
 }
 
 function drawPulse(data){
@@ -254,7 +265,7 @@ function drawTrend(data){
     trendCtx.strokeStyle='rgba(0,230,118,0.04)';trendCtx.lineWidth=.5;
     for(let x=0;x<w;x+=30){trendCtx.beginPath();trendCtx.moveTo(x,0);trendCtx.lineTo(x,h);trendCtx.stroke()}
     for(let y=0;y<h;y+=24){trendCtx.beginPath();trendCtx.moveTo(0,y);trendCtx.lineTo(w,y);trendCtx.stroke()}
-    if(data.length<2){trendCtx.fillStyle='rgba(62,80,96,0.5)';trendCtx.font='11px Share Tech Mono';trendCtx.textAlign='center';trendCtx.fillText('Waiting for data...',w/2,h/2+4);return}
+    if(data.length<2){trendCtx.fillStyle='rgba(62,80,96,0.5)';trendCtx.font='11px Share Tech Mono';trendCtx.textAlign='center';trendCtx.fillText('Waiting...',w/2,h/2+4);return}
     const minHr=40,maxHr=180,range=maxHr-minHr,pad=10;
     trendCtx.fillStyle='rgba(62,80,96,0.5)';trendCtx.font='9px Share Tech Mono';trendCtx.textAlign='left';
     [60,90,120,150].forEach(v=>{const y=pad+(1-(v-minHr)/range)*(h-pad*2);trendCtx.fillText(v,4,y+3);trendCtx.strokeStyle='rgba(0,230,118,0.06)';trendCtx.lineWidth=.5;trendCtx.beginPath();trendCtx.moveTo(26,y);trendCtx.lineTo(w,y);trendCtx.stroke()});
@@ -268,9 +279,10 @@ function drawTrend(data){
     if(data.length>0){const lx=30+(data.length-1)*step,ly=pad+(1-(data[data.length-1]-minHr)/range)*(h-pad*2);trendCtx.beginPath();trendCtx.arc(lx,ly,3,0,Math.PI*2);trendCtx.fillStyle='#00e676';trendCtx.fill()}
 }
 
-function updateQuality(q,paused){
+function updateQuality(q,state){
     const p=Math.round(Math.max(0,Math.min(100,q)));qualityFill.style.width=p+'%';qualityVal.textContent=p+'%';
-    if(paused){qualityFill.className='quality-fill paused-fill';qualityVal.style.color='var(--blue)'}
+    if(state==='motion'){qualityFill.className='quality-fill paused-fill';qualityVal.style.color='var(--blue)'}
+    else if(state==='light'){qualityFill.className='quality-fill light-fill';qualityVal.style.color='var(--cyan)'}
     else{qualityFill.className='quality-fill'+(p<25?' low':p<50?' mid':'');qualityVal.style.color=p<25?'var(--danger)':p<50?'var(--warning)':'var(--accent)'}
 }
 
@@ -278,38 +290,28 @@ async function fetchHR(){
     try{
         const r=await fetch('/api/hr');if(!r.ok)throw 0;const d=await r.json();
         const paused=d.motion_paused||false;
+        const light=d.light_change||false;
+        const state=paused?'motion':light?'light':'ok';
 
-        if(d.hr>0){const v=Math.round(d.hr);if(v!==lastHr){hrValue.textContent=v;updateRing(v,paused);triggerBeat();lastHr=v}}else{hrValue.textContent='--';updateRing(0,paused);lastHr=0}
+        if(d.hr>0){const v=Math.round(d.hr);if(v!==lastHr){hrValue.textContent=v;updateRing(v,state);syncHeartbeat(v);triggerBeat();lastHr=v}}else{hrValue.textContent='--';updateRing(0,state);syncHeartbeat(0);lastHr=0}
+        updateQuality(d.quality,state);
 
-        updateQuality(d.quality,paused);
+        diagMode.textContent='FUSION';diagMode.className='diag-value good';
+        diagRois.textContent=d.active_rois||0;diagRois.className='diag-value '+(d.active_rois>=3?'good':d.active_rois>=2?'warn':'bad');
+        const sk=(d.skin_ratio*100).toFixed(0)+'%';diagSkin.textContent=sk;diagSkin.className='diag-value '+(d.skin_ratio>=.4?'good':d.skin_ratio>=.2?'warn':'bad');
+        const mot=d.motion_score.toFixed(1)+'/'+d.motion_threshold.toFixed(0);diagMotion.textContent=mot;diagMotion.className='diag-value '+(d.motion_score>d.motion_threshold?'bad':'good');
 
-        // 诊断面板
-        const roiName=d.roi_name||'none';
-        diagRoi.textContent=roiName;
-        diagRoi.className='diag-value '+(roiName==='none'?'bad':'good');
-
-        const skinPct=(d.skin_ratio*100).toFixed(0)+'%';
-        diagSkin.textContent=skinPct;
-        diagSkin.className='diag-value '+(d.skin_ratio>=0.6?'good':d.skin_ratio>=0.3?'warn':'bad');
-
-        const mot=d.motion_score;
-        diagMotion.textContent=mot.toFixed(1);
-        diagMotion.className='diag-value '+(mot>12?'bad':mot>6?'warn':'good');
-
-        // 综合状态
         const diags=d.diagnostics||[];
-        const statusText=diags.map(s=>s).join(', ');
-        diagStatus.textContent=statusText;
+        diagStatus.textContent=diags.join(', ');
         if(diags.includes('OK'))diagStatus.className='diag-value good';
-        else if(diags.includes('MOTION_DETECTED'))diagStatus.className='diag-value paused';
+        else if(diags.includes('MOTION'))diagStatus.className='diag-value paused';
+        else if(diags.includes('LIGHT_CHANGE'))diagStatus.className='diag-value light-v';
         else if(diags.includes('NO_FACE'))diagStatus.className='diag-value bad';
         else diagStatus.className='diag-value warn';
 
-        diagFps.textContent=d.fps.toFixed(0);
-        diagFps.className='diag-value '+(d.fps>=20?'good':'warn');
-
-        const bp=Math.round((d.buffer/d.buffer_max)*100);bufferFill.style.width=bp+'%';
-        bufferText.textContent='Buffer: '+d.buffer+' / '+d.buffer_max+' frames';
+        diagFps.textContent=d.fps.toFixed(0);diagFps.className='diag-value '+(d.fps>=20?'good':'warn');
+        const bp=Math.round((d.buffer/d.buffer_max)*100);bufferFill.style.width=bp+'%';bufferText.textContent='Buffer: '+d.buffer+' / '+d.buffer_max;
+        updateFusion(d.fusion_weights);
 
         if(d.pulse&&d.pulse.length>1){pulseData=d.pulse;drawPulse(pulseData)}
         if(d.hr_history&&d.hr_history.length>1){trendData=d.hr_history;drawTrend(trendData)}

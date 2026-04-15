@@ -1,11 +1,12 @@
 """
-rPPG 心率监测 V4.1 (修复 ROI 检测失败)
+rPPG 心率监测 V5 (信号融合版)
 
-修复:
-  1. select_best_roi 不再用硬门槛，永远返回最佳候选
-  2. estimate_hr 频率掩码上限条件修复
-  3. HSV 皮肤检测改为质量参考而非通行证
-  4. 摄像头锁定更保守（不强制关闭自动曝光）
+V4.1 → V5 改动:
+  1. 多 ROI 加权融合替代"选一个"（消除 ROI 跳变，SNR 更高）
+  2. 自适应运动阈值（暗光下噪声更大）
+  3. 光照突变检测（开灯/关灯时保护信号）
+  4. CSV 数据记录（自动保存到 rppg_log.csv）
+  5. 心跳动画与真实心率同步（前端 CSS）
 """
 
 import cv2
@@ -16,6 +17,8 @@ import mediapipe as mp
 import threading
 import time
 import os
+import csv
+from datetime import datetime
 
 app = Flask(__name__)
 
@@ -37,8 +40,56 @@ DETECT_INTERVAL    = 2
 COMPUTE_INTERVAL   = 4
 MIN_BUFFER_COMPUTE = POS_WINDOW * 3
 MIN_ROI_PIXELS     = 300
-MOTION_THRESHOLD   = 12.0
+BASE_MOTION_THRESH = 12.0
 MOTION_PATIENCE    = 8
+LIGHT_CHANGE_THRESH = 25.0  # 亮度变化超过此值视为光照突变
+CSV_LOG_INTERVAL   = 10     # 每 N 次计算写入一次 CSV
+
+
+# ============================================================
+#  数据记录器
+# ============================================================
+class DataLogger:
+    """将心率数据自动保存到 CSV 文件"""
+
+    def __init__(self, filename='rppg_log.csv'):
+        self.filename = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), filename
+        )
+        self.buffer = []
+        self.counter = 0
+        self._init_file()
+
+    def _init_file(self):
+        with open(self.filename, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                'time', 'hr', 'quality', 'roi_name',
+                'skin_ratio', 'motion', 'fps'
+            ])
+        print(f"[OK] 日志文件: {self.filename}")
+
+    def log(self, hr, quality, roi_name, skin_ratio, motion, fps):
+        self.counter += 1
+        self.buffer.append([
+            datetime.now().strftime('%H:%M:%S'),
+            round(hr, 1),
+            round(quality, 0),
+            roi_name,
+            round(skin_ratio, 3),
+            round(motion, 1),
+            round(fps, 1),
+        ])
+        if self.counter % CSV_LOG_INTERVAL == 0:
+            self._flush()
+
+    def _flush(self):
+        if not self.buffer:
+            return
+        with open(self.filename, 'a', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerows(self.buffer)
+        self.buffer = []
 
 
 # ============================================================
@@ -67,7 +118,7 @@ class BBoxSmoother:
 
 
 # ============================================================
-#  rPPG 处理器 V4.1
+#  rPPG 处理器 V5
 # ============================================================
 class RPPGProcessor:
 
@@ -76,13 +127,16 @@ class RPPGProcessor:
         self.cap = None
         self.face_detector = None
         self.bbox_smoother = BBoxSmoother(alpha=0.4)
+        self.logger = DataLogger()
 
+        # 缓冲区
         self.rgb_buffer = []
         self.time_buffer = []
         self.hr_raw_history = []
         self.hr_output_history = []
         self.pulse_history = []
 
+        # 状态
         self.hr = 0.0
         self.signal_quality = 0.0
         self.face_detected = False
@@ -95,15 +149,24 @@ class RPPGProcessor:
         self.actual_fs = 0.0
         self.last_hr_time = 0.0
 
-        # V4 状态
+        # ROI 融合状态
         self.current_roi_name = "none"
-        self.current_roi_rect = None
+        self.best_roi_rect = None  # 用于视频框显示
         self.best_skin_ratio = 0.0
+        self.active_roi_count = 0
+        self.fusion_weights = {}
+
+        # 运动检测
         self.prev_roi_gray = None
         self.motion_score = 0.0
+        self.motion_threshold = BASE_MOTION_THRESH
         self.motion_frames = 0
         self.signal_paused = False
         self.paused_reason = ""
+
+        # 光照检测（V5 新增）
+        self.prev_roi_brightness = None
+        self.light_change_detected = False
 
         self.lock = threading.Lock()
         self.running = True
@@ -118,10 +181,6 @@ class RPPGProcessor:
         if not self.cap.isOpened():
             raise RuntimeError(f"无法打开摄像头 {self.camera_id}")
 
-        # [FIX] 不再强制锁定曝光，很多摄像头手动模式会导致画面全黑
-        # 只设置缓冲区大小，让摄像头自己管理曝光
-        print("[OK] 摄像头参数: 自动曝光（不锁定，避免画面过暗）")
-
         self.face_detector = mp.solutions.face_detection.FaceDetection(
             model_selection=1,
             min_detection_confidence=0.4,
@@ -130,11 +189,13 @@ class RPPGProcessor:
         print(f"[OK] 摄像头 {self.camera_id} 已打开")
         print(f"[OK] MediaPipe 远距离人脸模型 (0.5-5m)")
         print(f"[OK] Butterworth {BW_LOW}-{BW_HIGH}Hz order={BW_ORDER}")
+        print(f"[OK] 多ROI信号融合 + 光照突变检测 + CSV记录")
 
     def stop(self):
         self.running = False
         if self.cap and self.cap.isOpened():
             self.cap.release()
+        self.logger._flush()  # 关闭时写入剩余数据
 
     # -------------------- 多 ROI 定义 --------------------
     def define_rois(self, frame, bbox):
@@ -144,85 +205,53 @@ class RPPGProcessor:
         bw = int(bbox.width * w)
         bh = int(bbox.height * h)
 
-        rois = []
-
-        # ROI 1: 前额宽区（覆盖面大，容错高）
-        rois.append({
-            "name": "forehead_wide",
-            "rect": (
-                x_min + int(bw * 0.15),
-                y_min + int(bh * 0.12),
-                x_min + int(bw * 0.85),
-                y_min + int(bh * 0.42),
-            ),
-            "weight": 1.2,
-        })
-
-        # ROI 2: 前额窄区（核心区域）
-        rois.append({
-            "name": "forehead_core",
-            "rect": (
-                x_min + int(bw * 0.25),
-                y_min + int(bh * 0.18),
-                x_min + int(bw * 0.75),
-                y_min + int(bh * 0.38),
-            ),
-            "weight": 1.5,
-        })
-
-        # ROI 3: 左脸颊
-        rois.append({
-            "name": "left_cheek",
-            "rect": (
-                x_min + int(bw * 0.10),
-                y_min + int(bh * 0.45),
-                x_min + int(bw * 0.40),
-                y_min + int(bh * 0.72),
-            ),
-            "weight": 0.8,
-        })
-
-        # ROI 4: 右脸颊
-        rois.append({
-            "name": "right_cheek",
-            "rect": (
-                x_min + int(bw * 0.60),
-                y_min + int(bh * 0.45),
-                x_min + int(bw * 0.90),
-                y_min + int(bh * 0.72),
-            ),
-            "weight": 0.8,
-        })
-
-        return rois
+        return [
+            {
+                "name": "forehead_wide",
+                "rect": (x_min + int(bw * .15), y_min + int(bh * .12),
+                         x_min + int(bw * .85), y_min + int(bh * .42)),
+                "weight": 1.2,
+            },
+            {
+                "name": "forehead_core",
+                "rect": (x_min + int(bw * .25), y_min + int(bh * .18),
+                         x_min + int(bw * .75), y_min + int(bh * .38)),
+                "weight": 1.5,
+            },
+            {
+                "name": "left_cheek",
+                "rect": (x_min + int(bw * .10), y_min + int(bh * .45),
+                         x_min + int(bw * .40), y_min + int(bh * .72)),
+                "weight": 0.8,
+            },
+            {
+                "name": "right_cheek",
+                "rect": (x_min + int(bw * .60), y_min + int(bh * .45),
+                         x_min + int(bw * .90), y_min + int(bh * .72)),
+                "weight": 0.8,
+            },
+        ]
 
     # -------------------- HSV 皮肤检测 --------------------
     def compute_skin_ratio(self, roi_bgr):
-        """用 HSV 检测皮肤像素占比"""
         hsv = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2HSV)
-        # [FIX] 放宽 H 范围到 0-30（原来 0-25 太窄）
-        # S 下限降到 15（原来 20）
-        # V 下限降到 40（原来 50）
         lower = np.array([0, 15, 40])
         upper = np.array([30, 255, 255])
         mask = cv2.inRange(hsv, lower, upper)
         return np.sum(mask > 0) / mask.size
 
-    # -------------------- [FIX] 选择最佳 ROI --------------------
-    def select_best_roi(self, frame, rois):
+    # -------------------- 核心：多 ROI 信号融合 --------------------
+    def extract_all_rois(self, frame, rois):
         """
-        从候选 ROI 中选最佳区域
-        V4 bug: 用了硬门槛 skin_ratio >= 0.55，没通过就返回 None
-        V4.1 fix: 永远返回最佳候选，皮肤比例仅作为质量参考
+        提取所有候选 ROI 的信息
+        返回: (fused_rgb, best_rect, skin_ratio, active_count, weights)
+        fused_rgb: 所有合格 ROI 的加权融合 RGB 均值
         """
         h, w = frame.shape[:2]
         candidates = []
 
         for roi_info in rois:
-            name = roi_info["name"]
             x1, y1, x2, y2 = roi_info["rect"]
-            weight = roi_info["weight"]
-
             x1, y1 = max(0, x1), max(0, y1)
             x2, y2 = min(w, x2), min(h, y2)
 
@@ -230,47 +259,100 @@ class RPPGProcessor:
                 continue
 
             roi = frame[y1:y2, x1:x2]
-            pixels = roi.shape[0] * roi.shape[1]
-
-            if pixels < MIN_ROI_PIXELS:
+            if roi.shape[0] * roi.shape[1] < MIN_ROI_PIXELS:
                 continue
 
             skin_ratio = self.compute_skin_ratio(roi)
-            score = skin_ratio * weight
+
+            # BGR → RGB 空间平均
+            mean_rgb = np.mean(roi.reshape(-1, 3), axis=0)[::-1].copy()
+
+            # 每个候选的权重 = 皮肤比例 × 区域权重
+            score = skin_ratio * roi_info["weight"]
 
             candidates.append({
-                "name": name,
+                "name": roi_info["name"],
                 "rect": (x1, y1, x2, y2),
                 "roi": roi,
+                "mean_rgb": mean_rgb,
                 "skin_ratio": skin_ratio,
                 "score": score,
-                "pixels": pixels,
+                "weight": roi_info["weight"],
             })
 
         if not candidates:
-            return None
+            return None, None, 0.0, 0, {}
 
-        # [FIX] 关键改动：按评分排序，永远返回最佳候选
-        # 不再用硬门槛拒绝
-        candidates.sort(key=lambda c: c["score"], reverse=True)
-        return candidates[0]
+        # --- 加权融合（核心改动） ---
+        # 每个候选的贡献权重 = max(0, skin_ratio) * weight
+        # 即使皮肤比例很低也参与融合（权重自然就低）
+        total_weight = 0.0
+        fused_rgb = np.zeros(3, dtype=np.float64)
+
+        for c in candidates:
+            w = max(c["skin_ratio"], 0.05) * c["weight"]
+            fused_rgb += w * c["mean_rgb"]
+            total_weight += w
+
+        if total_weight > 0:
+            fused_rgb /= total_weight
+
+        # 选得分最高的 ROI 用于视频框显示
+        best = max(candidates, key=lambda c: c["score"])
+
+        # 收集权重信息
+        weight_info = {c["name"]: round(c["skin_ratio"], 2)
+                       for c in candidates}
+
+        return (fused_rgb, best["rect"], best["skin_ratio"],
+                len(candidates), weight_info)
+
+    # -------------------- 自适应运动阈值 --------------------
+    def compute_motion_threshold(self, roi_gray):
+        """暗光下噪声更大，需要更高的运动阈值"""
+        mean_brightness = float(np.mean(roi_gray))
+        if mean_brightness < 50:
+            return BASE_MOTION_THRESH * 1.5
+        elif mean_brightness > 200:
+            return BASE_MOTION_THRESH * 0.8
+        return BASE_MOTION_THRESH
 
     # -------------------- 运动检测 --------------------
     def detect_motion(self, roi_gray):
         if self.prev_roi_gray is None:
-            self.prev_roi_gray = roi_gray
+            self.prev_roi_gray = roi_gray.copy()
             return 0.0
 
         h, w = roi_gray.shape[:2]
         ph, pw = self.prev_roi_gray.shape[:2]
         if h != ph or w != pw:
-            self.prev_roi_gray = roi_gray
+            self.prev_roi_gray = roi_gray.copy()
             return 0.0
 
         diff = cv2.absdiff(roi_gray, self.prev_roi_gray)
         motion = float(np.mean(diff))
-        self.prev_roi_gray = roi_gray
+        self.prev_roi_gray = roi_gray.copy()
         return motion
+
+    # -------------------- 光照突变检测 --------------------
+    def detect_lighting_change(self, roi_gray):
+        """
+        检测 ROI 整体亮度突变（开灯/关灯/遮挡）
+        光照突变不暂停信号，但降低质量评分
+        """
+        current_brightness = float(np.mean(roi_gray))
+        changed = False
+
+        if self.prev_roi_brightness is not None:
+            delta = abs(current_brightness - self.prev_roi_brightness)
+            if delta > LIGHT_CHANGE_THRESH:
+                changed = True
+                self.light_change_detected = True
+            else:
+                self.light_change_detected = False
+
+        self.prev_roi_brightness = current_brightness
+        return changed
 
     # -------------------- POS 投影 --------------------
     def pos_extract(self, rgb_signals):
@@ -327,7 +409,7 @@ class RPPGProcessor:
         except Exception:
             return signal
 
-    # -------------------- [FIX] 心率估计 --------------------
+    # -------------------- 心率估计 --------------------
     def estimate_hr(self, pulse_signal, timestamps):
         if pulse_signal is None:
             return 0.0, 0.0
@@ -355,8 +437,6 @@ class RPPGProcessor:
         freqs = np.fft.rfftfreq(n, d=dt)
         magnitudes = np.abs(fft_result)
 
-        # [FIX] 原来的 bug: (freqs >= HR_MIN_FREQ) 写了两遍
-        # 修复为正确的下限+上限
         mask = (freqs >= HR_MIN_FREQ) & (freqs <= HR_MAX_FREQ)
         if not np.any(mask):
             return 0.0, 0.0
@@ -409,7 +489,9 @@ class RPPGProcessor:
         if not self.face_detected:
             diags.append("NO_FACE")
         elif self.signal_paused and self.paused_reason == "motion":
-            diags.append("MOTION_DETECTED")
+            diags.append("MOTION")
+        elif self.light_change_detected:
+            diags.append("LIGHT_CHANGE")
         elif self.best_skin_ratio < 0.3:
             diags.append("LOW_SKIN")
         elif self.signal_quality < 20:
@@ -434,6 +516,7 @@ class RPPGProcessor:
         self.processed_frames += 1
         roi_rect = None
 
+        # 人脸检测
         if self.processed_frames % DETECT_INTERVAL == 1:
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             results = self.face_detector.process(rgb_frame)
@@ -450,21 +533,37 @@ class RPPGProcessor:
                 self.face_detected = False
                 self.current_roi_name = "none"
                 self.best_skin_ratio = 0
+                self.active_roi_count = 0
+                self.fusion_weights = {}
                 self.prev_roi_gray = None
+                self.prev_roi_brightness = None
 
         if self.last_bbox is not None:
             candidates = self.define_rois(frame, self.last_bbox)
-            best = self.select_best_roi(frame, candidates)
 
-            if best is not None:
-                roi_rect = best["rect"]
-                self.current_roi_name = best["name"]
-                self.best_skin_ratio = round(best["skin_ratio"], 2)
-                roi = best["roi"]
-                roi_gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+            # V5 核心：多 ROI 加权融合
+            result = self.extract_all_rois(frame, candidates)
 
+            if result[0] is not None:
+                fused_rgb, best_rect, best_skin, active_cnt, weights = result
+
+                roi_rect = best_rect
+                self.current_roi_name = "fused"
+                self.best_roi_rect = best_rect
+                self.best_skin_ratio = round(best_skin, 2)
+                self.active_roi_count = active_cnt
+                self.fusion_weights = weights
+
+                # 运动检测（用得分最高的 ROI）
+                best_roi = frame[best_rect[1]:best_rect[3],
+                                 best_rect[0]:best_rect[2]]
+                roi_gray = cv2.cvtColor(best_roi, cv2.COLOR_BGR2GRAY)
+
+                # 自适应运动阈值
+                self.motion_threshold = self.compute_motion_threshold(roi_gray)
                 self.motion_score = self.detect_motion(roi_gray)
-                if self.motion_score > MOTION_THRESHOLD:
+
+                if self.motion_score > self.motion_threshold:
                     self.motion_frames += 1
                     if self.motion_frames >= MOTION_PATIENCE:
                         self.signal_paused = True
@@ -476,11 +575,13 @@ class RPPGProcessor:
                         self.signal_paused = False
                         self.paused_reason = ""
 
-                if not self.signal_paused:
-                    mean_rgb = np.mean(roi.reshape(-1, 3), axis=0)[::-1].copy()
+                # 光照突变检测
+                self.detect_lighting_change(roi_gray)
 
+                # 采集信号
+                if not self.signal_paused:
                     with self.lock:
-                        self.rgb_buffer.append(mean_rgb)
+                        self.rgb_buffer.append(fused_rgb)
                         self.time_buffer.append(now)
 
                         if len(self.rgb_buffer) > BUFFER_SIZE:
@@ -490,12 +591,18 @@ class RPPGProcessor:
                         if (len(self.rgb_buffer) >= MIN_BUFFER_COMPUTE and
                                 self.processed_frames % COMPUTE_INTERVAL == 0):
 
-                            pulse = self.pos_extract(np.array(self.rgb_buffer))
+                            pulse = self.pos_extract(
+                                np.array(self.rgb_buffer)
+                            )
 
                             if pulse is not None and len(pulse) > POS_WINDOW * 2:
                                 hr_raw, quality = self.estimate_hr(
                                     pulse, self.time_buffer
                                 )
+
+                                # 光照突变时降低质量
+                                if self.light_change_detected:
+                                    quality *= 0.5
 
                                 if hr_raw > 0:
                                     new_hr = self.apply_hr_limits(
@@ -510,6 +617,13 @@ class RPPGProcessor:
                                     if len(self.hr_output_history) > 120:
                                         self.hr_output_history.pop(0)
 
+                                    # CSV 记录
+                                    self.logger.log(
+                                        new_hr, quality, "fused",
+                                        best_skin, self.motion_score,
+                                        self.fps
+                                    )
+
                                 if len(pulse) > 48:
                                     p = pulse[-128:].copy()
                                     p = self.median_filter(p, 3)
@@ -523,6 +637,8 @@ class RPPGProcessor:
             else:
                 self.current_roi_name = "none"
                 self.best_skin_ratio = 0
+                self.active_roi_count = 0
+                self.fusion_weights = {}
 
         return frame, roi_rect
 
@@ -534,22 +650,31 @@ class RPPGProcessor:
         cv2.rectangle(overlay, (0, 0), (w, 68), (0, 0, 0), -1)
         cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
 
+        # ROI 框
         if roi_rect:
             x1, y1, x2, y2 = roi_rect
             if self.signal_paused:
                 box_color = (0, 80, 255)
-                label = f"{self.current_roi_name} [MOTION]"
+                label = "FUSED [MOTION]"
+            elif self.light_change_detected:
+                box_color = (0, 180, 255)
+                label = f"FUSED [LIGHT] skin:{self.best_skin_ratio:.0%}"
             else:
                 box_color = (0, 230, 118)
-                label = f"{self.current_roi_name} skin:{self.best_skin_ratio:.0%}"
+                label = (f"FUSED x{self.active_roi_count} "
+                         f"skin:{self.best_skin_ratio:.0%} "
+                         f"thresh:{self.motion_threshold:.0f}")
             cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 2)
             cv2.putText(frame, label, (x1, y1 - 6),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, box_color, 1)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.35, box_color, 1)
 
+        # 心率
         if self.hr > 0:
             hr_str = f"{self.hr:.0f} BPM"
             if self.signal_paused:
                 hr_color = (0, 80, 255)
+            elif self.light_change_detected:
+                hr_color = (0, 180, 255)
             elif self.signal_quality >= 30:
                 hr_color = (0, 230, 118)
             elif self.signal_quality >= 20:
@@ -563,21 +688,31 @@ class RPPGProcessor:
         cv2.putText(frame, hr_str, (16, 38),
                     cv2.FONT_HERSHEY_SIMPLEX, 1.0, hr_color, 2)
 
+        # 状态
         if self.face_detected:
-            line1 = (f"ROI:{self.current_roi_name} "
-                     f"skin:{self.best_skin_ratio:.0%} "
-                     f"Q:{self.signal_quality:.0f}% "
-                     f"motion:{self.motion_score:.1f}")
+            line1 = (f"Q:{self.signal_quality:.0f}% "
+                     f"motion:{self.motion_score:.1f}/{self.motion_threshold:.0f} "
+                     f"ROIs:{self.active_roi_count}")
             cv2.putText(frame, line1, (16, 56),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 200, 100), 1)
+
+            # 融合权重（第二行右侧）
+            if self.fusion_weights:
+                w_str = " ".join(
+                    f"{k[:3]}:{v:.0%}" for k, v in self.fusion_weights.items()
+                )
+                cv2.putText(frame, w_str, (w - len(w_str) * 6 - 10, 56),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.3, (80, 80, 80), 1)
         else:
             cv2.putText(frame, "NO FACE DETECTED", (16, 56),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 80, 255), 1)
 
+        # FPS
         fps_str = f"{self.fps:.0f}fps buf:{len(self.rgb_buffer)}/{BUFFER_SIZE}"
-        cv2.putText(frame, fps_str, (w - 180, 56),
+        cv2.putText(frame, fps_str, (w - 180, 38),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.35, (80, 80, 80), 1)
 
+        # 底部进度条
         buf_pct = len(self.rgb_buffer) / BUFFER_SIZE if BUFFER_SIZE else 0
         bar_color = (0, 230, 118) if buf_pct >= 0.8 else \
                     (0, 130, 70) if not self.signal_paused else (0, 80, 200)
@@ -660,7 +795,11 @@ def get_hr():
             'roi_name': processor.current_roi_name,
             'skin_ratio': processor.best_skin_ratio,
             'motion_score': round(processor.motion_score, 1),
+            'motion_threshold': round(processor.motion_threshold, 1),
             'motion_paused': processor.signal_paused,
+            'light_change': processor.light_change_detected,
+            'active_rois': processor.active_roi_count,
+            'fusion_weights': processor.fusion_weights,
             'diagnostics': processor.get_diagnostics(),
         })
 
@@ -668,9 +807,10 @@ def get_hr():
 if __name__ == '__main__':
     try:
         print("=" * 58)
-        print("  rPPG Monitor V4.1 (ROI Fix + Freq Mask Fix)")
-        print("  Fix: select_best_roi always returns best candidate")
-        print("  Fix: FFT freq mask upper bound restored")
+        print("  rPPG Monitor V5 (Multi-ROI Fusion)")
+        print("  ROI: 4 candidates → weighted fusion (no switching)")
+        print("  Motion: adaptive threshold + lighting change detect")
+        print("  Log: auto-save to rppg_log.csv")
         print("-" * 58)
         print("  http://localhost:5000")
         print("=" * 58)
