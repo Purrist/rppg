@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>rPPG 心率监测 V3</title>
+    <title>rPPG 心率监测 V4</title>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
     <style>
-        :root{--bg:#050a12;--card:#0b1320;--border:#14243a;--fg:#c4d4e4;--muted:#3e5060;--accent:#00e676;--accent-dim:#00994d;--accent-glow:rgba(0,230,118,0.25);--danger:#ff4757;--warning:#ffa502}
+        :root{--bg:#050a12;--card:#0b1320;--border:#14243a;--fg:#c4d4e4;--muted:#3e5060;--accent:#00e676;--accent-dim:#00994d;--accent-glow:rgba(0,230,118,0.25);--danger:#ff4757;--warning:#ffa502;--blue:#1e90ff}
         *{margin:0;padding:0;box-sizing:border-box}
         body{font-family:'Share Tech Mono',monospace;background:var(--bg);color:var(--fg);min-height:100vh;overflow:hidden}
         .header{display:flex;align-items:center;justify-content:space-between;padding:10px 24px;background:var(--card);border-bottom:1px solid var(--border);height:48px}
@@ -44,9 +44,11 @@
         .hr-ring-fill{fill:none;stroke:var(--accent);stroke-width:4;stroke-linecap:round;stroke-dasharray:408;stroke-dashoffset:408;transition:stroke-dashoffset .6s ease,stroke .3s ease;filter:drop-shadow(0 0 6px var(--accent-glow))}
         .hr-ring-inner{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
         .hr-icon{font-size:16px;color:var(--accent);margin-bottom:2px;animation:hb 1.2s ease-in-out infinite}
+        .hr-icon.paused{color:var(--blue)!important;animation:none!important}
         @keyframes hb{0%,100%{transform:scale(1);opacity:.7}14%{transform:scale(1.25);opacity:1}28%{transform:scale(1);opacity:.7}}
-        .hr-value{font-family:'Orbitron',sans-serif;font-size:44px;font-weight:900;color:var(--accent);line-height:1;text-shadow:0 0 20px var(--accent-glow);transition:transform .12s ease}
+        .hr-value{font-family:'Orbitron',sans-serif;font-size:44px;font-weight:900;color:var(--accent);line-height:1;text-shadow:0 0 20px var(--accent-glow);transition:transform .12s ease,color .3s ease}
         .hr-value.beat{transform:scale(1.06)}
+        .hr-value.paused-val{color:var(--blue)!important;text-shadow:0 0 20px rgba(30,144,255,.25)!important}
         .hr-unit{font-family:'Orbitron',sans-serif;font-size:11px;font-weight:400;color:var(--accent-dim);letter-spacing:4px;margin-top:2px}
         .canvas-wrap{position:relative;background:rgba(0,230,118,.015);border:1px solid var(--border);border-radius:5px;overflow:hidden}
         .canvas-wrap canvas{display:block;width:100%}
@@ -54,7 +56,7 @@
         .quality-row{display:flex;align-items:center;gap:10px}
         .quality-bar{flex:1;height:5px;background:rgba(255,255,255,.04);border-radius:3px;overflow:hidden}
         .quality-fill{height:100%;border-radius:3px;background:var(--accent);transition:width .4s ease,background .4s ease}
-        .quality-fill.low{background:var(--danger)}.quality-fill.mid{background:var(--warning)}
+        .quality-fill.low{background:var(--danger)}.quality-fill.mid{background:var(--warning)}.quality-fill.paused-fill{background:var(--blue)}
         .quality-val{font-size:13px;font-weight:700;min-width:38px;text-align:right;color:var(--accent)}
         .status-rows{display:flex;flex-direction:column;gap:7px}
         .status-row{display:flex;align-items:center;gap:8px;font-size:11px}
@@ -62,17 +64,26 @@
         .dot.g{background:var(--accent);box-shadow:0 0 5px var(--accent)}
         .dot.r{background:var(--danger);box-shadow:0 0 5px var(--danger)}
         .dot.y{background:var(--warning);box-shadow:0 0 5px var(--warning)}
+        .dot.b{background:var(--blue);box-shadow:0 0 5px var(--blue)}
         .dot.g.blink{animation:db 2s ease-in-out infinite}
+        .dot.b.blink{animation:db 2s ease-in-out infinite}
         @keyframes db{0%,100%{opacity:1}50%{opacity:.3}}
         .buffer-wrap{margin-top:4px}
         .buffer-bar{height:3px;background:rgba(255,255,255,.04);border-radius:2px;overflow:hidden}
         .buffer-fill{height:100%;background:var(--accent-dim);border-radius:2px;transition:width .3s ease}
         .buffer-text{font-size:10px;color:var(--muted);margin-top:4px}
-        .algo-info{font-size:10px;color:var(--muted);line-height:2}
-        .algo-info em{font-style:normal;color:var(--fg)}
-        .pipeline{display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin-top:8px}
-        .pipe-step{font-size:9px;color:var(--accent-dim);background:rgba(0,230,118,.06);border:1px solid rgba(0,230,118,.12);padding:2px 7px;border-radius:2px;letter-spacing:.5px}
-        .pipe-arrow{font-size:9px;color:var(--muted)}
+        /* 诊断面板 */
+        .diag-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+        .diag-item{display:flex;align-items:center;gap:6px;font-size:10px;padding:4px 8px;background:rgba(255,255,255,.02);border-radius:3px;border:1px solid var(--border)}
+        .diag-item .diag-label{color:var(--muted);min-width:48px}
+        .diag-item .diag-value{color:var(--fg);font-weight:700}
+        .diag-item .diag-value.good{color:var(--accent)}
+        .diag-item .diag-value.warn{color:var(--warning)}
+        .diag-item .diag-value.bad{color:var(--danger)}
+        .diag-item .diag-value.paused{color:var(--blue)}
+        .pipeline{display:flex;align-items:center;gap:3px;flex-wrap:wrap;margin-top:8px}
+        .pipe-step{font-size:8px;color:var(--accent-dim);background:rgba(0,230,118,.06);border:1px solid rgba(0,230,118,.12);padding:2px 5px;border-radius:2px;letter-spacing:.3px}
+        .pipe-arrow{font-size:8px;color:var(--muted)}
         .fix-list{margin-top:6px;font-size:10px;line-height:1.9}
         .fix-item{color:var(--muted)}.fix-item strong{color:var(--accent);font-weight:400}
         @media(max-width:860px){.main{grid-template-columns:1fr;grid-template-rows:55vh 1fr}.panel{border-left:none;border-top:1px solid var(--border)}.hr-ring{width:110px;height:110px}.hr-value{font-size:34px}}
@@ -85,7 +96,7 @@
         <div class="header-logo"><div class="header-logo-pulse"></div></div>
         <span class="header-title">rPPG MONITOR</span>
     </div>
-    <span class="header-badge">V3 Stable &amp; Accurate</span>
+    <span class="header-badge">V4 Multi-ROI + Motion</span>
 </header>
 <main class="main">
     <section class="video-section" aria-label="摄像头视频流">
@@ -100,6 +111,7 @@
         </div>
     </section>
     <aside class="panel" aria-label="心率数据面板">
+        <!-- 心率 -->
         <div class="hr-block">
             <div class="hr-ring">
                 <svg viewBox="0 0 140 140">
@@ -113,6 +125,7 @@
                 </div>
             </div>
         </div>
+        <!-- 脉搏波形 -->
         <div class="panel-block">
             <div class="panel-label">Pulse Waveform (Filtered)</div>
             <div class="canvas-wrap">
@@ -120,6 +133,7 @@
                 <canvas id="pulseCanvas" width="630" height="140"></canvas>
             </div>
         </div>
+        <!-- 心率趋势 -->
         <div class="panel-block">
             <div class="panel-label">Heart Rate Trend (Rate-Limited)</div>
             <div class="canvas-wrap">
@@ -127,6 +141,7 @@
                 <canvas id="trendCanvas" width="630" height="120"></canvas>
             </div>
         </div>
+        <!-- 信号质量 -->
         <div class="panel-block">
             <div class="panel-label">Signal Quality (SNR)</div>
             <div class="quality-row">
@@ -136,24 +151,33 @@
                 <span class="quality-val" id="qualityVal">0%</span>
             </div>
         </div>
+        <!-- 诊断面板（V4 新增） -->
         <div class="panel-block">
-            <div class="panel-label">System Status</div>
-            <div class="status-rows">
-                <div class="status-row">
-                    <span class="dot r" id="dotFace"></span>
-                    <span id="statusFace">Face: Initializing</span>
+            <div class="panel-label">Diagnostics</div>
+            <div class="diag-grid">
+                <div class="diag-item">
+                    <span class="diag-label">ROI</span>
+                    <span class="diag-value" id="diagRoi">none</span>
                 </div>
-                <div class="status-row">
-                    <span class="dot y" id="dotSignal"></span>
-                    <span id="statusSignal">Signal: Collecting data</span>
+                <div class="diag-item">
+                    <span class="diag-label">Skin</span>
+                    <span class="diag-value" id="diagSkin">0%</span>
                 </div>
-                <div class="status-row">
-                    <span class="dot g blink" id="dotCam"></span>
-                    <span id="statusCam">Camera: Connecting</span>
+                <div class="diag-item">
+                    <span class="diag-label">Motion</span>
+                    <span class="diag-value" id="diagMotion">0.0</span>
                 </div>
-                <div class="status-row">
-                    <span class="dot g blink" id="dotFps"></span>
-                    <span id="statusFps">FPS: --</span>
+                <div class="diag-item">
+                    <span class="diag-label">Status</span>
+                    <span class="diag-value" id="diagStatus">--</span>
+                </div>
+                <div class="diag-item">
+                    <span class="diag-label">Camera</span>
+                    <span class="diag-value" id="diagCam">--</span>
+                </div>
+                <div class="diag-item">
+                    <span class="diag-label">FPS</span>
+                    <span class="diag-value" id="diagFps">--</span>
                 </div>
             </div>
             <div class="buffer-wrap">
@@ -163,68 +187,70 @@
                 <div class="buffer-text" id="bufferText">Buffer: 0 / 180 frames</div>
             </div>
         </div>
+        <!-- 算法说明 -->
         <div class="panel-block" style="border-bottom:none">
-            <div class="panel-label">V3 Fixes</div>
+            <div class="panel-label">V4 Improvements</div>
             <div class="fix-list">
-                <div class="fix-item"><strong>HR Jump:</strong> +Butterworth +Median +Rate Limit (±15/s)</div>
-                <div class="fix-item"><strong>Face:</strong> Far model (0.5-5m) + bbox EMA smooth</div>
-                <div class="fix-item"><strong>ROI:</strong> Core zone 20-40% × 30-70% + size check</div>
+                <div class="fix-item"><strong>ROI:</strong> 4 candidates + HSV skin auto-select</div>
+                <div class="fix-item"><strong>Motion:</strong> Frame-diff detection, pause on movement</div>
+                <div class="fix-item"><strong>Camera:</strong> Lock exposure &amp; white balance</div>
+                <div class="fix-item"><strong>Diag:</strong> Real-time skin% + motion + status</div>
             </div>
-            <div class="pipeline" style="margin-top:10px">
-                <span class="pipe-step">RGB</span><span class="pipe-arrow">→</span>
+            <div class="pipeline">
+                <span class="pipe-step">Detect</span><span class="pipe-arrow">→</span>
+                <span class="pipe-step">4 ROIs</span><span class="pipe-arrow">→</span>
+                <span class="pipe-step">HSV Skin</span><span class="pipe-arrow">→</span>
+                <span class="pipe-step">Motion?</span><span class="pipe-arrow">→</span>
                 <span class="pipe-step">POS</span><span class="pipe-arrow">→</span>
                 <span class="pipe-step">Median</span><span class="pipe-arrow">→</span>
                 <span class="pipe-step">Detrend</span><span class="pipe-arrow">→</span>
                 <span class="pipe-step">Butterworth</span><span class="pipe-arrow">→</span>
                 <span class="pipe-step">FFT</span><span class="pipe-arrow">→</span>
-                <span class="pipe-step">Median HR</span><span class="pipe-arrow">→</span>
-                <span class="pipe-step">Rate Limit</span>
+                <span class="pipe-step">Limit</span>
             </div>
         </div>
     </aside>
 </main>
 <script>
 const $=id=>document.getElementById(id);
-const videoImg=$('videoImg'),noSignal=$('noSignal'),hrValue=$('hrValue'),hrRing=$('hrRing');
+const videoImg=$('videoImg'),noSignal=$('noSignal'),hrValue=$('hrValue'),hrRing=$('hrRing'),hrIcon=$('hrIcon');
 const pulseCanvas=$('pulseCanvas'),trendCanvas=$('trendCanvas');
 const qualityFill=$('qualityFill'),qualityVal=$('qualityVal');
-const dotFace=$('dotFace'),dotSignal=$('dotSignal'),dotCam=$('dotCam');
-const statusFace=$('statusFace'),statusSignal=$('statusSignal'),statusCam=$('statusCam'),statusFps=$('statusFps');
+const diagRoi=$('diagRoi'),diagSkin=$('diagSkin'),diagMotion=$('diagMotion'),diagStatus=$('diagStatus');
+const diagCam=$('diagCam'),diagFps=$('diagFps');
 const bufferFill=$('bufferFill'),bufferText=$('bufferText');
 const pulseCtx=pulseCanvas.getContext('2d'),trendCtx=trendCanvas.getContext('2d');
 let lastHr=0,pulseData=[],trendData=[],videoReady=false;
 const RC=2*Math.PI*65;
 
-videoImg.addEventListener('load',()=>{if(!videoReady){videoReady=true;noSignal.classList.add('hidden');dotCam.className='dot g blink';statusCam.textContent='Camera: Active'}});
-videoImg.addEventListener('error',()=>{videoReady=false;noSignal.classList.remove('hidden');dotCam.className='dot r';statusCam.textContent='Camera: Error'});
+videoImg.addEventListener('load',()=>{if(!videoReady){videoReady=true;noSignal.classList.add('hidden');diagCam.textContent='Active';diagCam.className='diag-value good'}});
+videoImg.addEventListener('error',()=>{videoReady=false;noSignal.classList.remove('hidden');diagCam.textContent='Error';diagCam.className='diag-value bad'});
 
 function triggerBeat(){hrValue.classList.add('beat');setTimeout(()=>hrValue.classList.remove('beat'),130)}
-function updateRing(hr){const p=Math.max(0,Math.min(1,(hr-45)/135));hrRing.style.strokeDashoffset=RC*(1-p);let c='#00e676';if(hr>150)c='#ffa502';if(hr>170||hr<50)c='#ff4757';hrRing.style.stroke=c;hrValue.style.color=c;hrValue.style.textShadow='0 0 20px '+c+'44'}
+function updateRing(hr,paused){
+    const p=Math.max(0,Math.min(1,(hr-45)/135));hrRing.style.strokeDashoffset=RC*(1-p);
+    if(paused){hrRing.style.stroke='var(--blue)';hrValue.style.color='var(--blue)';hrValue.style.textShadow='0 0 20px rgba(30,144,255,0.25)';hrIcon.className='fa-solid fa-heart-pulse hr-icon paused';hrValue.classList.add('paused-val')}
+    else{let c='#00e676';if(hr>150)c='#ffa502';if(hr>170||hr<50)c='#ff4757';hrRing.style.stroke=c;hrValue.style.color=c;hrValue.style.textShadow='0 0 20px '+c+'44';hrIcon.className='fa-solid fa-heart-pulse hr-icon';hrValue.classList.remove('paused-val')}
+}
 
 function drawPulse(data){
-    const w=pulseCanvas.width,h=pulseCanvas.height;
-    pulseCtx.clearRect(0,0,w,h);
+    const w=pulseCanvas.width,h=pulseCanvas.height;pulseCtx.clearRect(0,0,w,h);
     pulseCtx.strokeStyle='rgba(0,230,118,0.05)';pulseCtx.lineWidth=.5;
     for(let x=0;x<w;x+=30){pulseCtx.beginPath();pulseCtx.moveTo(x,0);pulseCtx.lineTo(x,h);pulseCtx.stroke()}
     for(let y=0;y<h;y+=28){pulseCtx.beginPath();pulseCtx.moveTo(0,y);pulseCtx.lineTo(w,y);pulseCtx.stroke()}
-    pulseCtx.strokeStyle='rgba(0,230,118,0.12)';pulseCtx.lineWidth=1;
-    pulseCtx.beginPath();pulseCtx.moveTo(0,h/2);pulseCtx.lineTo(w,h/2);pulseCtx.stroke();
+    pulseCtx.strokeStyle='rgba(0,230,118,0.12)';pulseCtx.lineWidth=1;pulseCtx.beginPath();pulseCtx.moveTo(0,h/2);pulseCtx.lineTo(w,h/2);pulseCtx.stroke();
     if(data.length<2)return;
     const step=w/(data.length-1),amp=h*.38;
-    pulseCtx.save();pulseCtx.shadowColor='#00e676';pulseCtx.shadowBlur=12;
-    pulseCtx.strokeStyle='rgba(0,230,118,0.3)';pulseCtx.lineWidth=4;pulseCtx.beginPath();
-    for(let i=0;i<data.length;i++){const x=i*step,y=h/2-data[i]*amp;i===0?pulseCtx.moveTo(x,y):pulseCtx.lineTo(x,y)}
-    pulseCtx.stroke();pulseCtx.restore();
+    pulseCtx.save();pulseCtx.shadowColor='#00e676';pulseCtx.shadowBlur=12;pulseCtx.strokeStyle='rgba(0,230,118,0.3)';pulseCtx.lineWidth=4;pulseCtx.beginPath();
+    for(let i=0;i<data.length;i++){const x=i*step,y=h/2-data[i]*amp;i===0?pulseCtx.moveTo(x,y):pulseCtx.lineTo(x,y)}pulseCtx.stroke();pulseCtx.restore();
     pulseCtx.strokeStyle='#00e676';pulseCtx.lineWidth=1.8;pulseCtx.beginPath();
-    for(let i=0;i<data.length;i++){const x=i*step,y=h/2-data[i]*amp;i===0?pulseCtx.moveTo(x,y):pulseCtx.lineTo(x,y)}
-    pulseCtx.stroke();
+    for(let i=0;i<data.length;i++){const x=i*step,y=h/2-data[i]*amp;i===0?pulseCtx.moveTo(x,y):pulseCtx.lineTo(x,y)}pulseCtx.stroke();
     const gR=pulseCtx.createLinearGradient(w-60,0,w,0);gR.addColorStop(0,'rgba(5,10,18,0)');gR.addColorStop(1,'rgba(5,10,18,0.7)');pulseCtx.fillStyle=gR;pulseCtx.fillRect(w-60,0,60,h);
     const gL=pulseCtx.createLinearGradient(0,0,40,0);gL.addColorStop(0,'rgba(5,10,18,0.8)');gL.addColorStop(1,'rgba(5,10,18,0)');pulseCtx.fillStyle=gL;pulseCtx.fillRect(0,0,40,h);
 }
 
 function drawTrend(data){
-    const w=trendCanvas.width,h=trendCanvas.height;
-    trendCtx.clearRect(0,0,w,h);
+    const w=trendCanvas.width,h=trendCanvas.height;trendCtx.clearRect(0,0,w,h);
     trendCtx.strokeStyle='rgba(0,230,118,0.04)';trendCtx.lineWidth=.5;
     for(let x=0;x<w;x+=30){trendCtx.beginPath();trendCtx.moveTo(x,0);trendCtx.lineTo(x,h);trendCtx.stroke()}
     for(let y=0;y<h;y+=24){trendCtx.beginPath();trendCtx.moveTo(0,y);trendCtx.lineTo(w,y);trendCtx.stroke()}
@@ -238,22 +264,53 @@ function drawTrend(data){
     trendCtx.lineTo(30+(data.length-1)*step,h);trendCtx.lineTo(30,h);trendCtx.closePath();
     const fg=trendCtx.createLinearGradient(0,0,0,h);fg.addColorStop(0,'rgba(0,230,118,0.12)');fg.addColorStop(1,'rgba(0,230,118,0)');trendCtx.fillStyle=fg;trendCtx.fill();
     trendCtx.save();trendCtx.shadowColor='#00e676';trendCtx.shadowBlur=6;trendCtx.strokeStyle='#00e676';trendCtx.lineWidth=1.5;trendCtx.lineJoin='round';trendCtx.beginPath();
-    for(let i=0;i<data.length;i++){const x=30+i*step,y=pad+(1-(data[i]-minHr)/range)*(h-pad*2);i===0?trendCtx.moveTo(x,y):trendCtx.lineTo(x,y)}
-    trendCtx.stroke();trendCtx.restore();
+    for(let i=0;i<data.length;i++){const x=30+i*step,y=pad+(1-(data[i]-minHr)/range)*(h-pad*2);i===0?trendCtx.moveTo(x,y):trendCtx.lineTo(x,y)}trendCtx.stroke();trendCtx.restore();
     if(data.length>0){const lx=30+(data.length-1)*step,ly=pad+(1-(data[data.length-1]-minHr)/range)*(h-pad*2);trendCtx.beginPath();trendCtx.arc(lx,ly,3,0,Math.PI*2);trendCtx.fillStyle='#00e676';trendCtx.fill()}
 }
 
-function updateQuality(q){const p=Math.round(Math.max(0,Math.min(100,q)));qualityFill.style.width=p+'%';qualityVal.textContent=p+'%';qualityFill.className='quality-fill'+(p<25?' low':p<50?' mid':'');qualityVal.style.color=p<25?'var(--danger)':p<50?'var(--warning)':'var(--accent)'}
+function updateQuality(q,paused){
+    const p=Math.round(Math.max(0,Math.min(100,q)));qualityFill.style.width=p+'%';qualityVal.textContent=p+'%';
+    if(paused){qualityFill.className='quality-fill paused-fill';qualityVal.style.color='var(--blue)'}
+    else{qualityFill.className='quality-fill'+(p<25?' low':p<50?' mid':'');qualityVal.style.color=p<25?'var(--danger)':p<50?'var(--warning)':'var(--accent)'}
+}
 
 async function fetchHR(){
     try{
         const r=await fetch('/api/hr');if(!r.ok)throw 0;const d=await r.json();
-        if(d.hr>0){const v=Math.round(d.hr);if(v!==lastHr){hrValue.textContent=v;updateRing(v);triggerBeat();lastHr=v}}else{hrValue.textContent='--';updateRing(0);lastHr=0}
-        updateQuality(d.quality);
-        if(d.face){dotFace.className='dot g blink';statusFace.textContent='Face: Detected ('+Math.round(d.confidence*100)+'%)'}else{dotFace.className='dot r';statusFace.textContent='Face: Not detected'}
-        if(d.quality>35&&d.face){dotSignal.className='dot g';statusSignal.textContent='Signal: Good'}else if(d.quality>20&&d.face){dotSignal.className='dot y blink';statusSignal.textContent='Signal: Weak'}else{dotSignal.className='dot r';statusSignal.textContent='Signal: No valid signal'}
-        statusFps.textContent='FPS: '+d.fps;
-        const bp=Math.round((d.buffer/d.buffer_max)*100);bufferFill.style.width=bp+'%';bufferText.textContent='Buffer: '+d.buffer+' / '+d.buffer_max+' frames';
+        const paused=d.motion_paused||false;
+
+        if(d.hr>0){const v=Math.round(d.hr);if(v!==lastHr){hrValue.textContent=v;updateRing(v,paused);triggerBeat();lastHr=v}}else{hrValue.textContent='--';updateRing(0,paused);lastHr=0}
+
+        updateQuality(d.quality,paused);
+
+        // 诊断面板
+        const roiName=d.roi_name||'none';
+        diagRoi.textContent=roiName;
+        diagRoi.className='diag-value '+(roiName==='none'?'bad':'good');
+
+        const skinPct=(d.skin_ratio*100).toFixed(0)+'%';
+        diagSkin.textContent=skinPct;
+        diagSkin.className='diag-value '+(d.skin_ratio>=0.6?'good':d.skin_ratio>=0.3?'warn':'bad');
+
+        const mot=d.motion_score;
+        diagMotion.textContent=mot.toFixed(1);
+        diagMotion.className='diag-value '+(mot>12?'bad':mot>6?'warn':'good');
+
+        // 综合状态
+        const diags=d.diagnostics||[];
+        const statusText=diags.map(s=>s).join(', ');
+        diagStatus.textContent=statusText;
+        if(diags.includes('OK'))diagStatus.className='diag-value good';
+        else if(diags.includes('MOTION_DETECTED'))diagStatus.className='diag-value paused';
+        else if(diags.includes('NO_FACE'))diagStatus.className='diag-value bad';
+        else diagStatus.className='diag-value warn';
+
+        diagFps.textContent=d.fps.toFixed(0);
+        diagFps.className='diag-value '+(d.fps>=20?'good':'warn');
+
+        const bp=Math.round((d.buffer/d.buffer_max)*100);bufferFill.style.width=bp+'%';
+        bufferText.textContent='Buffer: '+d.buffer+' / '+d.buffer_max+' frames';
+
         if(d.pulse&&d.pulse.length>1){pulseData=d.pulse;drawPulse(pulseData)}
         if(d.hr_history&&d.hr_history.length>1){trendData=d.hr_history;drawTrend(trendData)}
     }catch(e){}
