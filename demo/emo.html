@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>实时情绪识别系统</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #eee;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 20px;
+            font-size: 28px;
+            background: linear-gradient(90deg, #00d4ff, #7b2cbf);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .control-panel {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
+        .control-label {
+            font-size: 14px;
+            color: #aaa;
+            font-weight: bold;
+        }
+        
+        .btn-group {
+            display: flex;
+            gap: 10px;
+        }
+        
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            background: rgba(255, 255, 255, 0.1);
+            color: #ddd;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+        
+        button.active {
+            background: linear-gradient(135deg, #00d4ff, #0099cc);
+            color: white;
+            border-color: transparent;
+        }
+        
+        button.method-btn.active {
+            background: linear-gradient(135deg, #7b2cbf, #9d4edd);
+        }
+        
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 350px;
+            gap: 20px;
+        }
+        
+        @media (max-width: 900px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .video-section {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .video-header {
+            padding: 12px 16px;
+            background: rgba(255, 255, 255, 0.05);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .status-badge {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        
+        .status-online {
+            background: rgba(0, 255, 136, 0.2);
+            color: #00ff88;
+        }
+        
+        .status-offline {
+            background: rgba(255, 68, 68, 0.2);
+            color: #ff4444;
+        }
+        
+        .video-container {
+            position: relative;
+            width: 100%;
+            padding-top: 75%; /* 4:3 比例 */
+            background: #000;
+        }
+        
+        .video-container img {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+        
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        
+        .panel {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .panel-title {
+            font-size: 16px;
+            margin-bottom: 15px;
+            color: #00d4ff;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .panel-title::before {
+            content: "";
+            display: inline-block;
+            width: 4px;
+            height: 16px;
+            background: #00d4ff;
+            border-radius: 2px;
+        }
+        
+        .emotion-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        .emotion-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .emotion-name {
+            width: 60px;
+            font-size: 14px;
+            color: #ccc;
+        }
+        
+        .emotion-bar-bg {
+            flex: 1;
+            height: 24px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            overflow: hidden;
+            position: relative;
+        }
+        
+        .emotion-bar {
+            height: 100%;
+            border-radius: 12px;
+            transition: width 0.5s ease;
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            padding-right: 8px;
+            font-size: 12px;
+            font-weight: bold;
+            color: white;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+        }
+        
+        .emotion-value {
+            width: 45px;
+            text-align: right;
+            font-size: 13px;
+            color: #aaa;
+            font-variant-numeric: tabular-nums;
+        }
+        
+        .dominant-emotion {
+            text-align: center;
+            padding: 20px;
+            background: rgba(0, 212, 255, 0.1);
+            border-radius: 12px;
+            border: 1px solid rgba(0, 212, 255, 0.3);
+        }
+        
+        .dominant-label {
+            font-size: 14px;
+            color: #aaa;
+            margin-bottom: 8px;
+        }
+        
+        .dominant-value {
+            font-size: 32px;
+            font-weight: bold;
+            color: #00d4ff;
+        }
+        
+        .dominant-confidence {
+            font-size: 18px;
+            color: #7b2cbf;
+            margin-top: 5px;
+        }
+        
+        .face-count {
+            text-align: center;
+            padding: 15px;
+            background: rgba(123, 44, 191, 0.1);
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }
+        
+        .face-count-number {
+            font-size: 28px;
+            font-weight: bold;
+            color: #9d4edd;
+        }
+        
+        .face-count-label {
+            font-size: 13px;
+            color: #aaa;
+        }
+        
+        .log-panel {
+            max-height: 150px;
+            overflow-y: auto;
+            font-size: 12px;
+            color: #888;
+        }
+        
+        .log-entry {
+            padding: 4px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        
+        .log-time {
+            color: #666;
+            margin-right: 8px;
+        }
+        
+        /* 情绪颜色 */
+        .emo-中性 { background: linear-gradient(90deg, #808080, #a0a0a0); }
+        .emo-快乐 { background: linear-gradient(90deg, #ffd700, #ffed4e); color: #333 !important; text-shadow: none !important; }
+        .emo-惊讶 { background: linear-gradient(90deg, #ff6b6b, #ff8e8e); }
+        .emo-悲伤 { background: linear-gradient(90deg, #4169e1, #6495ed); }
+        .emo-愤怒 { background: linear-gradient(90deg, #dc143c, #ff1744); }
+        .emo-厌恶 { background: linear-gradient(90deg, #228b22, #32cd32); }
+        .emo-恐惧 { background: linear-gradient(90deg, #8b008b, #9932cc); }
+        .emo-蔑视 { background: linear-gradient(90deg, #ff8c00, #ffa500); }
+        
+        .loading {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 200px;
+            color: #666;
+        }
+        
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid rgba(255, 255, 255, 0.1);
+            border-top-color: #00d4ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 15px;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .no-face {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎭 实时情绪识别系统</h1>
+        
+        <div class="control-panel">
+            <div class="control-group">
+                <span class="control-label">📹 摄像头选择</span>
+                <div class="btn-group">
+                    <button id="cam-local" class="active" onclick="switchCamera(0)">
+                        💻 系统摄像头
+                    </button>
+                    <button id="cam-ip" onclick="switchCamera(1)">
+                        🌐 IP摄像头
+                    </button>
+                </div>
+            </div>
+            
+            <div class="control-group">
+                <span class="control-label">🧠 识别方法</span>
+                <div class="btn-group">
+                    <button id="method-onnx" class="active method-btn" onclick="switchMethod('onnx')">
+                        🔷 ONNX-FER+
+                    </button>
+                    <button id="method-deepface" class="method-btn" onclick="switchMethod('deepface')">
+                        🔶 DeepFace
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="main-content">
+            <div class="video-section">
+                <div class="video-header">
+                    <span>实时视频流</span>
+                    <span id="stream-status" class="status-badge status-online">● 在线</span>
+                </div>
+                <div class="video-container">
+                    <img id="video-stream" src="/video_feed" alt="视频流">
+                </div>
+            </div>
+            
+            <div class="sidebar">
+                <div class="panel">
+                    <div class="panel-title">检测状态</div>
+                    <div class="face-count">
+                        <div class="face-count-number" id="face-count">0</div>
+                        <div class="face-count-label">检测到的人脸</div>
+                    </div>
+                    <div id="dominant-emotion" class="dominant-emotion" style="display: none;">
+                        <div class="dominant-label">主要情绪</div>
+                        <div class="dominant-value" id="dominant-name">-</div>
+                        <div class="dominant-confidence" id="dominant-conf">-</div>
+                    </div>
+                </div>
+                
+                <div class="panel">
+                    <div class="panel-title">情绪概率分布</div>
+                    <div id="emotion-chart" class="emotion-list">
+                        <div class="no-face">等待人脸检测...</div>
+                    </div>
+                </div>
+                
+                <div class="panel">
+                    <div class="panel-title">系统日志</div>
+                    <div id="log-panel" class="log-panel">
+                        <div class="log-entry">
+                            <span class="log-time">[系统]</span>服务器已启动
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let currentCamera = 0;
+        let currentMethod = 'onnx';
+        let isStreamActive = true;
+        
+        // 情绪配置
+        const emotions = ['中性', '快乐', '惊讶', '悲伤', '愤怒', '厌恶', '恐惧', '蔑视'];
+        const emotionColors = {
+            '中性': '#808080',
+            '快乐': '#ffd700',
+            '惊讶': '#ff6b6b',
+            '悲伤': '#4169e1',
+            '愤怒': '#dc143c',
+            '厌恶': '#228b22',
+            '恐惧': '#8b008b',
+            '蔑视': '#ff8c00'
+        };
+        
+        function log(msg) {
+            const panel = document.getElementById('log-panel');
+            const time = new Date().toLocaleTimeString('zh-CN');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.innerHTML = `<span class="log-time">[${time}]</span>${msg}`;
+            panel.insertBefore(entry, panel.firstChild);
+            if (panel.children.length > 50) {
+                panel.removeChild(panel.lastChild);
+            }
+        }
+        
+        async function switchCamera(cameraId) {
+            try {
+                const response = await fetch('/api/switch_camera', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({camera: cameraId})
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    currentCamera = cameraId;
+                    document.getElementById('cam-local').classList.toggle('active', cameraId === 0);
+                    document.getElementById('cam-ip').classList.toggle('active', cameraId === 1);
+                    
+                    // 刷新视频流
+                    const img = document.getElementById('video-stream');
+                    img.src = '/video_feed?t=' + Date.now();
+                    
+                    log(`已切换到${cameraId === 0 ? '系统摄像头' : 'IP摄像头'}`);
+                }
+            } catch (e) {
+                log('切换摄像头失败: ' + e.message);
+            }
+        }
+        
+        async function switchMethod(method) {
+            try {
+                const response = await fetch('/api/switch_method', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({method: method})
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    currentMethod = method;
+                    document.getElementById('method-onnx').classList.toggle('active', method === 'onnx');
+                    document.getElementById('method-deepface').classList.toggle('active', method === 'deepface');
+                    log(`已切换到${method === 'onnx' ? 'ONNX-FER+' : 'DeepFace'}识别方法`);
+                }
+            } catch (e) {
+                log('切换方法失败: ' + e.message);
+            }
+        }
+        
+        function updateEmotionChart(faces) {
+            const chartDiv = document.getElementById('emotion-chart');
+            const dominantDiv = document.getElementById('dominant-emotion');
+            const faceCountDiv = document.getElementById('face-count');
+            
+            faceCountDiv.textContent = faces.length;
+            
+            if (faces.length === 0) {
+                chartDiv.innerHTML = '<div class="no-face">未检测到人脸</div>';
+                dominantDiv.style.display = 'none';
+                return;
+            }
+            
+            // 取第一个人脸的数据（主要人脸）
+            const face = faces[0];
+            const probs = face.all_probs || {};
+            
+            // 更新主导情绪
+            dominantDiv.style.display = 'block';
+            document.getElementById('dominant-name').textContent = face.emotion;
+            document.getElementById('dominant-conf').textContent = (face.confidence * 100).toFixed(1) + '%';
+            
+            // 更新图表
+            let html = '';
+            emotions.forEach(emo => {
+                const val = (probs[emo] || 0) * 100;
+                const color = emotionColors[emo] || '#666';
+                html += `
+                    <div class="emotion-item">
+                        <span class="emotion-name">${emo}</span>
+                        <div class="emotion-bar-bg">
+                            <div class="emotion-bar" style="width: ${val}%; background: ${color};">
+                                ${val > 15 ? val.toFixed(0) + '%' : ''}
+                            </div>
+                        </div>
+                        <span class="emotion-value">${val.toFixed(1)}%</span>
+                    </div>
+                `;
+            });
+            chartDiv.innerHTML = html;
+        }
+        
+        // 轮询获取最新结果
+        async function pollResults() {
+            try {
+                const response = await fetch('/api/latest_result');
+                const data = await response.json();
+                updateEmotionChart(data.faces || []);
+            } catch (e) {
+                // 静默处理轮询错误
+            }
+        }
+        
+        // 检查视频流状态
+        function checkStream() {
+            const img = document.getElementById('video-stream');
+            const status = document.getElementById('stream-status');
+            
+            // 简单的超时检测
+            if (!img.complete || img.naturalWidth === 0) {
+                status.className = 'status-badge status-offline';
+                status.textContent = '● 离线';
+                isStreamActive = false;
+            } else {
+                status.className = 'status-badge status-online';
+                status.textContent = '● 在线';
+                isStreamActive = true;
+            }
+        }
+        
+        // 定时任务
+        setInterval(pollResults, 200);  // 5fps 结果更新
+        setInterval(checkStream, 2000); // 每2秒检查流状态
+        
+        // 页面加载完成
+        window.onload = function() {
+            log('前端界面已加载');
+            log('默认使用系统摄像头 + ONNX-FER+');
+        };
+        
+        // 处理视频流错误
+        document.getElementById('video-stream').onerror = function() {
+            log('视频流连接错误，尝试重新连接...');
+            setTimeout(() => {
+                this.src = '/video_feed?t=' + Date.now();
+            }, 2000);
+        };
+    </script>
+</body>
+</html>
