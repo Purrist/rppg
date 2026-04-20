@@ -1,395 +1,467 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>rPPG 心率监测 V7 (IP Webcam)</title>
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
-    <style>
-        :root{--bg:#050a12;--card:#0b1320;--border:#14243a;--fg:#c4d4e4;--muted:#3e5060;--accent:#00e676;--accent-dim:#00994d;--accent-glow:rgba(0,230,118,0.25);--danger:#ff4757;--warning:#ffa502;--blue:#1e90ff;--cyan:#00bcd4}
-        *{margin:0;padding:0;box-sizing:border-box}
-        body{font-family:'Share Tech Mono',monospace;background:var(--bg);color:var(--fg);min-height:100vh;overflow:hidden}
-        .header{display:flex;align-items:center;justify-content:space-between;padding:10px 24px;background:var(--card);border-bottom:1px solid var(--border);height:48px}
-        .header-left{display:flex;align-items:center;gap:14px}
-        .header-logo{width:28px;height:28px;border:2px solid var(--accent);border-radius:50%;display:flex;align-items:center;justify-content:center;position:relative}
-        .header-logo::after{content:'';width:10px;height:10px;background:var(--accent);border-radius:50%}
-        .header-logo-pulse{position:absolute;inset:-4px;border:1px solid var(--accent);border-radius:50%;animation:lr 2s ease-out infinite}
-        @keyframes lr{0%{transform:scale(.8);opacity:.8}100%{transform:scale(1.6);opacity:0}}
-        .header-title{font-family:'Orbitron',sans-serif;font-weight:700;font-size:15px;color:var(--accent);letter-spacing:3px}
-        .header-badge{font-size:10px;color:var(--muted);background:rgba(0,230,118,.06);border:1px solid rgba(0,230,118,.15);padding:3px 10px;border-radius:3px;letter-spacing:1px}
-        #hrIcon{animation:hb 1s ease-in-out infinite}
-        #camLocalBtn{border-color:var(--muted);color:var(--muted)}
-        #camIpBtn{border-color:var(--accent);color:var(--accent)}
-        #dualMethod{color:var(--accent)}
-        #qualityFill{width:0%}
-        #bufferFill{width:0%}
-        .panel-block.no-border{border-bottom:none}
-        .main{display:grid;grid-template-columns:1fr 350px;height:calc(100vh - 48px)}
-        .video-section{position:relative;background:#000;overflow:hidden}
-        .video-section img{width:100%;height:100%;object-fit:contain;display:block}
-        .video-scanlines{position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,0,0,.04) 3px,rgba(0,0,0,.04) 4px)}
-        .corner{position:absolute;width:28px;height:28px;border-color:var(--accent);border-style:solid;border-width:0;opacity:.5}
-        .corner.tl{top:12px;left:12px;border-top-width:2px;border-left-width:2px}
-        .corner.tr{top:12px;right:12px;border-top-width:2px;border-right-width:2px}
-        .corner.bl{bottom:12px;left:12px;border-bottom-width:2px;border-left-width:2px}
-        .corner.br{bottom:12px;right:12px;border-bottom-width:2px;border-right-width:2px}
-        .rec-indicator{position:absolute;top:18px;right:56px;display:flex;align-items:center;gap:6px;font-size:11px;color:var(--danger);letter-spacing:2px;opacity:.8}
-        .rec-dot{width:8px;height:8px;border-radius:50%;background:var(--danger);animation:rb 1.2s ease-in-out infinite}
-        @keyframes rb{0%,100%{opacity:1}50%{opacity:.2}}
-        .no-signal{position:absolute;inset:0;background:rgba(0,0,0,.85);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:5;transition:opacity .5s}
-        .no-signal.hidden{opacity:0;pointer-events:none}
-        .no-signal-icon{font-size:48px;color:var(--muted);margin-bottom:16px}
-        .no-signal-text{font-size:14px;color:var(--muted);letter-spacing:2px}
-        .panel{background:var(--card);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto}
-        /* Scrollbar styling with cross-browser compatibility */
-        .panel::-webkit-scrollbar{width:6px}
-        .panel::-webkit-scrollbar-track{background:transparent}
-        .panel::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
-        .panel::-webkit-scrollbar-thumb:hover{background:var(--muted)}
-        /* Firefox */
-        @supports (scrollbar-width: thin) {
-            .panel{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
-        }
-        .panel-block{padding:12px 16px;border-bottom:1px solid var(--border)}
-        .panel-label{font-size:9px;text-transform:uppercase;letter-spacing:2.5px;color:var(--muted);margin-bottom:8px}
-        .hr-block{text-align:center;padding:18px 16px 14px}
-        .hr-ring{width:140px;height:140px;margin:0 auto 6px;position:relative}
-        .hr-ring svg{width:100%;height:100%;transform:rotate(-90deg)}
-        .hr-ring-bg{fill:none;stroke:var(--border);stroke-width:4}
-        .hr-ring-fill{fill:none;stroke:var(--accent);stroke-width:4;stroke-linecap:round;stroke-dasharray:408;stroke-dashoffset:408;transition:stroke-dashoffset .6s ease,stroke .3s ease;filter:drop-shadow(0 0 6px var(--accent-glow))}
-        .hr-ring-inner{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
-        .hr-icon{font-size:16px;color:var(--accent);margin-bottom:2px}
-        .hr-icon.paused{color:var(--blue)!important;animation:none!important}
-        .hr-icon.light{color:var(--cyan)!important;animation:none!important}
-        .hr-icon.retain{color:var(--warning)!important}
-        @keyframes hb{0%,100%{transform:scale(1);opacity:.7}14%{transform:scale(1.25);opacity:1}28%{transform:scale(1);opacity:.7}}
-        .hr-value{font-family:'Orbitron',sans-serif;font-size:44px;font-weight:900;color:var(--accent);line-height:1;text-shadow:0 0 20px var(--accent-glow);transition:transform .12s ease,color .3s ease}
-        .hr-value.beat{transform:scale(1.06)}
-        .hr-unit{font-family:'Orbitron',sans-serif;font-size:11px;font-weight:400;color:var(--accent-dim);letter-spacing:4px;margin-top:2px}
-        .canvas-wrap{position:relative;background:rgba(0,230,118,.015);border:1px solid var(--border);border-radius:5px;overflow:hidden}
-        .canvas-wrap canvas{display:block;width:100%}
-        .canvas-label{position:absolute;top:6px;left:8px;font-size:9px;color:var(--muted);letter-spacing:1px;z-index:1}
-        .quality-row{display:flex;align-items:center;gap:10px}
-        .quality-bar{flex:1;height:5px;background:rgba(255,255,255,.04);border-radius:3px;overflow:hidden}
-        .quality-fill{height:100%;border-radius:3px;background:var(--accent);transition:width .4s ease,background .4s ease}
-        .quality-fill.low{background:var(--danger)}.quality-fill.mid{background:var(--warning)}.quality-fill.paused-fill{background:var(--blue)}.quality-fill.light-fill{background:var(--cyan)}
-        .quality-val{font-size:13px;font-weight:700;min-width:38px;text-align:right;color:var(--accent)}
-        .dual-hr{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px}
-        .dual-item{display:flex;align-items:center;gap:6px;font-size:11px;padding:4px 8px;background:rgba(255,255,255,.02);border-radius:3px;border:1px solid var(--border)}
-        .dual-label{color:var(--muted);font-size:9px;min-width:30px}
-        .dual-val{font-weight:700}
-        .dual-val.match{color:var(--accent)}.dual-val.diff{color:var(--warning)}.dual-val.miss{color:var(--muted)}
-        .diag-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px}
-        .diag-item{display:flex;align-items:center;gap:6px;font-size:10px;padding:3px 8px;background:rgba(255,255,255,.02);border-radius:3px;border:1px solid var(--border)}
-        .diag-label{color:var(--muted);min-width:46px}
-        .diag-value{font-weight:700;color:var(--fg)}
-        .diag-value.good{color:var(--accent)}.diag-value.warn{color:var(--warning)}.diag-value.bad{color:var(--danger)}.diag-value.paused{color:var(--blue)}.diag-value.light-v{color:var(--cyan)}.diag-value.retain{color:var(--warning)}
-        .buffer-wrap{margin-top:4px}
-        .buffer-bar{height:3px;background:rgba(255,255,255,.04);border-radius:2px;overflow:hidden}
-        .buffer-fill{height:100%;background:var(--accent-dim);border-radius:2px;transition:width .3s ease}
-        .buffer-text{font-size:10px;color:var(--muted);margin-top:4px}
-        .fusion-bar{display:flex;height:6px;border-radius:3px;overflow:hidden;margin-top:4px}
-        .fusion-seg{transition:width .4s ease;min-width:2px}
-        .fusion-legend{display:flex;flex-wrap:wrap;gap:6px;margin-top:3px;font-size:9px}
-        .fusion-legend-item{display:flex;align-items:center;gap:3px;color:var(--muted)}
-        .fusion-legend-item .dot-s{width:5px;height:5px;border-radius:50%;flex-shrink:0}
-        /* [V6->V7] 摄像头切换模块 */
-        .cam-switch{display:flex;gap:6px;align-items:center;margin-top:6px}
-        .cam-input{flex:1;padding:4px 8px;background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:3px;color:var(--fg);font-family:inherit;font-size:11px;outline:none;transition:border-color .2s}
-        .cam-input:focus{border-color:var(--accent)}
-        .cam-input::placeholder{color:var(--muted)}
-        .cam-btn{padding:4px 12px;border:1px solid var(--accent);background:rgba(0,230,118,.08);color:var(--accent);border-radius:3px;cursor:pointer;font-family:inherit;font-size:11px;letter-spacing:.5px;transition:background .2s,color .2s}
-        .cam-btn:hover{background:var(--accent);color:var(--bg)}
-        .cam-btn:disabled{opacity:.4;cursor:not-allowed}
-        .cam-status{font-size:9px;color:var(--muted);margin-top:3px;min-height:14px}
-        .cam-status.ok{color:var(--accent)}.cam-status.err{color:var(--danger)}.cam-status.switching{color:var(--warning)}
-        .pipeline{display:flex;align-items:center;gap:2px;flex-wrap:wrap;margin-top:6px}
-        .pipe-step{font-size:7px;color:var(--accent-dim);background:rgba(0,230,118,.06);border:1px solid rgba(0,230,118,.12);padding:2px 4px;border-radius:2px;letter-spacing:.2px}
-        .pipe-arrow{font-size:7px;color:var(--muted)}
-        .fix-list{margin-top:4px;font-size:9px;line-height:1.8}
-        .fix-item{color:var(--muted)}.fix-item strong{color:var(--accent);font-weight:400}
-        @media(max-width:860px){.main{grid-template-columns:1fr;grid-template-rows:55vh 1fr}.panel{border-left:none;border-top:1px solid var(--border)}.hr-ring{width:110px;height:110px}.hr-value{font-size:34px}}
-        @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>rPPG Monitor V9.2</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  :root{
+    --bg:#0d1117;--card:#161b22;--border:#30363d;
+    --text:#e6edf3;--dim:#8b949e;--green:#00e676;
+    --cyan:#00bcd4;--warn:#ffa726;--err:#ef5350;
+    --green-dim:rgba(0,230,118,.15);--cyan-dim:rgba(0,188,212,.12);
+  }
+  body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;font-size:13px;line-height:1.5;height:100vh;overflow:hidden}
+  .wrap{max-width:1480px;margin:0 auto;padding:10px 16px;height:100vh;display:flex;flex-direction:column}
+
+  /* header */
+  .hdr{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);margin-bottom:10px;flex-shrink:0}
+  .hdr-left{display:flex;align-items:center;gap:10px}
+  .hdr h1{font-size:17px;font-weight:700;letter-spacing:1px;color:var(--green)}
+  .hdr .ver{font-size:10px;color:var(--dim);background:rgba(255,255,255,.05);padding:2px 6px;border-radius:4px}
+  .live-dot{width:8px;height:8px;border-radius:50%;background:var(--err);display:inline-block;animation:pulse 1.2s infinite}
+  .live-dot.on{background:var(--green)}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+  .live-label{font-size:11px;color:var(--dim);margin-left:2px}
+  .cam-row{display:flex;gap:6px;align-items:center}
+  .cam-btn{padding:5px 14px;border-radius:5px;border:1px solid var(--border);background:transparent;color:var(--text);cursor:pointer;font-size:11px;transition:all .2s;font-family:inherit}
+  .cam-btn:hover{border-color:var(--cyan);color:var(--cyan)}
+  .cam-btn.active{background:var(--cyan-dim);border-color:var(--cyan);color:var(--cyan)}
+  .cam-btn:disabled{opacity:.4;cursor:not-allowed}
+  .cam-status{font-size:10px;color:var(--dim);margin-left:6px;white-space:nowrap}
+  .cam-status.err{color:var(--err)}
+
+  /* main grid: 左视频 右数据 */
+  .main-grid{display:grid;grid-template-columns:1.15fr 1fr;gap:10px;flex:1;min-height:0;align-items:start}
+  .data-panel{display:flex;flex-direction:column;gap:10px;min-height:0}
+
+  /* card */
+  .card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:12px 14px;position:relative}
+  .card-title{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--dim);margin-bottom:8px;font-weight:600}
+
+  /* video */
+  .video-card{padding:6px;display:flex;flex-direction:column}
+  .video-box{position:relative;background:#000;border-radius:6px;overflow:hidden;flex:1;min-height:0}
+  .video-box img{width:100%;height:100%;object-fit:contain;display:block}
+  .video-box .placeholder{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:14px}
+
+  /* HR card: BPM + Dual + Quality 一体 */
+  .hr-row{display:flex;align-items:center;gap:16px}
+  .bpm-block{text-align:center;min-width:110px;flex-shrink:0}
+  .bpm-val{font-size:52px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums;transition:color .3s}
+  .bpm-val.good{color:var(--green)}.bpm-val.warn{color:var(--warn)}.bpm-val.err{color:var(--err)}.bpm-val.idle{color:var(--dim)}
+  .bpm-unit{font-size:13px;color:var(--dim);margin-top:1px;font-weight:400}
+  .bpm-method{font-size:10px;color:var(--dim);margin-top:4px;letter-spacing:.5px}
+  .dual-hr{flex:1;display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px}
+  .dual-item{text-align:center;padding:6px 2px;background:rgba(255,255,255,.02);border-radius:5px}
+  .dual-label{font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px}
+  .dual-val{font-size:18px;font-weight:700;margin-top:1px;font-variant-numeric:tabular-nums}
+
+  /* quality bar (嵌入HR卡片底部) */
+  .qual-section{display:flex;align-items:center;gap:10px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)}
+  .qual-label{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;white-space:nowrap}
+  .qual-pct{font-size:16px;font-weight:700;font-variant-numeric:tabular-nums;min-width:42px;text-align:right}
+  .qual-bar{flex:1;height:5px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden}
+  .qual-fill{height:100%;border-radius:3px;transition:width .4s,background .4s}
+
+  /* 图表和信息 并排行 */
+  .row-2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .chart-box{position:relative;width:100%;height:108px}
+  .chart-box canvas{width:100%;height:100%;border-radius:4px}
+
+  /* roi */
+  .roi-list{display:flex;gap:8px;flex-wrap:wrap}
+  .roi-item{padding:5px 10px;border-radius:5px;background:rgba(255,255,255,.03);border:1px solid var(--border);min-width:64px;text-align:center}
+  .roi-name{font-size:9px;color:var(--dim);text-transform:uppercase}
+  .roi-val{font-size:14px;font-weight:600;margin-top:1px}
+
+  /* diag */
+  .diag-grid{display:grid;grid-template-columns:1fr 1fr;gap:2px 14px;font-size:11px}
+  .diag-row{display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px solid rgba(255,255,255,.03)}
+  .diag-k{color:var(--dim)}.diag-v{font-weight:600;font-variant-numeric:tabular-nums}
+  .diag-v.ok{color:var(--green)}.diag-v.err{color:var(--err)}.diag-v.warn{color:var(--warn)}
+
+  /* pipeline */
+  .pipe{display:flex;align-items:center;gap:3px;overflow-x:auto;padding:4px 0;font-size:9px;color:var(--dim);flex-wrap:nowrap}
+  .pipe span{white-space:nowrap;padding:2px 6px;background:rgba(255,255,255,.03);border-radius:3px;border:1px solid var(--border)}
+  .pipe .arrow{background:none;border:none;color:var(--cyan);padding:0;font-size:11px}
+  .notes{font-size:9px;color:var(--dim);line-height:1.6;margin-top:4px}
+  .notes b{color:var(--cyan);font-weight:500}
+
+  /* toast */
+  .toast{position:fixed;top:14px;right:14px;padding:8px 16px;border-radius:7px;font-size:11px;z-index:999;transform:translateX(120%);transition:transform .3s;max-width:320px}
+  .toast.show{transform:translateX(0)}
+  .toast.err{background:#2d1215;border:1px solid var(--err);color:var(--err)}
+  .toast.ok{background:#0d2818;border:1px solid var(--green);color:var(--green)}
+</style>
 </head>
 <body>
-<header class="header">
-    <div class="header-left">
-        <div class="header-logo"><div class="header-logo-pulse"></div></div>
-        <span class="header-title">rPPG MONITOR</span>
+<div class="wrap">
+  <!-- header -->
+  <div class="hdr">
+    <div class="hdr-left">
+      <h1>rPPG MONITOR</h1>
+      <span class="ver">V9.2</span>
+      <span class="live-dot" id="liveDot"></span>
+      <span class="live-label" id="liveLabel">OFFLINE</span>
     </div>
-    <span class="header-badge">V7 IP Webcam</span>
-</header>
-<main class="main">
-    <section class="video-section" aria-label="摄像头视频流">
-        <img id="videoImg" src="/video_feed" alt="摄像头视频流">
-        <div class="video-scanlines"></div>
-        <div class="corner tl"></div><div class="corner tr"></div>
-        <div class="corner bl"></div><div class="corner br"></div>
-        <div class="rec-indicator"><div class="rec-dot"></div>LIVE</div>
-        <div class="no-signal" id="noSignal">
-            <i class="fa-solid fa-video-slash no-signal-icon"></i>
-            <div class="no-signal-text">等待视频流...</div>
+    <div class="cam-row">
+      <button class="cam-btn" id="btnLocal" onclick="switchCam('local',0)">本地 0</button>
+      <button class="cam-btn" id="btnIP" onclick="switchCam('default_ip')">IP 摄像头</button>
+      <span class="cam-status" id="camStatus">查询中...</span>
+    </div>
+  </div>
+
+  <!-- main: 左视频 + 右数据 -->
+  <div class="main-grid">
+    <!-- 左：视频 -->
+    <div class="card video-card">
+      <div class="video-box" id="videoBox">
+        <img id="videoImg" src="" alt="" style="display:none">
+        <div class="placeholder" id="videoPlaceholder">等待视频流...</div>
+      </div>
+    </div>
+
+    <!-- 右：数据面板 -->
+    <div class="data-panel">
+      <!-- HR: BPM + Dual + Quality -->
+      <div class="card">
+        <div class="hr-row">
+          <div class="bpm-block">
+            <div class="bpm-val idle" id="bpmVal">--</div>
+            <div class="bpm-unit">BPM</div>
+            <div class="bpm-method" id="bpmMethod">等待信号...</div>
+          </div>
+          <div class="dual-hr">
+            <div class="dual-item"><div class="dual-label">FFT</div><div class="dual-val" id="dFft" style="color:var(--cyan)">--</div></div>
+            <div class="dual-item"><div class="dual-label">Peak</div><div class="dual-val" id="dPeak" style="color:var(--green)">--</div></div>
+            <div class="dual-item"><div class="dual-label">Delta</div><div class="dual-val" id="dDelta" style="color:var(--warn)">--</div></div>
+            <div class="dual-item"><div class="dual-label">Use</div><div class="dual-val" id="dUse" style="color:var(--dim);font-size:12px">--</div></div>
+          </div>
         </div>
-    </section>
-    <aside class="panel" aria-label="心率数据面板">
-        <!-- 心率 -->
-        <div class="hr-block">
-            <div class="hr-ring">
-                <svg viewBox="0 0 140 140">
-                    <circle class="hr-ring-bg" cx="70" cy="70" r="65"/>
-                    <circle class="hr-ring-fill" id="hrRing" cx="70" cy="70" r="65"/>
-                </svg>
-                <div class="hr-ring-inner">
-                    <i class="fa-solid fa-heart-pulse hr-icon" id="hrIcon"></i>
-                    <div class="hr-value" id="hrValue">--</div>
-                    <div class="hr-unit">BPM</div>
-                </div>
-            </div>
+        <div class="qual-section">
+          <span class="qual-label">Signal Quality</span>
+          <div class="qual-bar"><div class="qual-fill" id="qualFill" style="width:0;background:var(--dim)"></div></div>
+          <span class="qual-pct" id="qualPct">0%</span>
         </div>
-        <!-- [V7->V7.1] 摄像头切换 -->
-        <div class="panel-block">
-            <div class="panel-label">Camera Source</div>
-            <div class="cam-switch">
-                <button class="cam-btn" id="camLocalBtn" type="button">本地 0</button>
-                <button class="cam-btn" id="camIpBtn" type="button">IP 摄像头</button>
-            </div>
-            <div class="cam-status" id="camStatus">查询中...</div>
+      </div>
+
+      <!-- 图表行 -->
+      <div class="row-2">
+        <div class="card" style="padding:10px 12px">
+          <div class="card-title">Pulse Waveform</div>
+          <div class="chart-box"><canvas id="cvPulse"></canvas></div>
         </div>
-        <!-- 双路心率 -->
-        <div class="panel-block">
-            <div class="panel-label">Dual HR: FFT vs Peak</div>
-            <div class="dual-hr">
-                <div class="dual-item"><span class="dual-label">FFT</span><span class="dual-val" id="dualFft">--</span></div>
-                <div class="dual-item"><span class="dual-label">Peak</span><span class="dual-val" id="dualPeak">--</span></div>
-                <div class="dual-item"><span class="dual-label">Δ</span><span class="dual-val" id="dualDelta">--</span></div>
-                <div class="dual-item"><span class="dual-label">Use</span><span class="dual-val" id="dualMethod">--</span></div>
-            </div>
+        <div class="card" style="padding:10px 12px">
+          <div class="card-title">Heart Rate Trend</div>
+          <div class="chart-box"><canvas id="cvTrend"></canvas></div>
         </div>
-        <!-- 波形 -->
-        <div class="panel-block">
-            <div class="panel-label">Pulse Waveform</div>
-            <div class="canvas-wrap">
-                <span class="canvas-label">PPG Signal</span>
-                <canvas id="pulseCanvas" width="630" height="120"></canvas>
-            </div>
+      </div>
+
+      <!-- 信息行 -->
+      <div class="row-2">
+        <div class="card">
+          <div class="card-title">ROI Fusion</div>
+          <div class="roi-list" id="roiList">
+            <div class="roi-item"><div class="roi-name">等待</div><div class="roi-val" style="color:var(--dim)">--</div></div>
+          </div>
         </div>
-        <!-- 趋势 -->
-        <div class="panel-block">
-            <div class="panel-label">Heart Rate Trend</div>
-            <div class="canvas-wrap">
-                <span class="canvas-label">BPM History</span>
-                <canvas id="trendCanvas" width="630" height="100"></canvas>
-            </div>
+        <div class="card">
+          <div class="card-title">Diagnostics</div>
+          <div class="diag-grid">
+            <div class="diag-row"><span class="diag-k">Mode</span><span class="diag-v" id="dgMode">--</span></div>
+            <div class="diag-row"><span class="diag-k">ROIs</span><span class="diag-v" id="dgRoi">0</span></div>
+            <div class="diag-row"><span class="diag-k">Motion</span><span class="diag-v" id="dgMotion">--</span></div>
+            <div class="diag-row"><span class="diag-k">Light</span><span class="diag-v" id="dgLight">--</span></div>
+            <div class="diag-row"><span class="diag-k">Face</span><span class="diag-v" id="dgFace">--</span></div>
+            <div class="diag-row"><span class="diag-k">FPS</span><span class="diag-v" id="dgFps">--</span></div>
+            <div class="diag-row"><span class="diag-k">Buffer</span><span class="diag-v" id="dgBuf">0 / 180</span></div>
+          </div>
         </div>
-        <!-- 质量 -->
-        <div class="panel-block">
-            <div class="panel-label">Signal Quality</div>
-            <div class="quality-row">
-                <div class="quality-bar"><div class="quality-fill" id="qualityFill"></div></div>
-                <span class="quality-val" id="qualityVal">0%</span>
-            </div>
+      </div>
+
+      <!-- Pipeline -->
+      <div class="card" style="padding:8px 14px">
+        <div class="pipe">
+          <span>4 ROIs</span><span class="arrow">→</span>
+          <span>Fuse</span><span class="arrow">→</span>
+          <span>Motion 5f</span><span class="arrow">→</span>
+          <span>Light?</span><span class="arrow">→</span>
+          <span>POS</span><span class="arrow">→</span>
+          <span>BW</span><span class="arrow">→</span>
+          <span>FFT+Peak</span><span class="arrow">→</span>
+          <span>FuseHR</span><span class="arrow">→</span>
+          <span>Limit</span>
         </div>
-        <!-- ROI 融合 -->
-        <div class="panel-block">
-            <div class="panel-label">ROI Fusion</div>
-            <div class="fusion-bar" id="fusionBar"></div>
-            <div class="fusion-legend" id="fusionLegend"></div>
+        <div class="notes">
+          <b>Motion:</b> 多帧最大值 &nbsp;
+          <b>Light:</b> 与运动解耦 &nbsp;
+          <b>HR:</b> Peak 60% + FFT 40% &nbsp;
+          <b>Face:</b> bbox 保留 30 帧 &nbsp;
+          <b>ROI:</b> 468点bbox + 眉毛分线 + 鼻尖分左右 &nbsp;
+          <b>EMA:</b> 质量自适应跟踪
         </div>
-        <!-- 诊断 -->
-        <div class="panel-block">
-            <div class="panel-label">Diagnostics</div>
-            <div class="diag-grid">
-                <div class="diag-item"><span class="diag-label">Mode</span><span class="diag-value" id="diagMode">--</span></div>
-                <div class="diag-item"><span class="diag-label">ROIs</span><span class="diag-value" id="diagRois">0</span></div>
-                <div class="diag-item"><span class="diag-label">Motion</span><span class="diag-value" id="diagMotion">--</span></div>
-                <div class="diag-item"><span class="diag-label">Light</span><span class="diag-value" id="diagLight">--</span></div>
-                <div class="diag-item"><span class="diag-label">Face</span><span class="diag-value" id="diagFace">--</span></div>
-                <div class="diag-item"><span class="diag-label">FPS</span><span class="diag-value" id="diagFps">--</span></div>
-            </div>
-            <div class="buffer-wrap">
-                <div class="buffer-bar"><div class="buffer-fill" id="bufferFill"></div></div>
-                <div class="buffer-text" id="bufferText">Buffer: 0 / 180</div>
-            </div>
-        </div>
-        <!-- 说明 -->
-        <div class="panel-block no-border">
-            <div class="panel-label">V7 Changes</div>
-            <div class="fix-list">
-                <div class="fix-item"><strong>Motion:</strong> multi-frame max (catches oscillation)</div>
-                <div class="fix-item"><strong>Light:</strong> decoupled from motion (threshold boost)</div>
-                <div class="fix-item"><strong>HR:</strong> FFT + peak detection fusion</div>
-                <div class="fix-item"><strong>Face:</strong> bbox retain 30 frames on loss</div>
-                <div class="fix-item"><strong>Camera:</strong> local (0/1) or IP Webcam (http://ip:8080/video)</div>
-            </div>
-            <div class="pipeline">
-                <span class="pipe-step">4 ROIs</span><span class="pipe-arrow">→</span>
-                <span class="pipe-step">Fuse</span><span class="pipe-arrow">→</span>
-                <span class="pipe-step">Motion5f</span><span class="pipe-arrow">→</span>
-                <span class="pipe-step">Light?</span><span class="pipe-arrow">→</span>
-                <span class="pipe-step">POS</span><span class="pipe-arrow">→</span>
-                <span class="pipe-step">BW</span><span class="pipe-arrow">→</span>
-                <span class="pipe-step">FFT+Peak</span><span class="pipe-arrow">→</span>
-                <span class="pipe-step">FuseHR</span><span class="pipe-arrow">→</span>
-                <span class="pipe-step">Limit</span>
-            </div>
-        </div>
-    </aside>
-</main>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
 <script>
-const $=id=>document.getElementById(id);
-const videoImg=$('videoImg'),noSignal=$('noSignal'),hrValue=$('hrValue'),hrRing=$('hrRing'),hrIcon=$('hrIcon');
-const pulseCanvas=$('pulseCanvas'),trendCanvas=$('trendCanvas');
-const qualityFill=$('qualityFill'),qualityVal=$('qualityVal');
-const dualFft=$('dualFft'),dualPeak=$('dualPeak'),dualDelta=$('dualDelta'),dualMethod=$('dualMethod');
-const diagMode=$('diagMode'),diagRois=$('diagRois'),diagMotion=$('diagMotion'),diagLight=$('diagLight'),diagFace=$('diagFace'),diagFps=$('diagFps');
-const bufferFill=$('bufferFill'),bufferText=$('bufferText');
-const fusionBar=$('fusionBar'),fusionLegend=$('fusionLegend');
-const pCtx=pulseCanvas.getContext('2d'),tCtx=trendCanvas.getContext('2d');
-let lastHr=0,pulseData=[],trendData=[],videoReady=false;
-const RC=2*Math.PI*65;
-const ROI_C={'forehead':'#00e676','left_cheek':'#ffa502','right_cheek':'#ff6348'};
-const ROI_L={'forehead':'Forehead','left_cheek':'L-Cheek','right_cheek':'R-Cheek'};
-videoImg.addEventListener('load',()=>{if(!videoReady){videoReady=true;noSignal.classList.add('hidden')}});
-videoImg.addEventListener('error',()=>{videoReady=false;noSignal.classList.remove('hidden')});
+/* ========== 状态 ========== */
+let currentCam = { type: null, src: null };
+let switching = false;
 
-/* [V7->V7.1] 只做本地/IP 切换，URL 由后端写死 */
-const camLocalBtn = document.getElementById('camLocalBtn');
-const camIpBtn = document.getElementById('camIpBtn');
-const camStatus = document.getElementById('camStatus');
+/* ========== Toast ========== */
+let toastTimer = null;
+function showToast(msg, type) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast ' + type + ' show';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 3500);
+}
 
-async function switchTo(type) {
-    camLocalBtn.disabled = true;
-    camIpBtn.disabled = true;
-    camStatus.className = 'cam-status switching';
-    camStatus.textContent = '切换中...';
-    try {
-        const r = await fetch('/api/camera', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ type })
-        });
-        if (!r.ok) { const e = await r.json(); throw new Error(e.error || '切换失败'); }
-        camStatus.className = 'cam-status ok';
-        camStatus.textContent = '已切换到 ' + (type === 'local' ? '本地摄像头' : 'IP 摄像头');
-    } catch (e) {
-        camStatus.className = 'cam-status err';
-        camStatus.textContent = '切换失败: ' + e.message;
-    } finally {
-        camLocalBtn.disabled = false;
-        camIpBtn.disabled = false;
+/* ========== 视频流 ========== */
+const videoImg = document.getElementById('videoImg');
+const videoPH = document.getElementById('videoPlaceholder');
+const liveDot = document.getElementById('liveDot');
+const liveLabel = document.getElementById('liveLabel');
+
+videoImg.onload = () => {
+  videoImg.style.display = 'block';
+  videoPH.style.display = 'none';
+  liveDot.classList.add('on');
+  liveLabel.textContent = 'LIVE';
+  liveLabel.style.color = 'var(--green)';
+};
+videoImg.onerror = () => {
+  videoImg.style.display = 'none';
+  videoPH.style.display = 'flex';
+  liveDot.classList.remove('on');
+  liveLabel.textContent = 'OFFLINE';
+  liveLabel.style.color = 'var(--dim)';
+};
+videoImg.src = '/video_feed';
+
+/* ========== 摄像头切换 ========== */
+function updateCamBtns() {
+  document.getElementById('btnLocal').classList.toggle('active', currentCam.type === 'local');
+  document.getElementById('btnIP').classList.toggle('active', currentCam.type === 'ip');
+}
+
+async function switchCam(type, src) {
+  if (switching) return;
+  switching = true;
+  const status = document.getElementById('camStatus');
+  status.textContent = '切换中...';
+  status.className = 'cam-status';
+  let body;
+  if (type === 'local') {
+    body = JSON.stringify({ type: 'local', src: src !== undefined ? src : 0 });
+  } else {
+    body = JSON.stringify({ type: 'default_ip' });
+  }
+  try {
+    const res = await fetch('/api/camera', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: body
+    });
+    const ct = res.headers.get('content-type') || '';
+    if (!ct.includes('application/json')) {
+      const text = await res.text();
+      throw new Error('服务端返回非 JSON: ' + text.slice(0, 120));
     }
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    currentCam = { type: type === 'local' ? 'local' : 'ip', src: src };
+    updateCamBtns();
+    status.textContent = '已切换';
+    status.className = 'cam-status';
+    showToast('摄像头切换成功', 'ok');
+  } catch (e) {
+    status.textContent = '切换失败';
+    status.className = 'cam-status err';
+    showToast('切换失败: ' + e.message, 'err');
+  } finally {
+    switching = false;
+  }
 }
 
-camLocalBtn.addEventListener('click', () => {
-    switchTo('local');
-    camLocalBtn.style.borderColor = 'var(--accent)';
-    camLocalBtn.style.color = 'var(--accent)';
-    camIpBtn.style.borderColor = 'var(--muted)';
-    camIpBtn.style.color = 'var(--muted)';
-});
+async function queryCam() {
+  try {
+    const res = await fetch('/api/camera');
+    if (!res.ok) return;
+    const ct = res.headers.get('content-type') || '';
+    if (!ct.includes('application/json')) return;
+    const data = await res.json();
+    currentCam = { type: data.type, src: data.src };
+    updateCamBtns();
+    const status = document.getElementById('camStatus');
+    status.textContent = data.type === 'ip' ? 'IP: ' + data.src : '本地 ' + data.src;
+    status.className = 'cam-status';
+  } catch (e) {}
+}
+queryCam();
 
-camIpBtn.addEventListener('click', () => {
-    switchTo('default_ip');      // 使用 py 里写死的 DEFAULT_IP_CAMERA_URL
-    camIpBtn.style.borderColor = 'var(--accent)';
-    camIpBtn.style.color = 'var(--accent)';
-    camLocalBtn.style.borderColor = 'var(--muted)';
-    camLocalBtn.style.color = 'var(--muted)';
-});
+/* ========== 数据轮询 ========== */
+const $ = id => document.getElementById(id);
 
-function triggerBeat(){hrValue.classList.add('beat');setTimeout(()=>hrValue.classList.remove('beat'),130)}
-function syncHB(hr){if(hr>0){hrIcon.style.animationDuration=(60/hr).toFixed(2)+'s';hrIcon.style.animationName='hb';hrIcon.className='fa-solid fa-heart-pulse hr-icon'}else{hrIcon.style.animationName='none'}}
+function poll() {
+  fetch('/api/hr').then(r => {
+    if (!r.ok) throw new Error(r.status);
+    return r.json();
+  }).then(d => {
+    /* BPM */
+    const bpm = d.hr;
+    const bv = $('bpmVal');
+    if (bpm > 0 && d.face) {
+      bv.textContent = Math.round(bpm);
+      bv.className = 'bpm-val ' + (d.quality >= 30 ? 'good' : d.quality >= 15 ? 'warn' : 'err');
+    } else {
+      bv.textContent = '--';
+      bv.className = 'bpm-val idle';
+    }
+    $('bpmMethod').textContent = d.face ? ('[' + d.hr_method + ']') : '等待信号...';
 
-function updateRing(hr,state){
-    const p=Math.max(0,Math.min(1,(hr-45)/135));hrRing.style.strokeDashoffset=RC*(1-p);
-    if(state==='motion'){hrRing.style.stroke='var(--blue)';hrValue.style.color='var(--blue)';hrValue.style.textShadow='0 0 20px rgba(30,144,255,.25)';hrIcon.className='fa-solid fa-heart-pulse hr-icon paused'}
-    else if(state==='light'){hrRing.style.stroke='var(--cyan)';hrValue.style.color='var(--cyan)';hrValue.style.textShadow='0 0 20px rgba(0,188,212,.25)';hrIcon.className='fa-solid fa-heart-pulse hr-icon light'}
-    else{let c='#00e676';if(hr>150)c='#ffa502';if(hr>170||hr<50)c='#ff4757';hrRing.style.stroke=c;hrValue.style.color=c;hrValue.style.textShadow='0 0 20px '+c+'44';hrIcon.className='fa-solid fa-heart-pulse hr-icon'}
+    /* dual */
+    const fft = d.hr_fft, peak = d.hr_peak;
+    $('dFft').textContent = fft > 0 ? Math.round(fft) : '--';
+    $('dPeak').textContent = peak > 0 ? Math.round(peak) : '--';
+    if (fft > 0 && peak > 0) {
+      const delta = Math.abs(fft - peak);
+      $('dDelta').textContent = delta.toFixed(0);
+      $('dDelta').style.color = delta < 8 ? 'var(--green)' : delta < 20 ? 'var(--warn)' : 'var(--err)';
+    } else {
+      $('dDelta').textContent = '--';
+      $('dDelta').style.color = 'var(--warn)';
+    }
+    $('dUse').textContent = d.hr_method;
+
+    /* quality */
+    const q = d.quality;
+    $('qualPct').textContent = Math.round(q) + '%';
+    $('qualPct').style.color = q >= 50 ? 'var(--green)' : q >= 25 ? 'var(--warn)' : q >= 10 ? 'var(--dim)' : 'var(--err)';
+    const qf = $('qualFill');
+    qf.style.width = q + '%';
+    qf.style.background = q >= 50 ? 'var(--green)' : q >= 25 ? 'var(--warn)' : q >= 10 ? 'var(--dim)' : 'var(--err)';
+
+    /* roi */
+    const rl = $('roiList');
+    if (d.active_rois > 0 && d.fusion_weights) {
+      const colors = { forehead: 'var(--cyan)', left_cheek: 'var(--green)', right_cheek: 'var(--warn)' };
+      const labels = { forehead: 'FH', left_cheek: 'LC', right_cheek: 'RC' };
+      let html = '';
+      for (const [k, v] of Object.entries(d.fusion_weights)) {
+        html += '<div class="roi-item"><div class="roi-name">' + (labels[k]||k) + '</div><div class="roi-val" style="color:' + (colors[k]||'var(--text)') + '">' + Math.round(v*100) + '%</div></div>';
+      }
+      rl.innerHTML = html;
+    }
+
+    /* diag */
+    const diags = d.diagnostics || [];
+    const okFlag = diags.includes('OK');
+    $('dgMode').textContent = d.hr_method;
+    $('dgMode').className = 'diag-v ' + (okFlag ? 'ok' : '');
+    $('dgRoi').textContent = d.active_rois;
+    $('dgRoi').className = 'diag-v ' + (d.active_rois > 0 ? 'ok' : 'err');
+    $('dgMotion').textContent = d.motion_paused ? '暂停' : d.motion_score.toFixed(1) + '/' + d.motion_threshold.toFixed(0);
+    $('dgMotion').className = 'diag-v ' + (d.motion_paused ? 'err' : 'ok');
+    $('dgLight').textContent = d.light_change ? '变化中' : '正常';
+    $('dgLight').className = 'diag-v ' + (d.light_change ? 'warn' : 'ok');
+    $('dgFace').textContent = d.face ? '检测到' : '未检测';
+    $('dgFace').className = 'diag-v ' + (d.face ? 'ok' : 'err');
+    $('dgFps').textContent = d.fps.toFixed(0);
+    $('dgBuf').textContent = d.buffer + ' / ' + d.buffer_max;
+
+    drawPulse(d.pulse || []);
+    drawTrend(d.hr_history || []);
+  }).catch(() => {});
+}
+setInterval(poll, 500);
+
+/* ========== 绘图 ========== */
+function setupCanvas(cv) {
+  const rect = cv.parentElement.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  cv.width = rect.width * dpr;
+  cv.height = rect.height * dpr;
+  const ctx = cv.getContext('2d');
+  ctx.scale(dpr, dpr);
+  return { ctx, w: rect.width, h: rect.height };
 }
 
-function updateFusion(w){
-    if(!w||!Object.keys(w).length){fusionBar.innerHTML='';fusionLegend.innerHTML='<span style="color:var(--muted)">No ROIs</span>';return}
-    const e=Object.entries(w),total=e.reduce((s,[,v])=>s+Math.max(v,.05),0);
-    let bH='',lH='';
-    e.forEach(([n,v])=>{const p=Math.max(v,.05)/total*100,c=ROI_C[n]||'#666',l=ROI_L[n]||n;
-        bH+=`<div class="fusion-seg" style="width:${p}%;background:${c}"></div>`;
-        lH+=`<div class="fusion-legend-item"><span class="dot-s" style="background:${c}"></span>${l} ${(v*100).toFixed(0)}%</div>`;
-    });fusionBar.innerHTML=bH;fusionLegend.innerHTML=lH;
+function drawPulse(data) {
+  const cv = $('cvPulse');
+  const { ctx, w, h } = setupCanvas(cv);
+  ctx.clearRect(0, 0, w, h);
+  ctx.strokeStyle = 'rgba(255,255,255,.04)'; ctx.lineWidth = 1;
+  for (let y = 0; y < h; y += h / 4) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
+  for (let x = 0; x < w; x += w / 8) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
+  if (data.length < 4) return;
+  const mid = h / 2, amp = h * 0.38;
+  ctx.beginPath();
+  for (let i = 0; i < data.length; i++) {
+    const x = (i / (data.length - 1)) * w, y = mid - data[i] * amp;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  ctx.lineTo(w, mid); ctx.lineTo(0, mid); ctx.closePath();
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, 'rgba(0,230,118,.12)'); grad.addColorStop(0.5, 'rgba(0,230,118,.02)'); grad.addColorStop(1, 'rgba(0,230,118,.12)');
+  ctx.fillStyle = grad; ctx.fill();
+  ctx.beginPath();
+  for (let i = 0; i < data.length; i++) {
+    const x = (i / (data.length - 1)) * w, y = mid - data[i] * amp;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  ctx.strokeStyle = '#00e676'; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, mid); ctx.lineTo(w, mid);
+  ctx.strokeStyle = 'rgba(0,230,118,.15)'; ctx.lineWidth = 1; ctx.stroke();
 }
 
-function drawPulse(data){
-    const w=pulseCanvas.width,h=pulseCanvas.height;pCtx.clearRect(0,0,w,h);
-    pCtx.strokeStyle='rgba(0,230,118,0.05)';pCtx.lineWidth=.5;
-    for(let x=0;x<w;x+=30){pCtx.beginPath();pCtx.moveTo(x,0);pCtx.lineTo(x,h);pCtx.stroke()}
-    for(let y=0;y<h;y+=24){pCtx.beginPath();pCtx.moveTo(0,y);pCtx.lineTo(w,y);pCtx.stroke()}
-    pCtx.strokeStyle='rgba(0,230,118,0.1)';pCtx.lineWidth=1;pCtx.beginPath();pCtx.moveTo(0,h/2);pCtx.lineTo(w,h/2);pCtx.stroke();
-    if(data.length<2)return;
-    const step=w/(data.length-1),amp=h*.38;
-    pCtx.save();pCtx.shadowColor='#00e676';pCtx.shadowBlur=10;pCtx.strokeStyle='rgba(0,230,118,0.3)';pCtx.lineWidth=3;pCtx.beginPath();
-    for(let i=0;i<data.length;i++){const x=i*step,y=h/2-data[i]*amp;i===0?pCtx.moveTo(x,y):pCtx.lineTo(x,y)}pCtx.stroke();pCtx.restore();
-    pCtx.strokeStyle='#00e676';pCtx.lineWidth=1.5;pCtx.beginPath();
-    for(let i=0;i<data.length;i++){const x=i*step,y=h/2-data[i]*amp;i===0?pCtx.moveTo(x,y):pCtx.lineTo(x,y)}pCtx.stroke();
+function drawTrend(data) {
+  const cv = $('cvTrend');
+  const { ctx, w, h } = setupCanvas(cv);
+  ctx.clearRect(0, 0, w, h);
+  ctx.strokeStyle = 'rgba(255,255,255,.04)'; ctx.lineWidth = 1;
+  for (let y = 0; y < h; y += h / 4) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
+  for (let x = 0; x < w; x += w / 8) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
+  if (data.length < 2) return;
+  const valid = data.filter(v => v > 0);
+  if (valid.length === 0) return;
+  const minHR = Math.max(40, Math.min(...valid) - 10);
+  const maxHR = Math.min(200, Math.max(...valid) + 10);
+  const range = maxHR - minHR || 1, pad = 6;
+  ctx.fillStyle = 'rgba(255,255,255,.2)'; ctx.font = '9px monospace'; ctx.textAlign = 'left';
+  ctx.fillText(Math.round(maxHR), 2, 10);
+  ctx.fillText(Math.round(minHR), 2, h - 2);
+  ctx.beginPath();
+  for (let i = 0; i < data.length; i++) {
+    const x = pad + (i / (data.length - 1)) * (w - pad * 2);
+    const y = data[i] > 0 ? h - pad - ((data[i] - minHR) / range) * (h - pad * 2) : h - pad;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  const lastX = pad + (w - pad * 2);
+  ctx.lineTo(lastX, h - pad); ctx.lineTo(pad, h - pad); ctx.closePath();
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, 'rgba(0,188,212,.15)'); grad.addColorStop(1, 'rgba(0,188,212,.01)');
+  ctx.fillStyle = grad; ctx.fill();
+  ctx.beginPath();
+  for (let i = 0; i < data.length; i++) {
+    const x = pad + (i / (data.length - 1)) * (w - pad * 2);
+    const y = data[i] > 0 ? h - pad - ((data[i] - minHR) / range) * (h - pad * 2) : h - pad;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  ctx.strokeStyle = '#00bcd4'; ctx.lineWidth = 1.5; ctx.stroke();
+  if (data.length > 0 && data[data.length - 1] > 0) {
+    const ly = h - pad - ((data[data.length - 1] - minHR) / range) * (h - pad * 2);
+    ctx.beginPath(); ctx.arc(lastX, ly, 3, 0, Math.PI * 2);
+    ctx.fillStyle = '#00bcd4'; ctx.fill();
+  }
 }
-
-function drawTrend(data){
-    const w=trendCanvas.width,h=trendCanvas.height;tCtx.clearRect(0,0,w,h);
-    tCtx.strokeStyle='rgba(0,230,118,0.04)';tCtx.lineWidth=.5;
-    for(let x=0;x<w;x+=30){tCtx.beginPath();tCtx.moveTo(x,0);tCtx.lineTo(x,h);tCtx.stroke()}
-    for(let y=0;y<h;y+=20){tCtx.beginPath();tCtx.moveTo(0,y);tCtx.lineTo(w,y);tCtx.stroke()}
-    if(data.length<2){tCtx.fillStyle='rgba(62,80,96,0.5)';tCtx.font='10px Share Tech Mono';tCtx.textAlign='center';tCtx.fillText('Waiting...',w/2,h/2+4);return}
-    const mn=40,mx=180,rng=mx-mn,pd=8;
-    tCtx.fillStyle='rgba(62,80,96,0.5)';tCtx.font='8px Share Tech Mono';tCtx.textAlign='left';
-    [60,90,120,150].forEach(v=>{const y=pd+(1-(v-mn)/rng)*(h-pd*2);tCtx.fillText(v,4,y+3)});
-    const step=(w-26)/(data.length-1);
-    tCtx.beginPath();for(let i=0;i<data.length;i++){const x=26+i*step,y=pd+(1-(data[i]-mn)/rng)*(h-pd*2);i===0?tCtx.moveTo(x,y):tCtx.lineTo(x,y)}
-    tCtx.lineTo(26+(data.length-1)*step,h);tCtx.lineTo(26,h);tCtx.closePath();
-    const fg=tCtx.createLinearGradient(0,0,0,h);fg.addColorStop(0,'rgba(0,230,118,0.12)');fg.addColorStop(1,'rgba(0,230,118,0)');tCtx.fillStyle=fg;tCtx.fill();
-    tCtx.save();tCtx.shadowColor='#00e676';tCtx.shadowBlur=5;tCtx.strokeStyle='#00e676';tCtx.lineWidth=1.2;tCtx.lineJoin='round';tCtx.beginPath();
-    for(let i=0;i<data.length;i++){const x=26+i*step,y=pd+(1-(data[i]-mn)/rng)*(h-pd*2);i===0?tCtx.moveTo(x,y):tCtx.lineTo(x,y)}tCtx.stroke();tCtx.restore();
-}
-
-function updateQuality(q,state){
-    const p=Math.round(Math.max(0,Math.min(100,q)));qualityFill.style.width=p+'%';qualityVal.textContent=p+'%';
-    if(state==='motion'){qualityFill.className='quality-fill paused-fill';qualityVal.style.color='var(--blue)'}
-    else if(state==='light'){qualityFill.className='quality-fill light-fill';qualityVal.style.color='var(--cyan)'}
-    else{qualityFill.className='quality-fill'+(p<25?' low':p<50?' mid':'');qualityVal.style.color=p<25?'var(--danger)':p<50?'var(--warning)':'var(--accent)'}
-}
-
-async function fetchHR(){
-    try{
-        const r=await fetch('/api/hr');if(!r.ok)throw 0;const d=await r.json();
-        const paused=d.motion_paused||false,light=d.light_change||false,lost=d.bbox_lost||false;
-        const state=paused?'motion':light?'light':lost?'retain':'ok';
-
-        if(d.hr>0){const v=Math.round(d.hr);if(v!==lastHr){hrValue.textContent=v;updateRing(v,state);syncHB(v);triggerBeat();lastHr=v}}else{hrValue.textContent='--';updateRing(0,state);syncHB(0);lastHr=0}
-        updateQuality(d.quality,state);
-
-        const fft=d.hr_fft||0,pk=d.hr_peak||0;
-        dualFft.textContent=fft>0?fft.toFixed(0):'--';
-        dualPeak.textContent=pk>0?pk.toFixed(0):'--';
-        const delta=fft>0&&pk>0?Math.abs(fft-pk).toFixed(0):'--';
-        dualDelta.textContent=delta!=='--'?delta+' BPM':'--';
-        dualDelta.className='dual-val '+(delta==='--'?'miss':parseInt(delta)<8?'match':parseInt(delta)<20?'match':'diff');
-        dualMethod.textContent=d.hr_method||'--';
-        if(d.hr_method==='avg'){dualMethod.style.color='var(--accent)'}else if(d.hr_method==='none'){dualMethod.style.color='var(--muted)'}else{dualMethod.style.color='var(--warning)'}
-
-        diagMode.textContent='FUSION';diagMode.className='diag-value good';
-        diagRois.textContent=d.active_rois||0;diagRois.className='diag-value '+(d.active_rois>=3?'good':d.active_rois>=1?'warn':'bad');
-        diagMotion.textContent=d.motion_score.toFixed(1)+'/'+d.motion_threshold.toFixed(0);diagMotion.className='diag-value '+(d.motion_score>d.motion_threshold?'bad':'good');
-        diagLight.textContent=light?'CHANGE':'stable';diagLight.className='diag-value '+(light?'light-v':'good');
-        diagFace.textContent=lost?'RETAIN '+d.bbox_lost_frames+'f':'detected';diagFace.className='diag-value '+(lost?'retain':'good');
-        diagFps.textContent=d.fps.toFixed(0);diagFps.className='diag-value '+(d.fps>=20?'good':'warn');
-
-        const bp=Math.round((d.buffer/d.buffer_max)*100);bufferFill.style.width=bp+'%';bufferText.textContent='Buffer: '+d.buffer+' / '+d.buffer_max;
-        updateFusion(d.fusion_weights);
-
-        if(d.pulse&&d.pulse.length>1){pulseData=d.pulse;drawPulse(pulseData)}
-        if(d.hr_history&&d.hr_history.length>1){trendData=d.hr_history;drawTrend(trendData)}
-    }catch(e){}
-}
-
-drawPulse([]);drawTrend([]);setInterval(fetchHR,200);fetchHR();
 </script>
 </body>
 </html>

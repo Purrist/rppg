@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>V4.0</title>
+<title>V4.1</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
@@ -47,7 +47,6 @@ body::after{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;back
 .badge.df{background:rgba(56,189,248,.1);color:#38bdf8;border:1px solid rgba(56,189,248,.2)}
 .badge.llm{background:rgba(168,85,247,.1);color:#a855f7;border:1px solid rgba(168,85,247,.2)}
 .stag{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:6px;background:var(--bg2);border:1px solid var(--border);font-size:12px;font-family:'JetBrains Mono',monospace;color:var(--muted)}
-.cb{position:relative;height:140px}
 .ac{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
 .acell{text-align:center;padding:10px 4px;border-radius:8px;background:var(--bg2);border:1px solid var(--border)}
 .acell .al{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
@@ -79,7 +78,7 @@ body::after{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;back
     </div>
   </div>
   <div class="flex items-center gap-2 flex-wrap">
-    <div class="tg" id="backends">
+    <div class="tg">
       <button class="tg-b dis" id="b-df" onclick="setB('deepface')"><i class="fa-solid fa-face-laugh-beam" style="margin-right:3px"></i>DeepFace</button>
       <button class="tg-b dis" id="b-on" onclick="setB('onnx')"><i class="fa-solid fa-microchip" style="margin-right:3px"></i>ONNX</button>
       <button class="tg-b dis" id="b-ll" onclick="setB('llm')"><i class="fa-solid fa-wand-magic-sparkles" style="margin-right:3px"></i>大模型</button>
@@ -98,14 +97,14 @@ body::after{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;back
   <div class="card p-2">
     <div class="vw"><img src="/video_local" alt="Local"><div class="vl"><i class="fa-solid fa-video"></i><span>Local</span><span style="margin-left:auto;font-family:'JetBrains Mono',monospace" id="lfp">--</span></div></div>
     <div class="flex items-center justify-between px-2 py-1.5">
-      <span class="text-xs font-medium" style="color:var(--muted)"><i class="fa-solid fa-person-running" style="margin-right:4px"></i>Motion</span>
+      <span class="text-xs font-medium" style="color:var(--muted)"><i class="fa-solid fa-person-running" style="margin-right:4px"></i>活动量</span>
       <span class="text-xs font-mono" style="color:var(--accent)" id="mi2">0%</span>
     </div>
   </div>
   <div class="card p-2">
     <div class="vw"><img src="/video_ip" alt="IP"><div class="vl"><i class="fa-solid fa-wifi"></i><span>IP</span><span style="margin-left:auto;font-family:'JetBrains Mono',monospace" id="ifp">--</span></div></div>
     <div class="flex items-center justify-between px-2 py-1.5">
-      <span class="text-xs font-medium" style="color:var(--muted)"><i class="fa-solid fa-face-smile" style="margin-right:4px"></i>Face</span>
+      <span class="text-xs font-medium" style="color:var(--muted)"><i class="fa-solid fa-face-smile" style="margin-right:4px"></i>情绪 / 专注度 / 属性</span>
       <span class="text-xs font-mono" id="ei" style="color:var(--en)">--</span>
     </div>
   </div>
@@ -113,6 +112,7 @@ body::after{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;back
 
 <div class="dg grid grid-cols-4 gap-3 mb-4">
 
+  <!-- 情绪 -->
   <div class="card p-4">
     <div class="flex items-center gap-2 mb-3"><i class="fa-solid fa-masks-theater" style="color:var(--accent);font-size:14px"></i><span class="text-sm font-semibold">Emotion</span></div>
     <div class="flex items-center justify-center mb-3">
@@ -130,6 +130,7 @@ body::after{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;back
     </div>
   </div>
 
+  <!-- 属性 -->
   <div class="card p-4">
     <div class="flex items-center gap-2 mb-3"><i class="fa-solid fa-id-card" style="color:var(--accent);font-size:14px"></i><span class="text-sm font-semibold">Age & Gender</span></div>
     <div id="attr-ok" style="display:none">
@@ -141,10 +142,11 @@ body::after{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;back
       <div style="margin-top:10px"><div class="text-xs mb-1" style="color:var(--muted)">Gender</div><div id="gbars"></div></div>
     </div>
     <div id="attr-no" style="text-align:center;padding:30px 0;color:var(--muted);font-size:13px">
-      <i class="fa-solid fa-circle-xmark" style="font-size:24px;display:block;margin-bottom:8px;opacity:.4"></i>该后端无属性
+      <i class="fa-solid fa-circle-xmark" style="font-size:24px;display:block;margin-bottom:8px;opacity:.4"></i>属性模型未加载
     </div>
   </div>
 
+  <!-- 专注度 -->
   <div class="card p-4">
     <div class="flex items-center gap-2 mb-3"><i class="fa-solid fa-crosshairs" style="color:var(--accent);font-size:14px"></i><span class="text-sm font-semibold">Focus</span></div>
     <div class="gw mb-3">
@@ -164,134 +166,138 @@ body::after{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;back
     </div>
   </div>
 
+  <!-- 活动量 -->
   <div class="card p-4">
     <div class="flex items-center gap-2 mb-3"><i class="fa-solid fa-person-walking" style="color:var(--accent);font-size:14px"></i><span class="text-sm font-semibold">Motion</span></div>
     <div class="text-center mb-2"><div class="mn" id="mtn" style="color:var(--muted)">0.0<span class="gu">%</span></div></div>
     <div class="text-center mb-3"><span class="ma">ACC: <span id="mac">0</span></span></div>
-    <div class="cb"><canvas id="mc"></canvas></div>
+    <div style="height:140px;position:relative"><canvas id="mc"></canvas></div>
   </div>
 </div>
 
+<!-- 趋势图 -->
 <div class="cg grid grid-cols-2 gap-3 mb-4">
-  <div class="card p-4"><div class="flex items-center gap-2 mb-2"><i class="fa-solid fa-chart-line" style="color:var(--accent);font-size:12px"></i><span class="text-sm font-semibold">Focus Trend</span></div><div class="cb" style="height:130px"><canvas id="fc"></canvas></div></div>
-  <div class="card p-4"><div class="flex items-center gap-2 mb-2"><i class="fa-solid fa-chart-area" style="color:var(--accent);font-size:12px"></i><span class="text-sm font-semibold">Motion Trend</span></div><div class="cb" style="height:130px"><canvas id="mtc"></canvas></div></div>
+  <div class="card p-4"><div class="flex items-center gap-2 mb-2"><i class="fa-solid fa-chart-line" style="color:var(--accent);font-size:12px"></i><span class="text-sm font-semibold">Focus Trend</span></div>
+    <div style="height:130px;position:relative"><canvas id="fc"></canvas></div>
+  </div>
+  <div class="card p-4"><div class="flex items-center gap-2 mb-2"><i class="fa-solid fa-chart-area" style="color:var(--accent);font-size:12px"></i><span class="text-sm font-semibold">Motion Trend</span></div>
+    <div style="height:130px;position:relative"><canvas id="mtc"></canvas></div>
+  </div>
 </div>
 
 <footer class="flex items-center gap-3 flex-wrap py-2">
   <div class="stag"><i class="fa-solid fa-desktop" style="font-size:10px"></i><span id="sl">--</span></div>
   <div class="stag"><i class="fa-solid fa-wifi" style="font-size:10px"></i><span id="si">--</span></div>
   <div class="stag"><i class="fa-solid fa-users" style="font-size:10px"></i><span id="sp">--</span></div>
-  <div style="margin-left:auto" class="stag">V4.0</div>
+  <div style="margin-left:auto" class="stag">V4.1</div>
 </footer>
 </div>
 
 <script>
-const EM={happy:{cn:'开心',c:'#22c55e',i:'fa-face-smile-beam',b:'rgba(34,197,94,.08)'},surprised:{cn:'惊讶',c:'#f59e0b',i:'fa-face-surprise',b:'rgba(245,158,11,.08)'},angry:{cn:'愤怒',c:'#ef4444',i:'fa-face-angry',b:'rgba(239,68,68,.08)'},sad:{cn:'悲伤',c:'#38bdf8',i:'fa-face-sad-tear',b:'rgba(56,189,248,.08)'},neutral:{cn:'平静',c:'#6b7280',i:'fa-face-meh',b:'rgba(107,114,128,.08)'},drowsy:{cn:'困倦',c:'#a855f7',i:'fa-face-tired',b:'rgba(168,85,247,.08)'}};
-const AL=['(0-2)','(4-6)','(8-12)','(15-20)','(25-32)','(38-43)','(48-53)','(60-100)'];
-const AC=['#ef4444','#f97316','#f59e0b','#eab308','#84cc16','#22c55e','#14b8a6','#38bdf8'];
-const GL=['Male','Female'],GC=['#38bdf8','#f472b6'];
+var EM={happy:{cn:'开心',c:'#22c55e',i:'fa-face-smile-beam',b:'rgba(34,197,94,.08)'},surprised:{cn:'惊讶',c:'#f59e0b',i:'fa-face-surprise',b:'rgba(245,158,11,.08)'},angry:{cn:'愤怒',c:'#ef4444',i:'fa-face-angry',b:'rgba(239,68,68,.08)'},sad:{cn:'悲伤',c:'#38bdf8',i:'fa-face-sad-tear',b:'rgba(56,189,248,.08)'},neutral:{cn:'平静',c:'#6b7280',i:'fa-face-meh',b:'rgba(107,114,128,.08)'},drowsy:{cn:'困倦',c:'#a855f7',i:'fa-face-tired',b:'rgba(168,85,247,.08)'}};
+var AL=['(0-2)','(4-6)','(8-12)','(15-20)','(25-32)','(38-43)','(48-53)','(60-100)'];
+var AC=['#ef4444','#f97316','#f59e0b','#eab308','#84cc16','#22c55e','#14b8a6','#38bdf8'];
+var GL=['Male','Female'],GC=['#38bdf8','#f472b6'];
 Chart.defaults.color='#7a8ba8';Chart.defaults.font.family="'JetBrains Mono',monospace";Chart.defaults.font.size=10;Chart.defaults.plugins.legend.display=false;Chart.defaults.elements.point.radius=0;Chart.defaults.elements.line.tension=.3;Chart.defaults.elements.line.borderWidth=1.5;
-const GC3='rgba(30,45,69,.6)';
-const mc=new Chart(document.getElementById('mc'),{type:'line',data:{labels:[],datasets:[{data:[],borderColor:'#00e5a0',backgroundColor:'rgba(0,229,160,.08)',fill:true}]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{display:false},y:{min:0,max:100,grid:{color:GC3},ticks:{stepSize:50}}},animation:{duration:200}}});
-const fc=new Chart(document.getElementById('fc'),{type:'line',data:{labels:[],datasets:[{data:[],borderColor:'#00e5a0',backgroundColor:'rgba(0,229,160,.06)',fill:true}]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{display:false},y:{min:0,max:100,grid:{color:GC3},ticks:{stepSize:25}}},animation:{duration:200}}});
-const mtc=new Chart(document.getElementById('mtc'),{type:'line',data:{labels:[],datasets:[{data:[],borderColor:'#f59e0b',backgroundColor:'rgba(245,158,11,.06)',fill:true}]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{display:false},y:{min:0,max:100,grid:{color:GC3},ticks:{stepSize:50}}},animation:{duration:200}}});
-const $=id=>document.getElementById(id);
-let tick=0;
+var GC3='rgba(30,45,69,.6)';
+var mc=new Chart(document.getElementById('mc'),{type:'line',data:{labels:[],datasets:[{data:[],borderColor:'#00e5a0',backgroundColor:'rgba(0,229,160,.08)',fill:true}]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{display:false},y:{min:0,max:100,grid:{color:GC3},ticks:{stepSize:50}}},animation:{duration:200}}});
+var fc=new Chart(document.getElementById('fc'),{type:'line',data:{labels:[],datasets:[{data:[],borderColor:'#00e5a0',backgroundColor:'rgba(0,229,160,.06)',fill:true}]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{display:false},y:{min:0,max:100,grid:{color:GC3},ticks:{stepSize:25}}},animation:{duration:200}}});
+var mtc=new Chart(document.getElementById('mtc'),{type:'line',data:{labels:[],datasets:[{data:[],borderColor:'#f59e0b',backgroundColor:'rgba(245,158,11,.06)',fill:true}]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{display:false},y:{min:0,max:100,grid:{color:GC3},ticks:{stepSize:50}}},animation:{duration:200}}});
+function $(id){return document.getElementById(id)}
+var tick=0;
 
 // 构建概率条
 (function(){
-  const c=$('abars');c.innerHTML='';
-  AL.forEach((l,i)=>{c.innerHTML+=`<div class="eb"><span class="ebl" style="width:46px">${l}</span><div class="ebt"><div class="ebf" id="ab${i}" style="width:0%;background:${AC[i]}"></div></div><span class="ebv" id="av${i}">0</span></div>`});
-  const g=$('gbars');g.innerHTML='';
-  GL.forEach((l,i)=>{g.innerHTML+=`<div class="eb"><span class="ebl" style="width:46px">${l}</span><div class="ebt"><div class="ebf" id="gb${i}" style="width:0%;background:${GC[i]}"></div></div><span class="ebv" id="gv${i}">0</span></div>`});
+  var c=$('abars');c.innerHTML='';
+  AL.forEach(function(l,i){c.innerHTML+='<div class="eb"><span class="ebl" style="width:46px">'+l+'</span><div class="ebt"><div class="ebf" id="ab'+i+'" style="width:0%;background:'+AC[i]+'"></div></div><span class="ebv" id="av'+i+'">0</span></div>'});
+  var g=$('gbars');g.innerHTML='';
+  GL.forEach(function(l,i){g.innerHTML+='<div class="eb"><span class="ebl" style="width:46px">'+l+'</span><div class="ebt"><div class="ebf" id="gb'+i+'" style="width:0%;background:'+GC[i]+'"></div></div><span class="ebv" id="gv'+i+'">0</span></div>'});
 })();
 
-// 清除按钮状态
-function clearB(){['b-df','b-on','b-ll','b-rl'].forEach(id=>{const b=$(id);b.className='tg-b'+(b.dataset.dis?' dis':'')})}
+function clearB(){['b-df','b-on','b-ll','b-rl'].forEach(function(id){var b=$(id);if(b)b.className='tg-b'})}
 
-// 切换后端
 async function setB(b){
-  try{
-    const r=await fetch('/api/set_backend',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({backend:b})});
-    if(r.ok){const d=await r.json();syncUI(d)}
-  }catch(e){console.error(e)}
-}
+  try{var r=await fetch('/api/set_backend',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({backend:b})});if(r.ok){var d=await r.json();syncUI(d)}}catch(e){}}
 
 function syncUI(d){
-  const s=d.system, m=s.backend;
-  // 按钮
+  var s=d.system, m=s.backend;
   clearB();
-  const map={'deepface':'b-df','onnx':'b-on','llm':'b-ll','rule':'b-rl'};
-  const onCls={'deepface':'on-df','onnx':'on-on','llm':'on-ll','rule':'on-rl'};
-  if(map[m]){const b=$(map[m]);b.className='tg-b '+onCls[m]}
-  // badge
-  const mb=$('method-badge');
-  const ml={'deepface':['df','DeepFace','fa-face-laugh-beam'],'onnx':['ok','ONNX','fa-microchip'],'llm':['llm','LLM','fa-wand-magic-sparkles'],'rule':['warn','规则','fa-ruler']};
-  const info=ml[s.emotion_method]||ml[m]||ml['rule'];
+  var map={deepface:'b-df',onnx:'b-on',llm:'b-ll',rule:'b-rl'};
+  var onCls={deepface:'on-df',onnx:'on-on',llm:'on-ll',rule:'on-rl'};
+  if(map[m]){var b=$(map[m]);if(b)b.className='tg-b '+onCls[m]}
+  var mb=$('method-badge');
+  var ml={deepface:['df','DeepFace','fa-face-laugh-beam'],onnx:['ok','ONNX','fa-microchip'],llm:['llm','LLM','fa-wand-magic-sparkles'],rule:['warn','规则','fa-ruler']};
+  var info=ml[s.emotion_method]||ml[m]||ml['rule'];
   mb.className='badge '+info[0];mb.querySelector('i').className='fa-solid '+info[2]+' style="font-size:9px"';mb.querySelector('span').textContent=info[1];
-  // 按钮可用性
-  $('b-df').dataset.dis=s.deepface?'':'1';$('b-df').className=$('b-df').className.replace(' dis','')+(s.deepface?'':' dis');
-  $('b-on').dataset.dis=s.onnx_emotion?'':'1';$('b-on').className=$('b-on').className.replace(' dis','')+(s.onnx_emotion?'':' dis');
-  $('b-ll').dataset.dis=s.llm?'':'1';$('b-ll').className=$('b-ll').className.replace(' dis','')+(s.llm?'':' dis');
-  $('b-rl').className=$('b-rl').className.replace(' dis','');
-  // 属性面板
-  const hasAttr=s.attr_method&&s.attr_method!=='none';
+  $('b-df').className='tg-b'+(s.deepface?' on-df':' dis');
+  $('b-on').className='tg-b'+(s.onnx_emotion?' on-on':' dis');
+  $('b-ll').className='tg-b'+(s.llm?' on-ll':' dis');
+  $('b-rl').className='tg-b on-rl';
+  // 属性面板：只看 attribute.method，不受情绪后端影响
+  var hasAttr=d.attribute&&d.attribute.method&&d.attribute.method!=='none';
   $('attr-ok').style.display=hasAttr?'':'none';
   $('attr-no').style.display=hasAttr?'none':'';
 }
 
 function updateUI(d){
-  tick++;const s=d.system;syncUI(d);
-  const p=d.person;
+  tick++;var s=d.system;syncUI(d);
+  var p=d.person;
   $('pd').className='dot '+(p.status==='present'?'on':p.status==='lost'?'lost':'off');
   $('pt').textContent={present:'Detected',lost:'Lost',offline:'Offline'}[p.status];
   $('pt').style.color=p.status==='present'?'var(--accent)':p.status==='lost'?'var(--warn)':'var(--danger)';
-  const sec=Math.floor(p.uptime||0);
+  var sec=Math.floor(p.uptime||0);
   $('ut').textContent=String(Math.floor(sec/60)).padStart(2,'0')+':'+String(sec%60).padStart(2,'0');
-  const e=d.emotion;const em=EM[e.current]||EM.neutral;
+  // 情绪
+  var e=d.emotion;var em=EM[e.current]||EM.neutral;
   $('ecn').textContent=em.cn;$('ecf').textContent=Math.round(e.confidence*100)+'%';
   $('etag').style.color=em.c;$('etag').style.borderColor=em.c;$('etag').style.background=em.b;
   $('etag').querySelector('i').className='fa-solid '+em.i;
   $('ei').textContent=em.cn;$('ei').style.color=em.c;
-  const sc=e.scores||{};const mx=Math.max(.01,...Object.values(sc));
-  const km={happy:'h',surprised:'s2',angry:'a',sad:'d2',neutral:'n',drowsy:'w'};
-  for(const k of Object.keys(EM)){const v=sc[k]||0;const b=$('b'+km[k]);const vl=$('v'+km[k]);if(b)b.style.width=(v/mx*100)+'%';if(vl)vl.textContent=v.toFixed(2)}
-  const a=d.attribute;
-  if(a.method&&a.method!=='none'&&a.age!==undefined){
+  var sc=e.scores||{};var mx=Math.max(0.01,Object.values(sc).map(function(v){return v}).reduce(function(a,b){return Math.max(a,b)},0));
+  var km={happy:'h',surprised:'s2',angry:'a',sad:'d2',neutral:'n',drowsy:'w'};
+  Object.keys(EM).forEach(function(k){var v=sc[k]||0;var b=$('b'+km[k]);var vl=$('v'+km[k]);if(b)b.style.width=(v/mx*100)+'%';if(vl)vl.textContent=v.toFixed(2)});
+  // 属性
+  var a=d.attribute;
+  var hasAttr=a&&a.method&&a.method!=='none'&&a.age!==undefined;
+  if(hasAttr){
     $('attr-ok').style.display='';$('attr-no').style.display='none';
     $('xa').textContent=a.age;$('xg').textContent=a.gender;
-    $('xg').style.color=a.gender==='Male'?'#38bdf8':'#f472b6';
+    $('xg').style.color=(a.gender==='Male')?'#38bdf8':'#f472b6';
     $('xac').textContent=a.age_confidence?Math.round(a.age_confidence*100)+'%':'';
     $('xgc').textContent=a.gender_confidence?Math.round(a.gender_confidence*100)+'%':'';
-    const ap=a.age_probs||{},amx=Math.max(.01,...Object.values(ap));
-    AL.forEach((l,i)=>{const v=ap[l]||0;$('ab'+i).style.width=(v/amx*100)+'%';$('av'+i).textContent=(v*100).toFixed(0)});
-    const gp=a.gender_probs||{};
-    GL.forEach((l,i)=>{const v=gp[l]||0;$('gb'+i).style.width=(v*100)+'%';$('gv'+i).textContent=(v*100).toFixed(0)});
+    var ap=a.age_probs||{},amx=Math.max(0.01,Object.values(ap).reduce(function(a,b){return Math.max(a,b)},0));
+    AL.forEach(function(l,i){var v=ap[l]||0;$('ab'+i).style.width=(v/amx*100)+'%';$('av'+i).textContent=(v*100).toFixed(0)});
+    var gp=a.gender_probs||{};
+    GL.forEach(function(l,i){var v=gp[l]||0;$('gb'+i).style.width=(v*100)+'%';$('gv'+i).textContent=(v*100).toFixed(0)});
   }else{$('attr-ok').style.display='none';$('attr-no').style.display=''}
-  const f=d.focus;const fs=f.score;
+  // 专注度
+  var f=d.focus;var fs=f.score;
   $('fn').innerHTML=Math.round(fs)+'<span class="gu">%</span>';
   $('fn').style.color=fs>60?'var(--accent)':fs>30?'var(--warn)':'var(--danger)';
   $('ga').setAttribute('stroke-dashoffset',(251.3*(1-Math.max(0,Math.min(100,fs))/100)).toFixed(1));
   $('me').textContent=f.eye_openness.toFixed(3);$('me').style.color=f.eye_openness<.2?'var(--danger)':'';
   $('my2').textContent=f.head_yaw.toFixed(3);$('mp').textContent=f.head_pitch.toFixed(3);
   $('mb').textContent=f.blink_rate.toFixed(1)+' /min';$('mf').textContent=f.head_motion.toFixed(4);
-  const m=d.motion;const mi=m.intensity;
+  // 活动量
+  var mo=d.motion;var mi=mo.intensity;
   $('mtn').innerHTML=mi.toFixed(1)+'<span class="gu">%</span>';
   $('mtn').style.color=mi<20?'var(--accent)':mi<50?'var(--warn)':'var(--danger)';
-  $('mac').textContent=m.accumulated.toFixed(1);$('mi2').textContent=mi.toFixed(1)+'%';
+  $('mac').textContent=mo.accumulated.toFixed(1);$('mi2').textContent=mi.toFixed(1)+'%';
+  // 趋势图
   if(tick%3===0){
-    const mh=m.history||[];
-    mc.data.labels=mh.map(()=>{});mc.data.datasets[0].data=mh;mc.update('none');
-    const fh=f.history||[];
-    fc.data.labels=fh.map(()=>{});fc.data.datasets[0].data=fh;
+    var mh=mo.history||[];
+    mc.data.labels=mh.map(function(){return ''});mc.data.datasets[0].data=mh;mc.update('none');
+    var fh=f.history||[];
+    fc.data.labels=fh.map(function(){return ''});fc.data.datasets[0].data=fh;
     fc.data.datasets[0].borderColor=fs>60?'#00e5a0':fs>30?'#f59e0b':'#ef4444';fc.update('none');
-    mtc.data.labels=mh.map(()=>{});mtc.data.datasets[0].data=mh;mtc.update('none');
+    mtc.data.labels=mh.map(function(){return ''});mtc.data.datasets[0].data=mh;mtc.update('none');
   }
+  // 系统栏
   $('lfp').textContent=s.local_fps.toFixed(0)+' fps';$('ifp').textContent=s.ip_fps.toFixed(0)+' fps';
   $('sl').textContent='Local: '+s.local_fps.toFixed(0)+' fps';$('si').textContent='IP: '+s.ip_fps.toFixed(0)+' fps';
   $('sp').textContent='Person: '+(p.detected?'Yes':'No');
 }
-async function poll(){try{const r=await fetch('/api/status');if(r.ok)updateUI(await r.json())}catch(e){}}
+async function poll(){try{var r=await fetch('/api/status');if(r.ok)updateUI(await r.json())}catch(e){}}
 setInterval(poll,200);poll();
 </script>
 </body>

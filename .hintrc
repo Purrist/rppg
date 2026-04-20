@@ -3,6 +3,13 @@
     "development"
   ],
   "hints": {
-    "typescript-config/is-valid": "off"
-  }
+    "typescript-config/is-valid": "off",
+    "no-inline-styles": "off"
+  },
+  "browserslist": [
+    "defaults",
+    "not ie 11",
+    "not ios_saf <= 18.6",
+    "not safari <= 18.6"
+  ]
 }

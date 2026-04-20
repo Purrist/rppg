@@ -1,12 +1,10 @@
-"""feel.py - 多模态感知系统 V4.0
+"""feel.py - 多模态感知系统 V4.1
 
-后端可选：
-  情绪+属性：DeepFace（最准，自动预处理对齐，pip install deepface）
-  情绪+属性：ONNX（FERPlus + age/gender GoogleNet，轻量本地）
-  情绪-only：规则（MediaPipe 关键点，始终可用）
-  情绪-only：大模型（OpenAI 兼容 Vision API，可选）
-
-其他模块不变：注意力 / 运动量 / ThreadedCamera 低延迟
+模块：情绪 + 属性(年龄/性别) + 专注度 + 活动量
+情绪后端：DeepFace / ONNX FERPlus / 规则 / LLM（可切换，互不影响）
+属性后端：ONNX AgeGender（始终运行，不受情绪切换影响）
+专注度：MediaPipe FaceMesh（头部姿态+眨眼+面部运动）
+活动量：MediaPipe Pose（关键点位移）
 """
 
 import cv2
@@ -21,9 +19,9 @@ from collections import deque
 
 app = Flask(__name__)
 
-# ═══════════════════════════════════════════════════
+# ═══════════════════════════════════════════
 # 配置
-# ═══════════════════════════════════════════════════
+# ═══════════════════════════════════════════
 LOCAL_CAMERA_ID = 1
 DEFAULT_IP_CAMERA_URL = "http://10.215.158.45:8080/video"
 
@@ -33,7 +31,6 @@ FERPLUS_PATH = os.path.join(MODELS_DIR, 'emotion-ferplus-8.onnx')
 AGE_PATH = os.path.join(MODELS_DIR, 'age_googlenet.onnx')
 GENDER_PATH = os.path.join(MODELS_DIR, 'gender_googlenet.onnx')
 
-# LLM（可选，设为 None 则不启用）
 LLM_API_URL = None
 LLM_API_KEY = None
 LLM_MODEL = None
@@ -76,8 +73,6 @@ FER8TO6 = {'neutral': 'neutral', 'happiness': 'happy', 'surprise': 'surprised',
 AGE_LABELS = ['(0-2)', '(4-6)', '(8-12)', '(15-20)',
               '(25-32)', '(38-43)', '(48-53)', '(60-100)']
 GENDER_LABELS = ['Male', 'Female']
-
-# DeepFace 7 类 → 系统 6 类
 DF_TO_6 = {'happy': 'happy', 'surprise': 'surprised', 'angry': 'angry',
            'sad': 'sad', 'neutral': 'neutral', 'disgust': 'angry', 'fear': 'sad'}
 
@@ -85,22 +80,19 @@ try:
     import onnxruntime as ort; HAS_ORT = True
 except ImportError:
     HAS_ORT = False; print("[WARN] onnxruntime 未安装")
-
 try:
-    from deepface import DeepFace; HAS_DF = True
-    print("[OK] deepface 已导入")
+    from deepface import DeepFace; HAS_DF = True; print("[OK] deepface")
 except ImportError:
     HAS_DF = False; print("[INFO] deepface 未安装 (pip install deepface)")
-
 try:
     import requests; HAS_REQ = True
 except ImportError:
     HAS_REQ = False
 
 
-# ═══════════════════════════════════════════════════
+# ═══════════════════════════════════════════
 # ThreadedCamera
-# ═══════════════════════════════════════════════════
+# ═══════════════════════════════════════════
 class ThreadedCamera:
     def __init__(self, src, buffer_size=1):
         self.cap = cv2.VideoCapture(src)
@@ -133,79 +125,51 @@ class ThreadedCamera:
         except: pass
 
 
-# ═══════════════════════════════════════════════════
-# DeepFace 后端（情绪 + 年龄 + 性别，一次调用）
-# ═══════════════════════════════════════════════════
+# ═══════════════════════════════════════════
+# DeepFace（情绪+年龄+性别）
+# ═══════════════════════════════════════════
 class DeepFaceBackend:
-    """
-    pip install deepface
-    一次 analyze() 返回情绪 7 类 + 年龄 + 性别。
-    DeepFace 内部自动处理预处理、对齐，准确率最高。
-    """
     def __init__(self):
-        self.ready = HAS_DF
-        self._warm = False
+        self.ready = HAS_DF; self._warm = False
 
     def analyze(self, face_bgr):
-        """返回 {'emotion_scores': {...}, 'age': int, 'gender': str} 或 None"""
         if not self.ready or face_bgr is None or face_bgr.size == 0:
             return None
         try:
             result = DeepFace.analyze(
-                face_bgr,
-                actions=['emotion', 'age', 'gender'],
-                enforce_detection=False,
-                silent=True)
+                face_bgr, actions=['emotion', 'age', 'gender'],
+                enforce_detection=False, silent=True)
             self._warm = True
-            # 兼容不同版本返回格式
-            if isinstance(result, list):
-                r = result[0]
-            elif hasattr(result, 'iloc'):
-                r = result.iloc[0].to_dict()
-            elif isinstance(result, dict):
-                r = result
-            else:
-                return None
-
-            # 情绪 7 类 → 6 类
+            if isinstance(result, list): r = result[0]
+            elif hasattr(result, 'iloc'): r = result.iloc[0].to_dict()
+            elif isinstance(result, dict): r = result
+            else: return None
             raw_em = r.get('emotion', {})
-            scores = {k: 0.0 for k in
-                      ['happy', 'surprised', 'angry', 'sad', 'neutral', 'drowsy']}
+            scores = {k: 0.0 for k in ['happy','surprised','angry','sad','neutral','drowsy']}
             for k, v in raw_em.items():
                 scores[DF_TO_6.get(k, 'neutral')] += float(v)
             total = sum(scores.values())
             if total > 0:
                 for k in scores: scores[k] /= total
-
-            # 年龄
             age = r.get('age', 0)
-            if isinstance(age, (list, tuple)):
-                age = age[0] if age else 0
+            if isinstance(age, (list, tuple)): age = age[0] if age else 0
             age = int(age)
-
-            # 性别
             g = r.get('dominant_gender', r.get('gender', 'Man'))
-            if isinstance(g, (list, tuple)):
-                g = g[0] if g else 'Man'
+            if isinstance(g, (list, tuple)): g = g[0] if g else 'Man'
             gender = 'Male' if str(g).lower().startswith('man') else 'Female'
-
-            return {
-                'emotion_scores': {k: round(v, 3) for k, v in scores.items()},
-                'age': age,
-                'gender': gender,
-            }
+            return {'emotion_scores': {k: round(v, 3) for k, v in scores.items()},
+                    'age': age, 'gender': gender}
         except Exception as e:
             if not self._warm:
-                self._warm = True  # 首次可能下载模型，忽略错误
-                print(f"[DeepFace] 首次加载中... ({e})")
+                self._warm = True; print(f"[DeepFace] 首次加载中... ({e})")
             return None
 
 
-# ═══════════════════════════════════════════════════
-# FERPlus ONNX 后端（情绪 only）
-# ═══════════════════════════════════════════════════
+# ═══════════════════════════════════════════
+# FERPlus ONNX（情绪 only）
+# ═══════════════════════════════════════════
 class FERPlusBackend:
-    """ONNX Model Zoo - FERPlus 官方预处理：灰度 64×64，0-255 原始像素值"""
+    """官方预处理：灰度 64x64，0-255 原始像素值，不做归一化"""
     def __init__(self, path):
         if not HAS_ORT: raise RuntimeError("onnxruntime 未安装")
         if not os.path.isfile(path): raise FileNotFoundError(path)
@@ -238,11 +202,11 @@ class FERPlusBackend:
         except: return None
 
 
-# ═══════════════════════════════════════════════════
-# Age/Gender ONNX 后端（属性 only）
-# ═══════════════════════════════════════════════════
+# ═══════════════════════════════════════════
+# Age/Gender ONNX（属性 only，始终运行）
+# ═══════════════════════════════════════════
 class AgeGenderBackend:
-    """官方预处理：BGR→RGB，224×224，减均值 [104,117,123]"""
+    """官方预处理：BGR→RGB，224x224，减均值 [104,117,123]"""
     MEAN = np.array([104.0, 117.0, 123.0], dtype=np.float32)
 
     def __init__(self, age_path, gender_path):
@@ -256,8 +220,7 @@ class AgeGenderBackend:
         self.a_out = self.age_s.get_outputs()[0].name
         self.g_in = self.gen_s.get_inputs()[0].name
         self.g_out = self.gen_s.get_outputs()[0].name
-        self.ready = True
-        print(f"[OK] Age/Gender ONNX")
+        self.ready = True; print("[OK] Age/Gender ONNX")
 
     def predict(self, face_bgr):
         if face_bgr is None or face_bgr.size == 0: return None
@@ -277,9 +240,9 @@ class AgeGenderBackend:
         except: return None
 
 
-# ═══════════════════════════════════════════════════
-# LLM Vision 后端（情绪 only，可选）
-# ═══════════════════════════════════════════════════
+# ═══════════════════════════════════════════
+# LLM Vision（情绪 only，可选）
+# ═══════════════════════════════════════════
 class LLMBackend:
     PROMPT = ("Look at this face and respond with ONLY ONE emotion word. "
               "Choose: happy, surprised, angry, sad, neutral, drowsy. Answer:")
@@ -293,8 +256,7 @@ class LLMBackend:
     def __init__(self, url, key, model):
         if not HAS_REQ: raise RuntimeError("requests 未安装")
         self.url = url.rstrip('/'); self.key = key or "none"; self.model = model
-        self.ready = True
-        print(f"[OK] LLM: {model} @ {url}")
+        self.ready = True; print(f"[OK] LLM: {model} @ {url}")
 
     def predict(self, face_bgr):
         if face_bgr is None or face_bgr.size == 0: return None
@@ -324,9 +286,9 @@ class LLMBackend:
         except: return None
 
 
-# ═══════════════════════════════════════════════════
+# ═══════════════════════════════════════════
 # 主处理器
-# ═══════════════════════════════════════════════════
+# ═══════════════════════════════════════════
 class Processor:
     def __init__(self):
         self.local_cap = None; self.ip_cap = None
@@ -334,17 +296,27 @@ class Processor:
         self.person_detected_local = False; self.person_detected_ip = False
         self.person_detected = False; self.person_last_seen = 0.0
         self.person_status = "offline"
+
+        # 情绪
         self.emotion = "neutral"; self.emotion_confidence = 0.0
         self.emotion_scores = {}; self.emotion_history = deque(maxlen=60)
         self.emotion_method = "none"
+        self.backend = "auto"  # deepface / onnx / rule / llm / auto
+
+        # 属性（始终独立运行）
         self.face_attribute = None; self.attr_method = "none"
+
+        # 专注度
         self.focus_score = 50.0; self.focus_history = deque(maxlen=120)
         self.blink_count = 0; self.blink_rate = 0.0
         self.head_yaw = 0.0; self.head_pitch = 0.0
         self.head_motion_score = 0.0; self.eye_openness = 0.0
+
+        # 活动量
         self.motion_intensity = 0.0; self.motion_history = deque(maxlen=120)
         self.motion_accumulator = 0.0; self.motion_window = deque(maxlen=MOTION_WINDOW)
         self.prev_pose_points = None
+
         self.local_fps = 0.0; self.ip_fps = 0.0
         self._lfc = 0; self._ifc = 0; self._ft = time.time()
         self.local_frame_out = None; self.ip_frame_out = None
@@ -356,16 +328,10 @@ class Processor:
         self.start_time = time.time()
         self.face_mesh = None; self.face_detection = None; self.pose_detector = None
 
-        # ---- 后端 ----
-        self.backend = "auto"   # deepface / onnx / rule / llm / auto
-
+        # 后端实例
         self.df = DeepFaceBackend()
-        self.ferplus = None
-        self.agnet = None
-        self.llm = None
-
-        self._df_busy = False
-        self._llm_busy = False
+        self.ferplus = None; self.agnet = None; self.llm = None
+        self._df_busy = False; self._llm_busy = False
 
     def start(self):
         print("[INIT] MediaPipe ...")
@@ -379,34 +345,32 @@ class Processor:
             min_detection_confidence=0.5, min_tracking_confidence=0.5)
         print("[OK] MediaPipe")
 
-        # 加载 ONNX
+        # 加载 ONNX 情绪
         if HAS_ORT and os.path.isfile(FERPLUS_PATH):
             try: self.ferplus = FERPlusBackend(FERPLUS_PATH)
             except Exception as e: print(f"[WARN] FERPlus: {e}")
+        # 加载 ONNX 属性（始终运行，不受情绪后端影响）
         if HAS_ORT and os.path.isfile(AGE_PATH) and os.path.isfile(GENDER_PATH):
-            try: self.agnet = AgeGenderBackend(AGE_PATH, GENDER_PATH)
+            try:
+                self.agnet = AgeGenderBackend(AGE_PATH, GENDER_PATH)
+                self.attr_method = "onnx"
+                print("[INFO] 属性模型: age+gender ONNX (始终运行)")
             except Exception as e: print(f"[WARN] AgeGender: {e}")
-
         # 加载 LLM
         if LLM_API_URL and LLM_MODEL:
             try: self.llm = LLMBackend(LLM_API_URL, LLM_API_KEY, LLM_MODEL)
             except Exception as e: print(f"[WARN] LLM: {e}")
 
-        # 默认后端
-        if self.df.ready:
-            self.backend = "deepface"
-        elif self.ferplus:
-            self.backend = "onnx"
-        else:
-            self.backend = "rule"
+        # 默认情绪后端
+        if self.df.ready: self.backend = "deepface"
+        elif self.ferplus: self.backend = "onnx"
+        else: self.backend = "rule"
 
         # 摄像头
         self.local_cap = ThreadedCamera(LOCAL_CAMERA_ID)
         if self.local_cap.isOpened():
-            self.local_running = True
-            print(f"[OK] 本地摄像头 {LOCAL_CAMERA_ID}")
-        else: print(f"[WARN] 本地摄像头失败")
-
+            self.local_running = True; print(f"[OK] 本地摄像头 {LOCAL_CAMERA_ID}")
+        else: print("[WARN] 本地摄像头失败")
         self.ip_cap = ThreadedCamera(DEFAULT_IP_CAMERA_URL)
         if self.ip_cap.isOpened():
             self.ip_running = True; print("[OK] IP 摄像头")
@@ -414,7 +378,6 @@ class Processor:
 
         if not self.local_running and not self.ip_running:
             raise RuntimeError("摄像头无法打开")
-
         if self.local_running:
             threading.Thread(target=self._local_w, daemon=True).start()
         if self.ip_running:
@@ -428,17 +391,12 @@ class Processor:
     def set_backend(self, b):
         with self.lock:
             if b == 'auto':
-                self.backend = 'deepface' if self.df.ready else (
-                    'onnx' if self.ferplus else 'rule')
-            elif b == 'deepface' and self.df.ready:
-                self.backend = 'deepface'
-            elif b == 'onnx' and self.ferplus:
-                self.backend = 'onnx'
-            elif b == 'llm' and self.llm:
-                self.backend = 'llm'
-            elif b == 'rule':
-                self.backend = 'rule'
-            print(f"[INFO] 后端: {self.backend}")
+                self.backend = 'deepface' if self.df.ready else ('onnx' if self.ferplus else 'rule')
+            elif b == 'deepface' and self.df.ready: self.backend = 'deepface'
+            elif b == 'onnx' and self.ferplus: self.backend = 'onnx'
+            elif b == 'llm' and self.llm: self.backend = 'llm'
+            elif b == 'rule': self.backend = 'rule'
+            print(f"[INFO] 情绪后端: {self.backend}")
 
     def _crop_oval(self, frame, lm, pad=0.18):
         h, w = frame.shape[:2]
@@ -467,6 +425,7 @@ class Processor:
             self.local_fps = self._lfc / dt; self.ip_fps = self._ifc / dt
             self._lfc = 0; self._ifc = 0; self._ft = now
 
+    # ──────── 活动量 ────────
     def _compute_motion(self, pl):
         pts = np.array([(l.x, l.y) for l in pl.landmark])
         if self.prev_pose_points is not None:
@@ -477,62 +436,44 @@ class Processor:
             self.motion_history.append(round(self.motion_intensity, 1))
         self.prev_pose_points = pts.copy()
 
-    # ---- 情绪 + 属性 ----
-    def _run_inference(self, crop, lm):
-        """根据当前后端，执行情绪识别和属性识别"""
+    # ──────── 情绪（根据后端分发） ────────
+    def _run_emotion(self, crop, lm, is_drowsy):
         self._frame_cnt += 1
 
-        # 困倦检测（所有后端通用）
+        if self.backend == "deepface" and not self._df_busy:
+            if self._frame_cnt % DEEPFACE_INTERVAL == 0 and crop is not None:
+                self._df_busy = True; cp = crop.copy()
+                threading.Thread(target=self._df_infer, args=(cp, is_drowsy), daemon=True).start()
+            return
+
+        if self.backend == "llm" and self.llm and not self._llm_busy:
+            if self._frame_cnt % LLM_INTERVAL == 0 and crop is not None:
+                self._llm_busy = True; cp = crop.copy()
+                threading.Thread(target=self._llm_infer, args=(cp, is_drowsy), daemon=True).start()
+            return
+
+        if self.backend == "onnx" and self.ferplus and crop is not None:
+            if self._frame_cnt % ONNX_EMOTION_INTERVAL == 0:
+                sc = self.ferplus.predict(crop)
+                if sc:
+                    if is_drowsy:
+                        sc['drowsy'] = max(sc.get('drowsy', 0), 0.6)
+                        for k in sc:
+                            if k != 'drowsy': sc[k] *= 0.3
+                        t = sum(sc.values())
+                        if t > 0:
+                            for k in sc: sc[k] /= t
+                    self.emotion_scores = sc; self._smooth(sc, "onnx")
+            return
+
+        # 规则兜底
         pts = np.array([(p.x, p.y, p.z) for p in lm.landmark])
         fh = np.linalg.norm(pts[10][:2] - pts[152][:2])
-        is_drowsy = False; ear = 0.3; mo = 0.0
+        ear = 0.3; mo = 0.0
         if fh > 1e-6:
             le = abs(pts[159][1] - pts[145][1]) / (abs(pts[33][0] - pts[133][0]) + 1e-8)
             re = abs(pts[386][1] - pts[374][1]) / (abs(pts[362][0] - pts[263][0]) + 1e-8)
-            ear = (le + re) / 2; self.eye_openness = ear
-            mo = abs(pts[13][1] - pts[14][1]) / fh
-            if ear < 0.15 and mo > 0.04: is_drowsy = True
-
-        # ---- DeepFace ----
-        if self.backend == "deepface" and not self._df_busy:
-            if self._frame_cnt % DEEPFACE_INTERVAL == 0 and crop is not None:
-                self._df_busy = True
-                cp = crop.copy()
-                threading.Thread(target=self._df_infer,
-                                 args=(cp, is_drowsy), daemon=True).start()
-            return  # 保留上次结果
-
-        # ---- LLM ----
-        if self.backend == "llm" and self.llm and not self._llm_busy:
-            if self._frame_cnt % LLM_INTERVAL == 0 and crop is not None:
-                self._llm_busy = True
-                cp = crop.copy()
-                threading.Thread(target=self._llm_infer,
-                                 args=(cp, is_drowsy), daemon=True).start()
-            return
-
-        # ---- ONNX ----
-        if self.backend == "onnx":
-            if self.ferplus and crop is not None:
-                if self._frame_cnt % ONNX_EMOTION_INTERVAL == 0:
-                    sc = self.ferplus.predict(crop)
-                    if sc:
-                        if is_drowsy:
-                            sc['drowsy'] = max(sc.get('drowsy', 0), 0.6)
-                            for k in sc:
-                                if k != 'drowsy': sc[k] *= 0.3
-                            t = sum(sc.values())
-                            if t > 0:
-                                for k in sc: sc[k] /= t
-                        self.emotion_scores = sc
-                        self._smooth(sc, "onnx")
-            if self.agnet and crop is not None:
-                if self._frame_cnt % ONNX_ATTR_INTERVAL == 0:
-                    attr = self.agnet.predict(crop)
-                    if attr: self.face_attribute = attr; self.attr_method = "onnx"
-            return
-
-        # ---- 规则 ----
+            ear = (le + re) / 2; mo = abs(pts[13][1] - pts[14][1]) / fh
         self.emotion_method = "rule"
         self._rule_emotion(pts, fh, ear, mo)
 
@@ -549,13 +490,7 @@ class Processor:
                     if t > 0:
                         for k in sc: sc[k] /= t
                 with self.lock:
-                    self.emotion_scores = sc
-                    self._smooth(sc, "deepface")
-                    self.face_attribute = {
-                        'age': r['age'], 'gender': r['gender'],
-                        'age_confidence': 0.0, 'gender_confidence': 0.0,
-                        'age_probs': {}, 'gender_probs': {}}
-                    self.attr_method = "deepface"
+                    self.emotion_scores = sc; self._smooth(sc, "deepface")
         except: pass
         finally: self._df_busy = False
 
@@ -571,8 +506,7 @@ class Processor:
                     if t > 0:
                         for k in sc: sc[k] /= t
                 with self.lock:
-                    self.emotion_scores = sc
-                    self._smooth(sc, "llm")
+                    self.emotion_scores = sc; self._smooth(sc, "llm")
         except: pass
         finally: self._llm_busy = False
 
@@ -611,6 +545,7 @@ class Processor:
         self.emotion_scores = {k: round(v, 3) for k, v in s.items()}
         self._smooth(s, "rule")
 
+    # ──────── 专注度 ────────
     def _compute_focus(self, lm):
         pts = np.array([(p.x, p.y, p.z) for p in lm.landmark])
         fh = np.linalg.norm(pts[10][:2] - pts[152][:2])
@@ -642,6 +577,7 @@ class Processor:
         self.focus_score = self.focus_score * FOCUS_SMOOTH + float(np.clip(sc, 0, 100)) * (1 - FOCUS_SMOOTH)
         self.focus_history.append(round(self.focus_score, 1))
 
+    # ──────── 绘制 ────────
     def _draw_pose(self, f, pl, w, h):
         ps = [(int(l.x * w), int(l.y * h)) for l in pl.landmark]
         for c in mp.solutions.pose.POSE_CONNECTIONS:
@@ -658,6 +594,7 @@ class Processor:
                 if a < len(ps) and b < len(ps):
                     cv2.line(f, ps[a], ps[b], (0, 200, 140), 1)
 
+    # ──────── 本地摄像头线程（活动量） ────────
     def _local_w(self):
         while self.running:
             try:
@@ -688,6 +625,7 @@ class Processor:
                     self._update_person(); self._update_fps(); self.local_frame_out = frame
             except: time.sleep(0.01)
 
+    # ──────── IP 摄像头线程（情绪+属性+专注度） ────────
     def _ip_w(self):
         while self.running:
             try:
@@ -702,18 +640,45 @@ class Processor:
                     mr = self.face_mesh.process(rgb)
                     has_m = mr.multi_face_landmarks is not None and len(mr.multi_face_landmarks) > 0
                 else: has_m = False
+
                 with self.lock:
                     self._ifc += 1
                     if has_m:
                         self.person_detected_ip = True
                         lm = mr.multi_face_landmarks[0]
                         crop = self._crop_oval(frame, lm)
-                        self._run_inference(crop, lm)
+
+                        # 困倦检测（所有后端通用）
+                        pts = np.array([(p.x, p.y, p.z) for p in lm.landmark])
+                        fh = np.linalg.norm(pts[10][:2] - pts[152][:2])
+                        is_drowsy = False
+                        if fh > 1e-6:
+                            le = abs(pts[159][1] - pts[145][1]) / (abs(pts[33][0] - pts[133][0]) + 1e-8)
+                            re = abs(pts[386][1] - pts[374][1]) / (abs(pts[362][0] - pts[263][0]) + 1e-8)
+                            ear = (le + re) / 2; self.eye_openness = ear
+                            mo = abs(pts[13][1] - pts[14][1]) / fh
+                            if ear < 0.15 and mo > 0.04: is_drowsy = True
+
+                        # 情绪（按选择的情绪后端）
+                        self._run_emotion(crop, lm, is_drowsy)
+
+                        # 属性（始终用 ONNX，不受情绪后端影响）
+                        if self.agnet and crop is not None:
+                            if self._frame_cnt % ONNX_ATTR_INTERVAL == 0:
+                                attr = self.agnet.predict(crop)
+                                if attr:
+                                    self.face_attribute = attr
+                                    self.attr_method = "onnx"
+
+                        # 专注度
                         self._compute_focus(lm)
+
+                        # 绘制
                         self._draw_face(frame, lm, w, h)
                         cv2.rectangle(frame, (0, 0), (w, 72), (0, 0, 0), -1)
                         cn, color = EMOTION_META.get(self.emotion, ('?', (150, 150, 150)))
-                        mt = {"deepface": "[DF]", "onnx": "[ON]", "llm": "[LLM]", "rule": "[R]"}.get(self.emotion_method, "[?]")
+                        mt = {"deepface": "[DF]", "onnx": "[ON]", "llm": "[LLM]", "rule": "[R]"}.get(
+                            self.emotion_method, "[?]")
                         cv2.putText(frame, f"{mt} {cn} ({self.emotion_confidence:.0%})",
                                     (10, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
                         fc = ((0, 229, 160) if self.focus_score > 60 else
@@ -730,12 +695,13 @@ class Processor:
                                         cv2.FONT_HERSHEY_SIMPLEX, 0.38, (150, 150, 150), 1)
                         bw = int(w * min(self.focus_score, 100) / 100)
                         cv2.rectangle(frame, (0, h - 4), (bw, h), fc, -1)
+
                         now = time.time()
                         if now - self._dbg_t > 3.0:
                             self._dbg_t = now
                             t3 = sorted(self.emotion_scores.items(), key=lambda x: -x[1])[:3]
                             print(f"[DBG] {self.emotion}({self.emotion_confidence:.2f}) "
-                                  f"{self.backend}/{self.emotion_method} TOP3:{t3}")
+                                  f"emo:{self.emotion_method} attr:{self.attr_method} TOP3:{t3}")
                     else:
                         self.person_detected_ip = False
                         self.emotion = "neutral"
@@ -747,6 +713,7 @@ class Processor:
                     self._update_person(); self._update_fps(); self.ip_frame_out = frame
             except: time.sleep(0.01)
 
+    # ──────── API 数据 ────────
     def get_status(self):
         with self.lock:
             r = {
@@ -781,7 +748,8 @@ class Processor:
                            'onnx_emotion': self.ferplus is not None,
                            'onnx_attr': self.agnet is not None,
                            'llm': self.llm is not None}}
-            if self.face_attribute: r['attribute'].update(self.face_attribute)
+            if self.face_attribute:
+                r['attribute'].update(self.face_attribute)
             return r
 
 
@@ -792,7 +760,6 @@ processor.start()
 def index():
     p = os.path.join(SCRIPT_DIR, 'camm.html')
     return send_file(p) if os.path.exists(p) else "<h1>camm.html not found</h1>"
-
 
 def _stream(fa, label, dw=640, dh=360):
     while processor.running:
@@ -807,7 +774,6 @@ def _stream(fa, label, dw=640, dh=360):
             ok, j = cv2.imencode('.jpg', ph, [cv2.IMWRITE_JPEG_QUALITY, 50])
             if ok: yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + j.tobytes() + b'\r\n')
         time.sleep(0.033)
-
 
 @app.route('/video_local')
 def video_local():
@@ -834,9 +800,10 @@ def api_set_backend():
 
 if __name__ == '__main__':
     print("=" * 60)
-    print(f"  V4.0 | Backend: {processor.backend}")
-    print(f"  DeepFace: {'YES' if processor.df.ready else 'NO (pip install deepface)'}")
-    print(f"  ONNX: emotion={'YES' if processor.ferplus else 'NO'} attr={'YES' if processor.agnet else 'NO'}")
+    print(f"  V4.1 | 情绪后端: {processor.backend}")
+    print(f"  DeepFace: {'YES' if processor.df.ready else 'NO'}")
+    print(f"  ONNX 情绪: {'YES' if processor.ferplus else 'NO'}")
+    print(f"  ONNX 属性: {'YES' if processor.agnet else 'NO'} (始终运行)")
     print(f"  LLM: {'YES' if processor.llm else 'NO'}")
     print(f"  http://localhost:5000")
     print("=" * 60)

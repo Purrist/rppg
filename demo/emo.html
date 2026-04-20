@@ -1,578 +1,175 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>实时情绪识别系统</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+import cv2
+import base64
+import time
+import threading
+import numpy as np
+import onnxruntime as ort
+from flask import Flask, render_template, Response, request, jsonify
+from deepface import DeepFace
+
+app = Flask(__name__)
+
+# ===================== 固定配置 =====================
+IP_CAMERA_URL = "http://10.215.158.45:8080/video"  # 仅保留IP摄像头
+ONNX_MODEL_PATH = r"C:\Users\purriste\Desktop\PYProject\rppg\backend\core\models\emotion-ferplus-8.onnx"
+
+# 情绪标签（FER+ 8类）
+EMOTION_LABELS = ["neutral", "happiness", "surprise", "sadness",
+                  "anger", "disgust", "fear", "contempt"]
+
+# 全局识别方法切换（deepface / onnx）
+current_method = "deepface"
+
+# 加载ONNX模型
+ort_session = ort.InferenceSession(ONNX_MODEL_PATH)
+
+
+# ===================== 核心情绪处理器（完全按你的参考代码重写） =====================
+class EmotionProcessor:
+    def __init__(self, video_url):
+        self.cap = cv2.VideoCapture(video_url)
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+        self.raw_frame = None
+        self.latest_result = {"emotion": "neutral", "confidence": 0, "region": None}
+        self.running = True
+
+        # 双线程：采集 + 分析
+        threading.Thread(target=self._capture_loop, daemon=True).start()
+        threading.Thread(target=self._analysis_loop, daemon=True).start()
+
+    def _capture_loop(self):
+        """视频帧采集线程"""
+        while self.running:
+            ret, frame = self.cap.read()
+            if ret:
+                self.raw_frame = frame
+            else:
+                self.cap.release()
+                self.cap = cv2.VideoCapture(IP_CAMERA_URL)
+                time.sleep(0.01)
+
+    def _analysis_loop(self):
+        """情绪分析线程（支持DeepFace + ONNX双方法）"""
+        global current_method
+        while self.running:
+            if self.raw_frame is None:
+                time.sleep(0.1)
+                continue
+
+            try:
+                # ============= DeepFace =============
+                if current_method == "deepface":
+                    res = DeepFace.analyze(
+                        self.raw_frame,
+                        actions=['emotion'],
+                        enforce_detection=False,
+                        detector_backend='mediapipe',
+                        silent=True
+                    )
+                    if res:
+                        r = res[0]
+                        emo = r['dominant_emotion']
+                        conf = int(r['emotion'][emo])
+                        self.latest_result = {
+                            "emotion": emo,
+                            "confidence": conf,
+                            "region": r['region']
+                        }
+
+                # ============= ONNX-FER+ =============
+                elif current_method == "onnx":
+                    gray = cv2.cvtColor(self.raw_frame, cv2.COLOR_BGR2GRAY)
+                    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+                    faces = face_cascade.detectMultiScale(gray, 1.1, 4)
+
+                    if len(faces) > 0:
+                        x, y, w, h = faces[0]
+                        face_gray = gray[y:y + h, x:x + w]
+
+                        # ONNX 预处理
+                        face = cv2.resize(face_gray, (64, 64))
+                        face = face.astype(np.float32) / 255.0
+                        face = np.expand_dims(face, axis=(0, 1))  # [1,1,64,64]
+
+                        out = ort_session.run(None, {"input": face})
+                        idx = np.argmax(out[0][0])
+                        emo = EMOTION_LABELS[idx]
+                        conf = int(float(out[0][0][idx]) * 100)
+
+                        self.latest_result = {
+                            "emotion": emo,
+                            "confidence": conf,
+                            "region": {"x": x, "y": y, "w": w, "h": h}
+                        }
+
+            except Exception:
+                pass
+
+            time.sleep(0.6)
+
+    def get_ui_frame(self):
+        """获取用于前端展示的帧（base64 + 情绪结果）"""
+        if self.raw_frame is None:
+            return None
+
+        frame = self.raw_frame.copy()
+        res = self.latest_result
+
+        # 画框（橙色主题色）
+        if res.get("region"):
+            r = res["region"]
+            x, y, w, h = r['x'], r['y'], r['w'], r['h']
+            color = (34, 114, 255)  # FF7222 橙色
+            cv2.rectangle(frame, (x, y), (x + w, y + h), color, 3)
+
+            # 标注情绪
+            text = f"{res['emotion']} ({res['confidence']}%)"
+            cv2.putText(frame, text, (x, y - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
+
+        # 压缩为JPEG
+        _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        return {
+            "image": base64.b64encode(buffer).decode('utf-8'),
+            "emotion": res["emotion"],
+            "confidence": res["confidence"]
         }
-        
-        body {
-            font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-            color: #eee;
-            min-height: 100vh;
-            padding: 20px;
-        }
-        
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-        
-        h1 {
-            text-align: center;
-            margin-bottom: 20px;
-            font-size: 28px;
-            background: linear-gradient(90deg, #00d4ff, #7b2cbf);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-        
-        .control-panel {
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 20px;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            display: flex;
-            flex-wrap: wrap;
-            gap: 20px;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .control-group {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-        
-        .control-label {
-            font-size: 14px;
-            color: #aaa;
-            font-weight: bold;
-        }
-        
-        .btn-group {
-            display: flex;
-            gap: 10px;
-        }
-        
-        button {
-            padding: 10px 20px;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: bold;
-            transition: all 0.3s ease;
-            background: rgba(255, 255, 255, 0.1);
-            color: #ddd;
-            border: 1px solid rgba(255, 255, 255, 0.2);
-        }
-        
-        button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-        }
-        
-        button.active {
-            background: linear-gradient(135deg, #00d4ff, #0099cc);
-            color: white;
-            border-color: transparent;
-        }
-        
-        button.method-btn.active {
-            background: linear-gradient(135deg, #7b2cbf, #9d4edd);
-        }
-        
-        .main-content {
-            display: grid;
-            grid-template-columns: 1fr 350px;
-            gap: 20px;
-        }
-        
-        @media (max-width: 900px) {
-            .main-content {
-                grid-template-columns: 1fr;
-            }
-        }
-        
-        .video-section {
-            background: rgba(0, 0, 0, 0.3);
-            border-radius: 12px;
-            overflow: hidden;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
-        
-        .video-header {
-            padding: 12px 16px;
-            background: rgba(255, 255, 255, 0.05);
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .status-badge {
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 12px;
-            font-weight: bold;
-        }
-        
-        .status-online {
-            background: rgba(0, 255, 136, 0.2);
-            color: #00ff88;
-        }
-        
-        .status-offline {
-            background: rgba(255, 68, 68, 0.2);
-            color: #ff4444;
-        }
-        
-        .video-container {
-            position: relative;
-            width: 100%;
-            padding-top: 75%; /* 4:3 比例 */
-            background: #000;
-        }
-        
-        .video-container img {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            object-fit: contain;
-        }
-        
-        .sidebar {
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-        }
-        
-        .panel {
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 12px;
-            padding: 20px;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
-        
-        .panel-title {
-            font-size: 16px;
-            margin-bottom: 15px;
-            color: #00d4ff;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .panel-title::before {
-            content: "";
-            display: inline-block;
-            width: 4px;
-            height: 16px;
-            background: #00d4ff;
-            border-radius: 2px;
-        }
-        
-        .emotion-list {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-        
-        .emotion-item {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        
-        .emotion-name {
-            width: 60px;
-            font-size: 14px;
-            color: #ccc;
-        }
-        
-        .emotion-bar-bg {
-            flex: 1;
-            height: 24px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 12px;
-            overflow: hidden;
-            position: relative;
-        }
-        
-        .emotion-bar {
-            height: 100%;
-            border-radius: 12px;
-            transition: width 0.5s ease;
-            display: flex;
-            align-items: center;
-            justify-content: flex-end;
-            padding-right: 8px;
-            font-size: 12px;
-            font-weight: bold;
-            color: white;
-            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
-        }
-        
-        .emotion-value {
-            width: 45px;
-            text-align: right;
-            font-size: 13px;
-            color: #aaa;
-            font-variant-numeric: tabular-nums;
-        }
-        
-        .dominant-emotion {
-            text-align: center;
-            padding: 20px;
-            background: rgba(0, 212, 255, 0.1);
-            border-radius: 12px;
-            border: 1px solid rgba(0, 212, 255, 0.3);
-        }
-        
-        .dominant-label {
-            font-size: 14px;
-            color: #aaa;
-            margin-bottom: 8px;
-        }
-        
-        .dominant-value {
-            font-size: 32px;
-            font-weight: bold;
-            color: #00d4ff;
-        }
-        
-        .dominant-confidence {
-            font-size: 18px;
-            color: #7b2cbf;
-            margin-top: 5px;
-        }
-        
-        .face-count {
-            text-align: center;
-            padding: 15px;
-            background: rgba(123, 44, 191, 0.1);
-            border-radius: 8px;
-            margin-bottom: 15px;
-        }
-        
-        .face-count-number {
-            font-size: 28px;
-            font-weight: bold;
-            color: #9d4edd;
-        }
-        
-        .face-count-label {
-            font-size: 13px;
-            color: #aaa;
-        }
-        
-        .log-panel {
-            max-height: 150px;
-            overflow-y: auto;
-            font-size: 12px;
-            color: #888;
-        }
-        
-        .log-entry {
-            padding: 4px 0;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-        }
-        
-        .log-time {
-            color: #666;
-            margin-right: 8px;
-        }
-        
-        /* 情绪颜色 */
-        .emo-中性 { background: linear-gradient(90deg, #808080, #a0a0a0); }
-        .emo-快乐 { background: linear-gradient(90deg, #ffd700, #ffed4e); color: #333 !important; text-shadow: none !important; }
-        .emo-惊讶 { background: linear-gradient(90deg, #ff6b6b, #ff8e8e); }
-        .emo-悲伤 { background: linear-gradient(90deg, #4169e1, #6495ed); }
-        .emo-愤怒 { background: linear-gradient(90deg, #dc143c, #ff1744); }
-        .emo-厌恶 { background: linear-gradient(90deg, #228b22, #32cd32); }
-        .emo-恐惧 { background: linear-gradient(90deg, #8b008b, #9932cc); }
-        .emo-蔑视 { background: linear-gradient(90deg, #ff8c00, #ffa500); }
-        
-        .loading {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 200px;
-            color: #666;
-        }
-        
-        .spinner {
-            width: 40px;
-            height: 40px;
-            border: 3px solid rgba(255, 255, 255, 0.1);
-            border-top-color: #00d4ff;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin-right: 15px;
-        }
-        
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-        
-        .no-face {
-            text-align: center;
-            padding: 40px;
-            color: #666;
-            font-size: 14px;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>🎭 实时情绪识别系统</h1>
-        
-        <div class="control-panel">
-            <div class="control-group">
-                <span class="control-label">📹 摄像头选择</span>
-                <div class="btn-group">
-                    <button id="cam-local" class="active" onclick="switchCamera(0)">
-                        💻 系统摄像头
-                    </button>
-                    <button id="cam-ip" onclick="switchCamera(1)">
-                        🌐 IP摄像头
-                    </button>
-                </div>
-            </div>
-            
-            <div class="control-group">
-                <span class="control-label">🧠 识别方法</span>
-                <div class="btn-group">
-                    <button id="method-onnx" class="active method-btn" onclick="switchMethod('onnx')">
-                        🔷 ONNX-FER+
-                    </button>
-                    <button id="method-deepface" class="method-btn" onclick="switchMethod('deepface')">
-                        🔶 DeepFace
-                    </button>
-                </div>
-            </div>
-        </div>
-        
-        <div class="main-content">
-            <div class="video-section">
-                <div class="video-header">
-                    <span>实时视频流</span>
-                    <span id="stream-status" class="status-badge status-online">● 在线</span>
-                </div>
-                <div class="video-container">
-                    <img id="video-stream" src="/video_feed" alt="视频流">
-                </div>
-            </div>
-            
-            <div class="sidebar">
-                <div class="panel">
-                    <div class="panel-title">检测状态</div>
-                    <div class="face-count">
-                        <div class="face-count-number" id="face-count">0</div>
-                        <div class="face-count-label">检测到的人脸</div>
-                    </div>
-                    <div id="dominant-emotion" class="dominant-emotion" style="display: none;">
-                        <div class="dominant-label">主要情绪</div>
-                        <div class="dominant-value" id="dominant-name">-</div>
-                        <div class="dominant-confidence" id="dominant-conf">-</div>
-                    </div>
-                </div>
-                
-                <div class="panel">
-                    <div class="panel-title">情绪概率分布</div>
-                    <div id="emotion-chart" class="emotion-list">
-                        <div class="no-face">等待人脸检测...</div>
-                    </div>
-                </div>
-                
-                <div class="panel">
-                    <div class="panel-title">系统日志</div>
-                    <div id="log-panel" class="log-panel">
-                        <div class="log-entry">
-                            <span class="log-time">[系统]</span>服务器已启动
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <script>
-        let currentCamera = 0;
-        let currentMethod = 'onnx';
-        let isStreamActive = true;
-        
-        // 情绪配置
-        const emotions = ['中性', '快乐', '惊讶', '悲伤', '愤怒', '厌恶', '恐惧', '蔑视'];
-        const emotionColors = {
-            '中性': '#808080',
-            '快乐': '#ffd700',
-            '惊讶': '#ff6b6b',
-            '悲伤': '#4169e1',
-            '愤怒': '#dc143c',
-            '厌恶': '#228b22',
-            '恐惧': '#8b008b',
-            '蔑视': '#ff8c00'
-        };
-        
-        function log(msg) {
-            const panel = document.getElementById('log-panel');
-            const time = new Date().toLocaleTimeString('zh-CN');
-            const entry = document.createElement('div');
-            entry.className = 'log-entry';
-            entry.innerHTML = `<span class="log-time">[${time}]</span>${msg}`;
-            panel.insertBefore(entry, panel.firstChild);
-            if (panel.children.length > 50) {
-                panel.removeChild(panel.lastChild);
-            }
-        }
-        
-        async function switchCamera(cameraId) {
-            try {
-                const response = await fetch('/api/switch_camera', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({camera: cameraId})
-                });
-                const data = await response.json();
-                
-                if (data.success) {
-                    currentCamera = cameraId;
-                    document.getElementById('cam-local').classList.toggle('active', cameraId === 0);
-                    document.getElementById('cam-ip').classList.toggle('active', cameraId === 1);
-                    
-                    // 刷新视频流
-                    const img = document.getElementById('video-stream');
-                    img.src = '/video_feed?t=' + Date.now();
-                    
-                    log(`已切换到${cameraId === 0 ? '系统摄像头' : 'IP摄像头'}`);
-                }
-            } catch (e) {
-                log('切换摄像头失败: ' + e.message);
-            }
-        }
-        
-        async function switchMethod(method) {
-            try {
-                const response = await fetch('/api/switch_method', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({method: method})
-                });
-                const data = await response.json();
-                
-                if (data.success) {
-                    currentMethod = method;
-                    document.getElementById('method-onnx').classList.toggle('active', method === 'onnx');
-                    document.getElementById('method-deepface').classList.toggle('active', method === 'deepface');
-                    log(`已切换到${method === 'onnx' ? 'ONNX-FER+' : 'DeepFace'}识别方法`);
-                }
-            } catch (e) {
-                log('切换方法失败: ' + e.message);
-            }
-        }
-        
-        function updateEmotionChart(faces) {
-            const chartDiv = document.getElementById('emotion-chart');
-            const dominantDiv = document.getElementById('dominant-emotion');
-            const faceCountDiv = document.getElementById('face-count');
-            
-            faceCountDiv.textContent = faces.length;
-            
-            if (faces.length === 0) {
-                chartDiv.innerHTML = '<div class="no-face">未检测到人脸</div>';
-                dominantDiv.style.display = 'none';
-                return;
-            }
-            
-            // 取第一个人脸的数据（主要人脸）
-            const face = faces[0];
-            const probs = face.all_probs || {};
-            
-            // 更新主导情绪
-            dominantDiv.style.display = 'block';
-            document.getElementById('dominant-name').textContent = face.emotion;
-            document.getElementById('dominant-conf').textContent = (face.confidence * 100).toFixed(1) + '%';
-            
-            // 更新图表
-            let html = '';
-            emotions.forEach(emo => {
-                const val = (probs[emo] || 0) * 100;
-                const color = emotionColors[emo] || '#666';
-                html += `
-                    <div class="emotion-item">
-                        <span class="emotion-name">${emo}</span>
-                        <div class="emotion-bar-bg">
-                            <div class="emotion-bar" style="width: ${val}%; background: ${color};">
-                                ${val > 15 ? val.toFixed(0) + '%' : ''}
-                            </div>
-                        </div>
-                        <span class="emotion-value">${val.toFixed(1)}%</span>
-                    </div>
-                `;
-            });
-            chartDiv.innerHTML = html;
-        }
-        
-        // 轮询获取最新结果
-        async function pollResults() {
-            try {
-                const response = await fetch('/api/latest_result');
-                const data = await response.json();
-                updateEmotionChart(data.faces || []);
-            } catch (e) {
-                // 静默处理轮询错误
-            }
-        }
-        
-        // 检查视频流状态
-        function checkStream() {
-            const img = document.getElementById('video-stream');
-            const status = document.getElementById('stream-status');
-            
-            // 简单的超时检测
-            if (!img.complete || img.naturalWidth === 0) {
-                status.className = 'status-badge status-offline';
-                status.textContent = '● 离线';
-                isStreamActive = false;
-            } else {
-                status.className = 'status-badge status-online';
-                status.textContent = '● 在线';
-                isStreamActive = true;
-            }
-        }
-        
-        // 定时任务
-        setInterval(pollResults, 200);  // 5fps 结果更新
-        setInterval(checkStream, 2000); // 每2秒检查流状态
-        
-        // 页面加载完成
-        window.onload = function() {
-            log('前端界面已加载');
-            log('默认使用系统摄像头 + ONNX-FER+');
-        };
-        
-        // 处理视频流错误
-        document.getElementById('video-stream').onerror = function() {
-            log('视频流连接错误，尝试重新连接...');
-            setTimeout(() => {
-                this.src = '/video_feed?t=' + Date.now();
-            }, 2000);
-        };
-    </script>
-</body>
-</html>
+
+    def stop(self):
+        self.running = False
+        self.cap.release()
+
+
+# ===================== 全局初始化 =====================
+processor = EmotionProcessor(IP_CAMERA_URL)
+
+
+# ===================== Flask 接口 =====================
+@app.route('/')
+def index():
+    return render_template('emo.html')
+
+@app.route('/switch_method', methods=['POST'])
+def switch_method():
+    global current_method
+    method = request.json.get('method')
+    if method in ["deepface", "onnx"]:
+        current_method = method
+    return jsonify(status="ok", method=current_method)
+
+def gen_video():
+    while True:
+        data = processor.get_ui_frame()
+        if data is None:
+            time.sleep(0.1)
+            continue
+        yield f"data: {data['image']}\n\n"
+        time.sleep(0.03)
+
+@app.route('/video_feed')
+def video_feed():
+    return Response(gen_video(), mimetype='text/event-stream')
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=True, threaded=True)
