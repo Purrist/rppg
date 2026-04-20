@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>rPPG 心率监测 V6</title>
+    <title>rPPG 心率监测 V7 (IP Webcam)</title>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
     <style>
@@ -18,6 +18,13 @@
         @keyframes lr{0%{transform:scale(.8);opacity:.8}100%{transform:scale(1.6);opacity:0}}
         .header-title{font-family:'Orbitron',sans-serif;font-weight:700;font-size:15px;color:var(--accent);letter-spacing:3px}
         .header-badge{font-size:10px;color:var(--muted);background:rgba(0,230,118,.06);border:1px solid rgba(0,230,118,.15);padding:3px 10px;border-radius:3px;letter-spacing:1px}
+        #hrIcon{animation:hb 1s ease-in-out infinite}
+        #camLocalBtn{border-color:var(--muted);color:var(--muted)}
+        #camIpBtn{border-color:var(--accent);color:var(--accent)}
+        #dualMethod{color:var(--accent)}
+        #qualityFill{width:0%}
+        #bufferFill{width:0%}
+        .panel-block.no-border{border-bottom:none}
         .main{display:grid;grid-template-columns:1fr 350px;height:calc(100vh - 48px)}
         .video-section{position:relative;background:#000;overflow:hidden}
         .video-section img{width:100%;height:100%;object-fit:contain;display:block}
@@ -34,7 +41,16 @@
         .no-signal.hidden{opacity:0;pointer-events:none}
         .no-signal-icon{font-size:48px;color:var(--muted);margin-bottom:16px}
         .no-signal-text{font-size:14px;color:var(--muted);letter-spacing:2px}
-        .panel{background:var(--card);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--border) transparent}
+        .panel{background:var(--card);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto}
+        /* Scrollbar styling with cross-browser compatibility */
+        .panel::-webkit-scrollbar{width:6px}
+        .panel::-webkit-scrollbar-track{background:transparent}
+        .panel::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+        .panel::-webkit-scrollbar-thumb:hover{background:var(--muted)}
+        /* Firefox */
+        @supports (scrollbar-width: thin) {
+            .panel{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
+        }
         .panel-block{padding:12px 16px;border-bottom:1px solid var(--border)}
         .panel-label{font-size:9px;text-transform:uppercase;letter-spacing:2.5px;color:var(--muted);margin-bottom:8px}
         .hr-block{text-align:center;padding:18px 16px 14px}
@@ -59,13 +75,11 @@
         .quality-fill{height:100%;border-radius:3px;background:var(--accent);transition:width .4s ease,background .4s ease}
         .quality-fill.low{background:var(--danger)}.quality-fill.mid{background:var(--warning)}.quality-fill.paused-fill{background:var(--blue)}.quality-fill.light-fill{background:var(--cyan)}
         .quality-val{font-size:13px;font-weight:700;min-width:38px;text-align:right;color:var(--accent)}
-        /* 双路心率对比 */
         .dual-hr{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px}
         .dual-item{display:flex;align-items:center;gap:6px;font-size:11px;padding:4px 8px;background:rgba(255,255,255,.02);border-radius:3px;border:1px solid var(--border)}
         .dual-label{color:var(--muted);font-size:9px;min-width:30px}
         .dual-val{font-weight:700}
         .dual-val.match{color:var(--accent)}.dual-val.diff{color:var(--warning)}.dual-val.miss{color:var(--muted)}
-        /* 诊断面板 */
         .diag-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px}
         .diag-item{display:flex;align-items:center;gap:6px;font-size:10px;padding:3px 8px;background:rgba(255,255,255,.02);border-radius:3px;border:1px solid var(--border)}
         .diag-label{color:var(--muted);min-width:46px}
@@ -80,6 +94,16 @@
         .fusion-legend{display:flex;flex-wrap:wrap;gap:6px;margin-top:3px;font-size:9px}
         .fusion-legend-item{display:flex;align-items:center;gap:3px;color:var(--muted)}
         .fusion-legend-item .dot-s{width:5px;height:5px;border-radius:50%;flex-shrink:0}
+        /* [V6->V7] 摄像头切换模块 */
+        .cam-switch{display:flex;gap:6px;align-items:center;margin-top:6px}
+        .cam-input{flex:1;padding:4px 8px;background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:3px;color:var(--fg);font-family:inherit;font-size:11px;outline:none;transition:border-color .2s}
+        .cam-input:focus{border-color:var(--accent)}
+        .cam-input::placeholder{color:var(--muted)}
+        .cam-btn{padding:4px 12px;border:1px solid var(--accent);background:rgba(0,230,118,.08);color:var(--accent);border-radius:3px;cursor:pointer;font-family:inherit;font-size:11px;letter-spacing:.5px;transition:background .2s,color .2s}
+        .cam-btn:hover{background:var(--accent);color:var(--bg)}
+        .cam-btn:disabled{opacity:.4;cursor:not-allowed}
+        .cam-status{font-size:9px;color:var(--muted);margin-top:3px;min-height:14px}
+        .cam-status.ok{color:var(--accent)}.cam-status.err{color:var(--danger)}.cam-status.switching{color:var(--warning)}
         .pipeline{display:flex;align-items:center;gap:2px;flex-wrap:wrap;margin-top:6px}
         .pipe-step{font-size:7px;color:var(--accent-dim);background:rgba(0,230,118,.06);border:1px solid rgba(0,230,118,.12);padding:2px 4px;border-radius:2px;letter-spacing:.2px}
         .pipe-arrow{font-size:7px;color:var(--muted)}
@@ -95,7 +119,7 @@
         <div class="header-logo"><div class="header-logo-pulse"></div></div>
         <span class="header-title">rPPG MONITOR</span>
     </div>
-    <span class="header-badge">V6 Robust</span>
+    <span class="header-badge">V7 IP Webcam</span>
 </header>
 <main class="main">
     <section class="video-section" aria-label="摄像头视频流">
@@ -110,6 +134,7 @@
         </div>
     </section>
     <aside class="panel" aria-label="心率数据面板">
+        <!-- 心率 -->
         <div class="hr-block">
             <div class="hr-ring">
                 <svg viewBox="0 0 140 140">
@@ -117,21 +142,32 @@
                     <circle class="hr-ring-fill" id="hrRing" cx="70" cy="70" r="65"/>
                 </svg>
                 <div class="hr-ring-inner">
-                    <i class="fa-solid fa-heart-pulse hr-icon" id="hrIcon" style="animation:hb 1s ease-in-out infinite"></i>
+                    <i class="fa-solid fa-heart-pulse hr-icon" id="hrIcon"></i>
                     <div class="hr-value" id="hrValue">--</div>
                     <div class="hr-unit">BPM</div>
                 </div>
             </div>
         </div>
+        <!-- [V7->V7.1] 摄像头切换 -->
+        <div class="panel-block">
+            <div class="panel-label">Camera Source</div>
+            <div class="cam-switch">
+                <button class="cam-btn" id="camLocalBtn" type="button">本地 0</button>
+                <button class="cam-btn" id="camIpBtn" type="button">IP 摄像头</button>
+            </div>
+            <div class="cam-status" id="camStatus">查询中...</div>
+        </div>
+        <!-- 双路心率 -->
         <div class="panel-block">
             <div class="panel-label">Dual HR: FFT vs Peak</div>
             <div class="dual-hr">
                 <div class="dual-item"><span class="dual-label">FFT</span><span class="dual-val" id="dualFft">--</span></div>
                 <div class="dual-item"><span class="dual-label">Peak</span><span class="dual-val" id="dualPeak">--</span></div>
                 <div class="dual-item"><span class="dual-label">Δ</span><span class="dual-val" id="dualDelta">--</span></div>
-                <div class="dual-item"><span class="dual-label">Use</span><span class="dual-val" id="dualMethod" style="color:var(--accent)">--</span></div>
+                <div class="dual-item"><span class="dual-label">Use</span><span class="dual-val" id="dualMethod">--</span></div>
             </div>
         </div>
+        <!-- 波形 -->
         <div class="panel-block">
             <div class="panel-label">Pulse Waveform</div>
             <div class="canvas-wrap">
@@ -139,6 +175,7 @@
                 <canvas id="pulseCanvas" width="630" height="120"></canvas>
             </div>
         </div>
+        <!-- 趋势 -->
         <div class="panel-block">
             <div class="panel-label">Heart Rate Trend</div>
             <div class="canvas-wrap">
@@ -146,18 +183,21 @@
                 <canvas id="trendCanvas" width="630" height="100"></canvas>
             </div>
         </div>
+        <!-- 质量 -->
         <div class="panel-block">
             <div class="panel-label">Signal Quality</div>
             <div class="quality-row">
-                <div class="quality-bar"><div class="quality-fill" id="qualityFill" style="width:0%"></div></div>
+                <div class="quality-bar"><div class="quality-fill" id="qualityFill"></div></div>
                 <span class="quality-val" id="qualityVal">0%</span>
             </div>
         </div>
+        <!-- ROI 融合 -->
         <div class="panel-block">
             <div class="panel-label">ROI Fusion</div>
             <div class="fusion-bar" id="fusionBar"></div>
             <div class="fusion-legend" id="fusionLegend"></div>
         </div>
+        <!-- 诊断 -->
         <div class="panel-block">
             <div class="panel-label">Diagnostics</div>
             <div class="diag-grid">
@@ -169,17 +209,19 @@
                 <div class="diag-item"><span class="diag-label">FPS</span><span class="diag-value" id="diagFps">--</span></div>
             </div>
             <div class="buffer-wrap">
-                <div class="buffer-bar"><div class="buffer-fill" id="bufferFill" style="width:0%"></div></div>
+                <div class="buffer-bar"><div class="buffer-fill" id="bufferFill"></div></div>
                 <div class="buffer-text" id="bufferText">Buffer: 0 / 180</div>
             </div>
         </div>
-        <div class="panel-block" style="border-bottom:none">
-            <div class="panel-label">V6 Changes</div>
+        <!-- 说明 -->
+        <div class="panel-block no-border">
+            <div class="panel-label">V7 Changes</div>
             <div class="fix-list">
                 <div class="fix-item"><strong>Motion:</strong> multi-frame max (catches oscillation)</div>
                 <div class="fix-item"><strong>Light:</strong> decoupled from motion (threshold boost)</div>
                 <div class="fix-item"><strong>HR:</strong> FFT + peak detection fusion</div>
                 <div class="fix-item"><strong>Face:</strong> bbox retain 30 frames on loss</div>
+                <div class="fix-item"><strong>Camera:</strong> local (0/1) or IP Webcam (http://ip:8080/video)</div>
             </div>
             <div class="pipeline">
                 <span class="pipe-step">4 ROIs</span><span class="pipe-arrow">→</span>
@@ -207,11 +249,54 @@ const fusionBar=$('fusionBar'),fusionLegend=$('fusionLegend');
 const pCtx=pulseCanvas.getContext('2d'),tCtx=trendCanvas.getContext('2d');
 let lastHr=0,pulseData=[],trendData=[],videoReady=false;
 const RC=2*Math.PI*65;
-const ROI_C={'forehead_wide':'#00e676','forehead_core':'#00c853','left_cheek':'#ffa502','right_cheek':'#ff6348'};
-const ROI_L={'forehead_wide':'Fhd-W','forehead_core':'Fhd-C','left_cheek':'L-Ch','right_cheek':'R-Ch'};
-
+const ROI_C={'forehead':'#00e676','left_cheek':'#ffa502','right_cheek':'#ff6348'};
+const ROI_L={'forehead':'Forehead','left_cheek':'L-Cheek','right_cheek':'R-Cheek'};
 videoImg.addEventListener('load',()=>{if(!videoReady){videoReady=true;noSignal.classList.add('hidden')}});
 videoImg.addEventListener('error',()=>{videoReady=false;noSignal.classList.remove('hidden')});
+
+/* [V7->V7.1] 只做本地/IP 切换，URL 由后端写死 */
+const camLocalBtn = document.getElementById('camLocalBtn');
+const camIpBtn = document.getElementById('camIpBtn');
+const camStatus = document.getElementById('camStatus');
+
+async function switchTo(type) {
+    camLocalBtn.disabled = true;
+    camIpBtn.disabled = true;
+    camStatus.className = 'cam-status switching';
+    camStatus.textContent = '切换中...';
+    try {
+        const r = await fetch('/api/camera', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type })
+        });
+        if (!r.ok) { const e = await r.json(); throw new Error(e.error || '切换失败'); }
+        camStatus.className = 'cam-status ok';
+        camStatus.textContent = '已切换到 ' + (type === 'local' ? '本地摄像头' : 'IP 摄像头');
+    } catch (e) {
+        camStatus.className = 'cam-status err';
+        camStatus.textContent = '切换失败: ' + e.message;
+    } finally {
+        camLocalBtn.disabled = false;
+        camIpBtn.disabled = false;
+    }
+}
+
+camLocalBtn.addEventListener('click', () => {
+    switchTo('local');
+    camLocalBtn.style.borderColor = 'var(--accent)';
+    camLocalBtn.style.color = 'var(--accent)';
+    camIpBtn.style.borderColor = 'var(--muted)';
+    camIpBtn.style.color = 'var(--muted)';
+});
+
+camIpBtn.addEventListener('click', () => {
+    switchTo('default_ip');      // 使用 py 里写死的 DEFAULT_IP_CAMERA_URL
+    camIpBtn.style.borderColor = 'var(--accent)';
+    camIpBtn.style.color = 'var(--accent)';
+    camLocalBtn.style.borderColor = 'var(--muted)';
+    camLocalBtn.style.color = 'var(--muted)';
+});
 
 function triggerBeat(){hrValue.classList.add('beat');setTimeout(()=>hrValue.classList.remove('beat'),130)}
 function syncHB(hr){if(hr>0){hrIcon.style.animationDuration=(60/hr).toFixed(2)+'s';hrIcon.style.animationName='hb';hrIcon.className='fa-solid fa-heart-pulse hr-icon'}else{hrIcon.style.animationName='none'}}
@@ -280,7 +365,6 @@ async function fetchHR(){
         if(d.hr>0){const v=Math.round(d.hr);if(v!==lastHr){hrValue.textContent=v;updateRing(v,state);syncHB(v);triggerBeat();lastHr=v}}else{hrValue.textContent='--';updateRing(0,state);syncHB(0);lastHr=0}
         updateQuality(d.quality,state);
 
-        // 双路心率
         const fft=d.hr_fft||0,pk=d.hr_peak||0;
         dualFft.textContent=fft>0?fft.toFixed(0):'--';
         dualPeak.textContent=pk>0?pk.toFixed(0):'--';

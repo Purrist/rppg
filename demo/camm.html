@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Multi-Modal Perception V2</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+    --bg: #060b14;
+    --bg2: #0c1322;
+    --card: #111c2e;
+    --card-hover: #152236;
+    --border: #1e2d45;
+    --border-lit: #2a3f5f;
+    --fg: #e2e8f4;
+    --muted: #7a8ba8;
+    --accent: #00e5a0;
+    --accent-dim: rgba(0,229,160,0.12);
+    --warn: #f59e0b;
+    --danger: #ef4444;
+    --emo-happy: #22c55e;
+    --emo-surprised: #f59e0b;
+    --emo-angry: #ef4444;
+    --emo-sad: #38bdf8;
+    --emo-neutral: #6b7280;
+    --emo-drowsy: #a855f7;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: 'Space Grotesk', sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    min-height: 100vh;
+    overflow-x: hidden;
+}
+body::before {
+    content: '';
+    position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    background-image:
+        linear-gradient(rgba(0,229,160,0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,229,160,0.025) 1px, transparent 1px);
+    background-size: 60px 60px;
+}
+body::after {
+    content: '';
+    position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    background: radial-gradient(ellipse 80% 50% at 50% 0%, rgba(0,229,160,0.05) 0%, transparent 60%);
+}
+.app { position: relative; z-index: 1; }
+
+.card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    transition: border-color 0.3s, background 0.3s;
+}
+.card:hover { border-color: var(--border-lit); background: var(--card-hover); }
+
+.video-wrap {
+    position: relative;
+    border-radius: 10px;
+    overflow: hidden;
+    background: #000;
+    aspect-ratio: 16/9;
+}
+.video-wrap img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.video-label {
+    position: absolute; top: 0; left: 0; right: 0;
+    padding: 6px 12px;
+    background: linear-gradient(180deg, rgba(0,0,0,0.7) 0%, transparent 100%);
+    font-size: 12px; font-weight: 500; color: var(--muted);
+    display: flex; align-items: center; gap: 6px;
+}
+
+.status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    display: inline-block; flex-shrink: 0;
+}
+.status-dot.online {
+    background: var(--accent);
+    box-shadow: 0 0 6px var(--accent), 0 0 12px var(--accent-dim);
+    animation: pulse-dot 2s ease-in-out infinite;
+}
+.status-dot.lost {
+    background: var(--warn);
+    box-shadow: 0 0 6px var(--warn);
+    animation: pulse-dot 1s ease-in-out infinite;
+}
+.status-dot.offline { background: var(--danger); box-shadow: 0 0 4px var(--danger); }
+@keyframes pulse-dot {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(0.8); }
+}
+
+.emo-tag {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 8px 18px; border-radius: 8px;
+    font-size: 22px; font-weight: 600;
+    border: 1px solid; transition: all 0.4s;
+}
+.emo-tag i { font-size: 18px; }
+
+.emo-bar-row {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 6px; font-size: 12px;
+}
+.emo-bar-label { width: 36px; text-align: right; color: var(--muted); flex-shrink: 0; }
+.emo-bar-track {
+    flex: 1; height: 6px; background: var(--border);
+    border-radius: 3px; overflow: hidden;
+}
+.emo-bar-fill { height: 100%; border-radius: 3px; transition: width 0.3s ease; }
+.emo-bar-val {
+    width: 36px; text-align: right; color: var(--muted);
+    font-family: 'JetBrains Mono', monospace; font-size: 11px; flex-shrink: 0;
+}
+
+.gauge-wrap { position: relative; width: 180px; height: 110px; margin: 0 auto; }
+.gauge-wrap svg { width: 100%; height: 100%; }
+.gauge-value {
+    position: absolute; bottom: 2px; left: 50%; transform: translateX(-50%);
+    font-size: 32px; font-weight: 700;
+    font-family: 'JetBrains Mono', monospace;
+}
+.gauge-unit { font-size: 14px; font-weight: 400; color: var(--muted); margin-left: 2px; }
+
+.metric-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 13px;
+}
+.metric-row:last-child { border-bottom: none; }
+.metric-label { color: var(--muted); }
+.metric-val { font-family: 'JetBrains Mono', monospace; font-weight: 500; }
+
+.motion-num {
+    font-size: 40px; font-weight: 700;
+    font-family: 'JetBrains Mono', monospace; line-height: 1;
+}
+.motion-acc {
+    font-size: 13px; color: var(--muted);
+    font-family: 'JetBrains Mono', monospace;
+}
+
+.sys-tag {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 10px; border-radius: 6px;
+    background: var(--bg2); border: 1px solid var(--border);
+    font-size: 12px; font-family: 'JetBrains Mono', monospace;
+    color: var(--muted);
+}
+
+/* 模型状态标签 */
+.model-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 8px; border-radius: 4px;
+    font-size: 11px; font-weight: 500;
+    font-family: 'JetBrains Mono', monospace;
+}
+.model-badge.model {
+    background: rgba(0,229,160,0.1); color: var(--accent); border: 1px solid rgba(0,229,160,0.2);
+}
+.model-badge.rule {
+    background: rgba(245,158,11,0.1); color: var(--warn); border: 1px solid rgba(245,158,11,0.2);
+}
+
+.chart-box { position: relative; height: 140px; }
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border-lit); border-radius: 3px; }
+
+@media (max-width: 1024px) {
+    .video-grid { grid-template-columns: 1fr !important; }
+    .data-grid { grid-template-columns: 1fr !important; }
+    .chart-grid { grid-template-columns: 1fr !important; }
+}
+</style>
+</head>
+<body>
+<div class="app max-w-7xl mx-auto px-4 py-4">
+
+    <!-- 顶部标题栏 -->
+    <header class="flex items-center justify-between mb-4">
+        <div class="flex items-center gap-3">
+            <div style="width:36px;height:36px;border-radius:8px;background:var(--accent-dim);display:flex;align-items:center;justify-content:center;">
+                <i class="fa-solid fa-brain" style="color:var(--accent);font-size:16px;"></i>
+            </div>
+            <div>
+                <h1 class="text-lg font-bold tracking-tight" style="color:var(--fg);">Multi-Modal Perception</h1>
+                <p class="text-xs" style="color:var(--muted);">Person / Emotion / Focus / Motion</p>
+            </div>
+        </div>
+        <div class="flex items-center gap-3">
+            <!-- [V2] 模型状态 -->
+            <div class="model-badge rule" id="model-badge">
+                <i class="fa-solid fa-gear" style="font-size:9px;"></i>
+                <span id="model-badge-text">RULE</span>
+            </div>
+            <div id="person-badge" class="flex items-center gap-2 px-4 py-2 rounded-lg" style="background:var(--bg2);border:1px solid var(--border);">
+                <span class="status-dot offline" id="person-dot"></span>
+                <span class="text-sm font-medium" id="person-text" style="color:var(--muted);">Offline</span>
+            </div>
+            <div class="sys-tag">
+                <i class="fa-solid fa-clock" style="font-size:10px;"></i>
+                <span id="uptime">00:00</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- 视频区域 -->
+    <div class="video-grid grid grid-cols-2 gap-3 mb-4">
+        <div class="card p-2">
+            <div class="video-wrap">
+                <img src="/video_local" alt="Local Camera">
+                <div class="video-label">
+                    <i class="fa-solid fa-video"></i>
+                    <span>Local Camera 1</span>
+                    <span style="margin-left:auto;font-family:'JetBrains Mono',monospace;" id="local-fps-tag">-- fps</span>
+                </div>
+            </div>
+            <div class="flex items-center justify-between px-2 py-1.5">
+                <span class="text-xs font-medium" style="color:var(--muted);">
+                    <i class="fa-solid fa-person-running" style="margin-right:4px;"></i>Full Body / Motion
+                </span>
+                <span class="text-xs font-mono" style="color:var(--accent);" id="motion-inline">0.0%</span>
+            </div>
+        </div>
+        <div class="card p-2">
+            <div class="video-wrap">
+                <img src="/video_ip" alt="IP Camera">
+                <div class="video-label">
+                    <i class="fa-solid fa-wifi"></i>
+                    <span>IP Camera</span>
+                    <span style="margin-left:auto;font-family:'JetBrains Mono',monospace;" id="ip-fps-tag">-- fps</span>
+                </div>
+            </div>
+            <div class="flex items-center justify-between px-2 py-1.5">
+                <span class="text-xs font-medium" style="color:var(--muted);">
+                    <i class="fa-solid fa-face-smile" style="margin-right:4px;"></i>Face / Emotion / Focus
+                </span>
+                <span class="text-xs font-mono" id="emo-inline" style="color:var(--emo-neutral);">--</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 三列数据面板 -->
+    <div class="data-grid grid grid-cols-3 gap-3 mb-4">
+
+        <!-- 情绪识别 -->
+        <div class="card p-4">
+            <div class="flex items-center gap-2 mb-3">
+                <i class="fa-solid fa-masks-theater" style="color:var(--accent);font-size:14px;"></i>
+                <span class="text-sm font-semibold">Emotion Recognition</span>
+                <!-- [V2] 方法标签 -->
+                <span class="model-badge rule" id="emo-method-badge" style="margin-left:auto;font-size:10px;">
+                    <span id="emo-method-text">RULE</span>
+                </span>
+            </div>
+            <div class="flex items-center justify-center mb-4">
+                <div class="emo-tag" id="emo-tag"
+                     style="color:var(--emo-neutral);border-color:var(--emo-neutral);background:rgba(107,114,128,0.08);">
+                    <i class="fa-solid fa-face-meh"></i>
+                    <span id="emo-cn">平静</span>
+                    <span id="emo-conf" style="font-size:14px;font-weight:400;opacity:0.7;">0%</span>
+                </div>
+            </div>
+            <div id="emo-bars">
+                <div class="emo-bar-row"><span class="emo-bar-label">开心</span><div class="emo-bar-track"><div class="emo-bar-fill" id="bar-happy" style="width:0%;background:var(--emo-happy);"></div></div><span class="emo-bar-val" id="val-happy">0.00</span></div>
+                <div class="emo-bar-row"><span class="emo-bar-label">惊讶</span><div class="emo-bar-track"><div class="emo-bar-fill" id="bar-surprised" style="width:0%;background:var(--emo-surprised);"></div></div><span class="emo-bar-val" id="val-surprised">0.00</span></div>
+                <div class="emo-bar-row"><span class="emo-bar-label">愤怒</span><div class="emo-bar-track"><div class="emo-bar-fill" id="bar-angry" style="width:0%;background:var(--emo-angry);"></div></div><span class="emo-bar-val" id="val-angry">0.00</span></div>
+                <div class="emo-bar-row"><span class="emo-bar-label">悲伤</span><div class="emo-bar-track"><div class="emo-bar-fill" id="bar-sad" style="width:0%;background:var(--emo-sad);"></div></div><span class="emo-bar-val" id="val-sad">0.00</span></div>
+                <div class="emo-bar-row"><span class="emo-bar-label">平静</span><div class="emo-bar-track"><div class="emo-bar-fill" id="bar-neutral" style="width:0%;background:var(--emo-neutral);"></div></div><span class="emo-bar-val" id="val-neutral">0.00</span></div>
+                <div class="emo-bar-row"><span class="emo-bar-label">困倦</span><div class="emo-bar-track"><div class="emo-bar-fill" id="bar-drowsy" style="width:0%;background:var(--emo-drowsy);"></div></div><span class="emo-bar-val" id="val-drowsy">0.00</span></div>
+            </div>
+        </div>
+
+        <!-- 专注度 -->
+        <div class="card p-4">
+            <div class="flex items-center gap-2 mb-3">
+                <i class="fa-solid fa-crosshairs" style="color:var(--accent);font-size:14px;"></i>
+                <span class="text-sm font-semibold">Focus Estimation</span>
+            </div>
+            <div class="gauge-wrap mb-3">
+                <svg viewBox="0 0 200 120">
+                    <defs>
+                        <linearGradient id="gauge-grad" x1="0" y1="0" x2="1" y2="0">
+                            <stop offset="0%" stop-color="#ef4444"/>
+                            <stop offset="40%" stop-color="#f59e0b"/>
+                            <stop offset="100%" stop-color="#00e5a0"/>
+                        </linearGradient>
+                    </defs>
+                    <path d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke="var(--border)" stroke-width="14" stroke-linecap="round"/>
+                    <path id="gauge-arc" d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke="url(#gauge-grad)" stroke-width="14" stroke-linecap="round" stroke-dasharray="251.3" stroke-dashoffset="251.3"/>
+                    <text x="14" y="112" fill="var(--muted)" font-size="10" font-family="JetBrains Mono">0</text>
+                    <text x="88" y="20" fill="var(--muted)" font-size="10" font-family="JetBrains Mono">50</text>
+                    <text x="175" y="112" fill="var(--muted)" font-size="10" font-family="JetBrains Mono">100</text>
+                </svg>
+                <div class="gauge-value" id="focus-num" style="color:var(--muted);">--<span class="gauge-unit">%</span></div>
+            </div>
+            <div>
+                <div class="metric-row"><span class="metric-label"><i class="fa-solid fa-eye" style="width:16px;margin-right:4px;"></i>Eye Openness</span><span class="metric-val" id="m-eye">--</span></div>
+                <div class="metric-row"><span class="metric-label"><i class="fa-solid fa-arrows-left-right" style="width:16px;margin-right:4px;"></i>Head Yaw</span><span class="metric-val" id="m-yaw">--</span></div>
+                <div class="metric-row"><span class="metric-label"><i class="fa-solid fa-arrows-up-down" style="width:16px;margin-right:4px;"></i>Head Pitch</span><span class="metric-val" id="m-pitch">--</span></div>
+                <div class="metric-row"><span class="metric-label"><i class="fa-solid fa-heart-pulse" style="width:16px;margin-right:4px;"></i>Blink Rate</span><span class="metric-val" id="m-blink">-- /min</span></div>
+                <div class="metric-row"><span class="metric-label"><i class="fa-solid fa-wave-square" style="width:16px;margin-right:4px;"></i>Face Motion</span><span class="metric-val" id="m-fmotion">--</span></div>
+            </div>
+        </div>
+
+        <!-- 运动量 -->
+        <div class="card p-4">
+            <div class="flex items-center gap-2 mb-3">
+                <i class="fa-solid fa-person-walking" style="color:var(--accent);font-size:14px;"></i>
+                <span class="text-sm font-semibold">Motion Tracking</span>
+            </div>
+            <div class="text-center mb-2">
+                <div class="motion-num" id="motion-num" style="color:var(--muted);">0.0<span class="gauge-unit">%</span></div>
+            </div>
+            <div class="text-center mb-4">
+                <span class="motion-acc">ACC: <span id="motion-acc">0.00</span></span>
+            </div>
+            <div class="chart-box">
+                <canvas id="motion-chart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- 底部趋势图 -->
+    <div class="chart-grid grid grid-cols-2 gap-3 mb-4">
+        <div class="card p-4">
+            <div class="flex items-center gap-2 mb-2">
+                <i class="fa-solid fa-chart-line" style="color:var(--accent);font-size:12px;"></i>
+                <span class="text-sm font-semibold">Focus Trend</span>
+            </div>
+            <div class="chart-box" style="height:130px;">
+                <canvas id="focus-chart"></canvas>
+            </div>
+        </div>
+        <div class="card p-4">
+            <div class="flex items-center gap-2 mb-2">
+                <i class="fa-solid fa-chart-area" style="color:var(--accent);font-size:12px;"></i>
+                <span class="text-sm font-semibold">Motion Trend</span>
+            </div>
+            <div class="chart-box" style="height:130px;">
+                <canvas id="motion-trend-chart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- 系统信息栏 -->
+    <footer class="flex items-center gap-3 flex-wrap py-2">
+        <div class="sys-tag"><i class="fa-solid fa-desktop" style="font-size:10px;"></i><span id="sys-local">Local --: -- fps</span></div>
+        <div class="sys-tag"><i class="fa-solid fa-wifi" style="font-size:10px;"></i><span id="sys-ip">IP -- fps</span></div>
+        <div class="sys-tag"><i class="fa-solid fa-users" style="font-size:10px;"></i><span id="sys-person">Person: --</span></div>
+        <div class="sys-tag"><i class="fa-solid fa-microchip" style="font-size:10px;"></i><span id="sys-model">Emo: --</span></div>
+        <div style="margin-left:auto;" class="sys-tag">V2.0</div>
+    </footer>
+</div>
+
+<script>
+/* ============================================================
+   情绪映射表
+   ============================================================ */
+const EMO_META = {
+    happy:     { cn: '开心', color: '#22c55e', icon: 'fa-face-smile-beam', bg: 'rgba(34,197,94,0.08)' },
+    surprised: { cn: '惊讶', color: '#f59e0b', icon: 'fa-face-surprise',   bg: 'rgba(245,158,11,0.08)' },
+    angry:     { cn: '愤怒', color: '#ef4444', icon: 'fa-face-angry',      bg: 'rgba(239,68,68,0.08)' },
+    sad:       { cn: '悲伤', color: '#38bdf8', icon: 'fa-face-sad-tear',   bg: 'rgba(56,189,248,0.08)' },
+    neutral:   { cn: '平静', color: '#6b7280', icon: 'fa-face-meh',        bg: 'rgba(107,114,128,0.08)' },
+    drowsy:    { cn: '困倦', color: '#a855f7', icon: 'fa-face-tired',      bg: 'rgba(168,85,247,0.08)' },
+};
+
+/* ============================================================
+   Chart.js 配置
+   ============================================================ */
+Chart.defaults.color = '#7a8ba8';
+Chart.defaults.font.family = "'JetBrains Mono', monospace";
+Chart.defaults.font.size = 10;
+Chart.defaults.plugins.legend.display = false;
+Chart.defaults.elements.point.radius = 0;
+Chart.defaults.elements.line.tension = 0.3;
+Chart.defaults.elements.line.borderWidth = 1.5;
+const GRID_COLOR = 'rgba(30,45,69,0.6)';
+
+const motionChart = new Chart(document.getElementById('motion-chart'), {
+    type: 'line',
+    data: { labels: [], datasets: [{ data: [], borderColor: '#00e5a0', backgroundColor: 'rgba(0,229,160,0.08)', fill: true }] },
+    options: {
+        responsive: true, maintainAspectRatio: false,
+        scales: { x: { display: false }, y: { min: 0, max: 100, grid: { color: GRID_COLOR }, ticks: { stepSize: 50 } } },
+        animation: { duration: 200 },
+    }
+});
+
+const focusChart = new Chart(document.getElementById('focus-chart'), {
+    type: 'line',
+    data: { labels: [], datasets: [{ data: [], borderColor: '#00e5a0', backgroundColor: 'rgba(0,229,160,0.06)', fill: true }] },
+    options: {
+        responsive: true, maintainAspectRatio: false,
+        scales: { x: { display: false }, y: { min: 0, max: 100, grid: { color: GRID_COLOR }, ticks: { stepSize: 25 } } },
+        animation: { duration: 200 },
+    }
+});
+
+const motionTrendChart = new Chart(document.getElementById('motion-trend-chart'), {
+    type: 'line',
+    data: { labels: [], datasets: [{ data: [], borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.06)', fill: true }] },
+    options: {
+        responsive: true, maintainAspectRatio: false,
+        scales: { x: { display: false }, y: { min: 0, max: 100, grid: { color: GRID_COLOR }, ticks: { stepSize: 50 } } },
+        animation: { duration: 200 },
+    }
+});
+
+/* ============================================================
+   DOM 缓存
+   ============================================================ */
+const $ = id => document.getElementById(id);
+const personDot = $('person-dot');
+const personText = $('person-text');
+const uptimeEl = $('uptime');
+const emoTag = $('emo-tag');
+const emoCn = $('emo-cn');
+const emoConf = $('emo-conf');
+const emoInline = $('emo-inline');
+const focusNum = $('focus-num');
+const gaugeArc = $('gauge-arc');
+const motionNum = $('motion-num');
+const motionAcc = $('motion-acc');
+const motionInline = $('motion-inline');
+const modelBadge = $('model-badge');
+const modelBadgeText = $('model-badge-text');
+const emoMethodBadge = $('emo-method-badge');
+const emoMethodText = $('emo-method-text');
+
+/* ============================================================
+   更新模型状态标签
+   ============================================================ */
+function updateModelBadge(method) {
+    const isModel = method === 'model';
+    // 顶部 badge
+    modelBadge.className = 'model-badge ' + (isModel ? 'model' : 'rule');
+    modelBadgeText.textContent = isModel ? 'ONNX' : 'RULE';
+    modelBadge.querySelector('i').className = isModel
+        ? 'fa-solid fa-microchip' : 'fa-solid fa-gear';
+    // 情绪面板 badge
+    emoMethodBadge.className = 'model-badge ' + (isModel ? 'model' : 'rule');
+    emoMethodText.textContent = isModel ? 'MODEL' : 'RULE';
+}
+
+/* ============================================================
+   数据更新
+   ============================================================ */
+let tick = 0;
+
+function updateUI(data) {
+    tick++;
+
+    /* ---- 系统模型状态 ---- */
+    const sys = data.system;
+    updateModelBadge(sys.emotion_method);
+
+    /* ---- 人存在 ---- */
+    const p = data.person;
+    personDot.className = 'status-dot ' + (p.status === 'present' ? 'online' : p.status === 'lost' ? 'lost' : 'offline');
+    const stMap = { present: 'Detected', lost: 'Lost', offline: 'Offline' };
+    personText.textContent = stMap[p.status] || 'Offline';
+    personText.style.color = p.status === 'present' ? 'var(--accent)' : p.status === 'lost' ? 'var(--warn)' : 'var(--danger)';
+
+    const sec = Math.floor(p.uptime || 0);
+    uptimeEl.textContent = String(Math.floor(sec / 60)).padStart(2, '0') + ':' + String(sec % 60).padStart(2, '0');
+
+    /* ---- 情绪 ---- */
+    const e = data.emotion;
+    const em = EMO_META[e.current] || EMO_META.neutral;
+    emoCn.textContent = em.cn;
+    emoConf.textContent = Math.round(e.confidence * 100) + '%';
+    emoTag.style.color = em.color;
+    emoTag.style.borderColor = em.color;
+    emoTag.style.background = em.bg;
+    emoTag.querySelector('i').className = 'fa-solid ' + em.icon;
+    emoInline.textContent = em.cn;
+    emoInline.style.color = em.color;
+
+    const scores = e.scores || {};
+    const maxS = Math.max(0.01, ...Object.values(scores));
+    for (const key of Object.keys(EMO_META)) {
+        const v = scores[key] || 0;
+        const bar = $('bar-' + key);
+        const val = $('val-' + key);
+        if (bar) bar.style.width = (v / maxS * 100) + '%';
+        if (val) val.textContent = v.toFixed(2);
+    }
+
+    /* ---- 专注度 ---- */
+    const f = data.focus;
+    const fs = f.score;
+    focusNum.innerHTML = Math.round(fs) + '<span class="gauge-unit">%</span>';
+    focusNum.style.color = fs > 60 ? 'var(--accent)' : fs > 30 ? 'var(--warn)' : 'var(--danger)';
+    gaugeArc.setAttribute('stroke-dashoffset', (251.3 * (1 - Math.max(0, Math.min(100, fs)) / 100)).toFixed(1));
+
+    $('m-eye').textContent = f.eye_openness.toFixed(3);
+    $('m-yaw').textContent = f.head_yaw.toFixed(3);
+    $('m-pitch').textContent = f.head_pitch.toFixed(3);
+    $('m-blink').textContent = f.blink_rate.toFixed(1) + ' /min';
+    $('m-fmotion').textContent = f.head_motion.toFixed(4);
+
+    $('m-eye').style.color = f.eye_openness < 0.2 ? 'var(--danger)' : 'var(--fg)';
+    $('m-blink').style.color = f.blink_rate > 25 ? 'var(--danger)' : f.blink_rate < 5 ? 'var(--warn)' : 'var(--fg)';
+
+    /* ---- 运动量 ---- */
+    const m = data.motion;
+    const mi = m.intensity;
+    motionNum.innerHTML = mi.toFixed(1) + '<span class="gauge-unit">%</span>';
+    motionNum.style.color = mi < 20 ? 'var(--accent)' : mi < 50 ? 'var(--warn)' : 'var(--danger)';
+    motionAcc.textContent = m.accumulated.toFixed(2);
+    motionInline.textContent = mi.toFixed(1) + '%';
+    motionInline.style.color = mi < 20 ? 'var(--accent)' : mi < 50 ? 'var(--warn)' : 'var(--danger)';
+
+    /* ---- 图表（每 3 tick） ---- */
+    if (tick % 3 === 0) {
+        const mh = m.history || [];
+        motionChart.data.labels = mh.map(() => '');
+        motionChart.data.datasets[0].data = mh;
+        motionChart.update('none');
+
+        const fh = f.history || [];
+        focusChart.data.labels = fh.map(() => '');
+        focusChart.data.datasets[0].data = fh;
+        focusChart.data.datasets[0].borderColor = fs > 60 ? '#00e5a0' : fs > 30 ? '#f59e0b' : '#ef4444';
+        focusChart.data.datasets[0].backgroundColor = fs > 60 ? 'rgba(0,229,160,0.06)' : fs > 30 ? 'rgba(245,158,11,0.06)' : 'rgba(239,68,68,0.06)';
+        focusChart.update('none');
+
+        motionTrendChart.data.labels = mh.map(() => '');
+        motionTrendChart.data.datasets[0].data = mh;
+        motionTrendChart.update('none');
+    }
+
+    /* ---- 系统栏 ---- */
+    $('local-fps-tag').textContent = sys.local_fps.toFixed(0) + ' fps';
+    $('ip-fps-tag').textContent = sys.ip_fps.toFixed(0) + ' fps';
+    $('sys-local').textContent = 'Local ' + sys.local_cam.split(' ').pop() + ': ' + sys.local_fps.toFixed(0) + ' fps';
+    $('sys-ip').textContent = 'IP: ' + sys.ip_fps.toFixed(0) + ' fps';
+    $('sys-person').textContent = 'Person: ' + (p.detected ? 'Yes (L:' + p.local + ' IP:' + p.ip + ')' : 'No');
+    $('sys-model').textContent = 'Emo: ' + (sys.emotion_model === 'none' ? 'Rule' : sys.emotion_model);
+}
+
+/* ============================================================
+   轮询
+   ============================================================ */
+async function poll() {
+    try {
+        const resp = await fetch('/api/status');
+        if (resp.ok) {
+            const data = await resp.json();
+            updateUI(data);
+        }
+    } catch (err) { /* 静默 */ }
+}
+
+setInterval(poll, 200);
+poll();
+</script>
+</body>
+</html>
