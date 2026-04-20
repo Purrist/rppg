@@ -1,12 +1,12 @@
 """
-rPPG 心率监测 V8.2 (精确 ROI + 快速响应)
+rPPG 心率监测 V9.2 (简单可靠 ROI + peak 优先融合)
 
-V8.1 → V8.2 改动:
-  1. ROI 定义重写: 不再猜关键点位置，改用 468 点计算精确人脸框
-     + 眉毛关键点(159/145)定位额头/脸颊分界线
-  2. EMA 加快: alpha 从 0.04→0.12（高质量时 ~2 秒跟踪变化）
-  3. 质量门槛降低: 25→20，避免长时间冻结
-  4. 中值窗口缩小: 9→7
+V9.1 → V9.2 改动:
+  1. ROI 回归简单方案: 468点bbox + 眉毛分上下 + 鼻尖分左右
+     去掉旋转矩阵, 用简单的矩形框 + 直角显示
+  2. 融合策略反转: peak 为主(60%), FFT 仅辅助(40%)
+     peak 质量合格时直接用 peak
+  3. 侧脸自适应保留: 鼻尖到脸边缘距离 < 28% 时跳过该脸颊
 """
 
 import cv2
@@ -24,27 +24,24 @@ from collections import deque
 app = Flask(__name__)
 
 # ============================================================
-#  配置参数
-# ============================================================
 CAMERA_ID_DEFAULT = 0
 DEFAULT_IP_CAMERA_URL = "http://10.215.158.45:8080/video"
 
 POS_WINDOW         = 48
 BUFFER_SIZE        = 300
-HR_MIN_FREQ        = 0.75
-HR_MAX_FREQ        = 3.0
+HR_MIN_FREQ        = 0.85
+HR_MAX_FREQ        = 2.8
 BW_ORDER           = 3
-BW_LOW             = 0.7
-BW_HIGH            = 3.5
+BW_LOW             = 0.85
+BW_HIGH            = 2.8
 MEDIAN_KERNEL      = 5
-HR_MEDIAN_WIN      = 7         # V8.1=9 → V8.2=7
-HR_MAX_DELTA_SEC   = 8         # V8.1=6 → V8.2=8（稍放宽）
-EMA_ALPHA_HIGH      = 0.12     # V8.1=0.04 → 0.12（快 ~2s 跟踪）
-EMA_ALPHA_LOW       = 0.05     # V8.1=0.015 → 0.05
+HR_MEDIAN_WIN      = 7
+HR_MAX_DELTA_SEC   = 10
+EMA_ALPHA           = 0.06
 DETECT_INTERVAL    = 3
 COMPUTE_INTERVAL   = 8
 MIN_BUFFER_COMPUTE = POS_WINDOW * 3
-MIN_ROI_PIXELS     = 400       # V8.1=300 → 400（稍微提高，过滤太小的区域）
+MIN_ROI_PIXELS     = 400
 BASE_MOTION_THRESH = 12.0
 MOTION_PATIENCE    = 10
 LIGHT_CHANGE_THRESH = 25.0
@@ -52,10 +49,11 @@ CSV_LOG_INTERVAL   = 10
 MOTION_HISTORY_LEN = 5
 BBOX_RETAIN_FRAMES = 30
 PEAK_MIN_DISTANCE   = 12
+DISPLAY_UPDATE_SEC  = 3.0
+MAX_DISPLAY_CHANGE  = 10
+MIN_CHEEK_RATIO    = 0.28
 
 
-# ============================================================
-#  数据记录器
 # ============================================================
 class DataLogger:
     def __init__(self, filename='rppg_log.csv'):
@@ -93,8 +91,6 @@ class DataLogger:
 
 
 # ============================================================
-#  rPPG 处理器 V8.2
-# ============================================================
 class RPPGProcessor:
 
     def __init__(self, camera_id=0):
@@ -110,6 +106,7 @@ class RPPGProcessor:
         self.pulse_history = []
 
         self.hr = 0.0
+        self._hr_internal = 0.0
         self.signal_quality = 0.0
         self.face_detected = False
         self.face_confidence = 0.0
@@ -119,12 +116,14 @@ class RPPGProcessor:
         self.processed_frames = 0
         self.actual_fs = 0.0
         self.last_hr_time = 0.0
+        self.last_display_update = 0.0
 
         self.current_roi_name = "none"
         self.best_skin_ratio = 0.0
         self.active_roi_count = 0
         self.fusion_weights = {}
 
+        # 每个元素: (name, (x1,y1,x2,y2), skin_ratio)
         self.all_roi_rects = []
         self.display_roi_rect = None
 
@@ -149,7 +148,6 @@ class RPPGProcessor:
 
         self.lock = threading.Lock()
         self.running = True
-
         self.switch_lock = threading.Lock()
         self.switch_event = threading.Event()
         self.switch_target = None
@@ -174,25 +172,20 @@ class RPPGProcessor:
         else:
             self.cap = self._open_cap(self.camera_id)
             print(f"[OK] 摄像头 (本地): {self.camera_id}")
-
         if self.cap is None:
             raise RuntimeError("无法打开任何摄像头")
-
         w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         print(f"[OK] 分辨率: {w}x{h}")
-
         self.face_mesh = mp.solutions.face_mesh.FaceMesh(
-            static_image_mode=False,
-            max_num_faces=1,
+            static_image_mode=False, max_num_faces=1,
             refine_landmarks=False,
             min_detection_confidence=0.3,
-            min_tracking_confidence=0.3,
-        )
-        print("[OK] FaceMesh (468 关键点，精确 ROI)")
-        print(f"[OK] 缓冲区 {BUFFER_SIZE} 帧 ({BUFFER_SIZE/30:.1f}s)")
-        print(f"[OK] EMA alpha={EMA_ALPHA_HIGH}(high) / {EMA_ALPHA_LOW}(low)")
-
+            min_tracking_confidence=0.3)
+        print("[OK] FaceMesh (468 关键点, 简单矩形 ROI)")
+        print(f"[OK] 融合: peak 为主(60%), FFT 辅助(40%)")
+        print(f"[OK] 显示: 每{DISPLAY_UPDATE_SEC:.0f}s刷新, "
+              f"单次≤{MAX_DISPLAY_CHANGE}BPM")
         threading.Thread(target=self._switch_worker, daemon=True).start()
 
     def stop(self):
@@ -210,13 +203,11 @@ class RPPGProcessor:
             if target is None:
                 continue
             src_type, src_val = target
-
             with self.switch_lock:
                 self._reset_state()
                 if self.cap and self.cap.isOpened():
                     self.cap.release()
                 self.cap = None
-
                 if src_type == 'local':
                     self.camera_url = None
                     self.camera_id = int(src_val)
@@ -225,7 +216,6 @@ class RPPGProcessor:
                     self.camera_url = str(src_val)
                     self.camera_id = None
                     self.cap = self._open_cap(str(src_val))
-
                 if self.cap is None:
                     self.camera_url = None
                     self.camera_id = 0
@@ -253,47 +243,50 @@ class RPPGProcessor:
         self.light_change_counter = 0
         self.signal_paused = False
         self.paused_reason = ""
+        self._hr_internal = 0.0
+        self.hr = 0.0
 
     def request_switch(self, src_type, src_val):
         self.switch_target = (src_type, src_val)
         self.switch_event.set()
 
     # ================================================================
-    #  [V8.2] ROI 定义：基于 468 点人脸框 + 眉毛分界线
+    #  [V9.2] ROI: 简单可靠方案
     # ================================================================
     def define_rois_from_mesh(self, frame, landmarks):
         """
-        V8 的问题：用 pts[159], pts[116], pts[234] 等单个关键点定义脸颊角落，
-        这些点的实际位置不一定在脸颊区域内，导致 ROI 太小或位置错误。
+        最简方案，没有任何复杂计算:
+        1. 468 点算人脸 bbox
+        2. 眉毛关键点 (159, 145) 确定额头/脸颊分界线
+        3. 鼻尖 (4) 确定左右分割线
+        4. 每个区域就是简单的矩形，内缩 8-12%
+        5. 侧脸时窄侧 < 28% 跳过
 
-        V8.2 的做法：
-        1. 用全部 468 个关键点计算精确的人脸边界框
-        2. 用眉毛关键点 (159=左眉尾, 145=右眉尾) 确定额头/脸颊分界线
-        3. 在这个精确框内按比例定义 3 个区域
-
-        额头 (weight=0.5): 脸顶部 → 眉毛上方
-        左脸颊 (weight=1.2): 眉毛下方 → 下颌，左半边
-        右脸颊 (weight=1.2): 眉毛下方 → 下颌，右半边
+        关键点位置说明:
+        pts[4]   = 鼻尖
+        pts[10]  = 额头顶部中心
+        pts[159] = 左眉毛外端
+        pts[145] = 右眉毛外端
+        pts[234] = 左脸颊边缘 (鼻翼旁)
+        pts[454] = 右脸颊边缘 (鼻翼旁)
         """
         h, w = frame.shape[:2]
         pts = landmarks.landmark
 
-        # --- 步骤 1: 用全部 468 个关键点计算精确人脸框 ---
+        # --- 人脸 bbox (全部 468 点) ---
         xs = [lm.x * w for lm in pts]
         ys = [lm.y * h for lm in pts]
-        face_x1 = int(min(xs))
-        face_y1 = int(min(ys))
-        face_x2 = int(max(xs))
-        face_y2 = int(max(ys))
+        face_x1, face_x2 = int(min(xs)), int(max(xs))
+        face_y1, face_y2 = int(min(ys)), int(max(ys))
         face_w = face_x2 - face_x1
         face_h = face_y2 - face_y1
 
-        # --- 步骤 2: 眉毛 y 坐标（额头/脸颊分界线）---
-        # pts[159] = 左眉毛外端, pts[145] = 右眉毛外端
-        # 取两者 y 均值作为分界线
+        # --- 眉毛 Y (额头/脸颊分界) ---
         brow_y = int((pts[159].y + pts[145].y) / 2 * h)
 
-        # --- 步骤 3: 定义 3 个 ROI ---
+        # --- 鼻尖 X (左右分割) ---
+        nose_x = int(pts[4].x * w)
+
         def safe(x1, y1, x2, y2):
             x1 = max(0, x1)
             y1 = max(0, y1)
@@ -307,43 +300,39 @@ class RPPGProcessor:
 
         rois = []
 
-        # 额头: 脸顶 → 眉毛上方，水平居中
-        # y: face顶部 5% → 眉毛上方 3%
-        # x: 脸宽 15%-85%（避边缘）
-        fh_rect = safe(
-            face_x1 + int(face_w * 0.15),
-            face_y1 + int(face_h * 0.05),
-            face_x2 - int(face_w * 0.15),
-            brow_y - int(face_h * 0.03),
-        )
+        # ========== 额头 ==========
+        # 范围: 脸顶 → 眉毛, 水平居中
+        fh_x1 = face_x1 + int(face_w * 0.15)
+        fh_y1 = face_y1 + int(face_h * 0.05)
+        fh_x2 = face_x2 - int(face_w * 0.15)
+        fh_y2 = brow_y - int(face_h * 0.03)
+        fh_rect = safe(fh_x1, fh_y1, fh_x2, fh_y2)
         if fh_rect:
             rois.append(("forehead", fh_rect, 0.5))
 
-        # 脸颊区域: 眉毛下方 → 脸底部 8%
-        cheek_y1 = brow_y + int(face_h * 0.05)
-        cheek_y2 = face_y2 - int(face_h * 0.08)
+        # ========== 脸颊公共范围 ==========
+        ck_y1 = brow_y + int(face_h * 0.06)
+        ck_y2 = face_y2 - int(face_h * 0.08)
 
-        # 左脸颊: 脸左边 5% → 脸中心偏左
-        # x: 脸宽 5% → 45%
-        lc_rect = safe(
-            face_x1 + int(face_w * 0.05),
-            cheek_y1,
-            face_x1 + int(face_w * 0.45),
-            cheek_y2,
-        )
-        if lc_rect:
-            rois.append(("left_cheek", lc_rect, 1.2))
+        # ========== 左脸颊 ==========
+        # 范围: 脸左边缘 → 鼻尖
+        left_w = nose_x - face_x1
+        if left_w >= face_w * MIN_CHEEK_RATIO:
+            lc_x1 = face_x1 + int(face_w * 0.05)
+            lc_x2 = nose_x - int(face_w * 0.02)
+            lc_rect = safe(lc_x1, ck_y1, lc_x2, ck_y2)
+            if lc_rect:
+                rois.append(("left_cheek", lc_rect, 1.2))
 
-        # 右脸颊: 脸中心偏右 → 脸右边 5%
-        # x: 脸宽 55% → 95%
-        rc_rect = safe(
-            face_x1 + int(face_w * 0.55),
-            cheek_y1,
-            face_x2 - int(face_w * 0.05),
-            cheek_y2,
-        )
-        if rc_rect:
-            rois.append(("right_cheek", rc_rect, 1.2))
+        # ========== 右脸颊 ==========
+        # 范围: 鼻尖 → 脸右边缘
+        right_w = face_x2 - nose_x
+        if right_w >= face_w * MIN_CHEEK_RATIO:
+            rc_x1 = nose_x + int(face_w * 0.02)
+            rc_x2 = face_x2 - int(face_w * 0.05)
+            rc_rect = safe(rc_x1, ck_y1, rc_x2, ck_y2)
+            if rc_rect:
+                rois.append(("right_cheek", rc_rect, 1.2))
 
         return rois
 
@@ -359,7 +348,6 @@ class RPPGProcessor:
     def extract_fused_rgb(self, frame, roi_list):
         candidates = []
         all_rects = []
-
         for name, rect, weight in roi_list:
             x1, y1, x2, y2 = rect
             roi = frame[y1:y2, x1:x2]
@@ -388,8 +376,8 @@ class RPPGProcessor:
             fused /= total_w
 
         best = max(candidates, key=lambda c: c["score"])
-        weights = {c["name"]: round(c["skin_ratio"], 2) for c in candidates}
-
+        weights = {c["name"]: round(c["skin_ratio"], 2)
+                   for c in candidates}
         return (fused, best["rect"], best["skin_ratio"],
                 len(candidates), weights, all_rects)
 
@@ -418,12 +406,14 @@ class RPPGProcessor:
                 changed = True
                 self.light_change_detected = True
                 self.light_change_counter = 30
-                self.motion_threshold = self._base_motion_thresh(roi_gray) * 2.5
+                self.motion_threshold = \
+                    self._base_motion_thresh(roi_gray) * 2.5
             else:
                 if self.light_change_counter > 0:
                     self.light_change_counter -= 1
                     f = 1.0 + 1.5 * (self.light_change_counter / 30)
-                    self.motion_threshold = self._base_motion_thresh(roi_gray) * f
+                    self.motion_threshold = \
+                        self._base_motion_thresh(roi_gray) * f
                     if self.light_change_counter == 0:
                         self.light_change_detected = False
                 else:
@@ -433,10 +423,8 @@ class RPPGProcessor:
 
     def _base_motion_thresh(self, roi_gray):
         b = float(np.mean(roi_gray))
-        if b < 50:
-            return BASE_MOTION_THRESH * 1.5
-        if b > 200:
-            return BASE_MOTION_THRESH * 0.8
+        if b < 50: return BASE_MOTION_THRESH * 1.5
+        if b > 200: return BASE_MOTION_THRESH * 0.8
         return BASE_MOTION_THRESH
 
     # -------------------- POS 投影 --------------------
@@ -455,7 +443,8 @@ class RPPGProcessor:
             p1 = centered @ h1
             p2 = centered @ h2
             s1, s2 = np.std(p1), np.std(p2)
-            pulse[i] = p1[-1] + (s1 / s2) * p2[-1] if s2 > 1e-8 else p1[-1]
+            pulse[i] = p1[-1] + (s1 / s2) * p2[-1] \
+                if s2 > 1e-8 else p1[-1]
         return pulse
 
     # -------------------- 信号处理 --------------------
@@ -490,7 +479,7 @@ class RPPGProcessor:
         except Exception:
             return signal
 
-    # -------------------- FFT 心率 --------------------
+    # -------------------- FFT + 抛物线插值 --------------------
     def estimate_hr_fft(self, pulse, timestamps):
         if pulse is None:
             return 0.0, 0.0
@@ -520,10 +509,25 @@ class RPPGProcessor:
         hr_mags = mags[mask]
         hr_freqs = freqs[mask]
         peak_idx = np.argmax(hr_mags)
-        hr_bpm = hr_freqs[peak_idx] * 60.0
-        quality = np.clip(
-            (hr_mags[peak_idx] / (np.mean(hr_mags) + 1e-10)) * 12, 0, 100)
 
+        if 0 < peak_idx < len(hr_freqs) - 1:
+            a = np.log(hr_mags[peak_idx - 1] + 1e-10)
+            b = np.log(hr_mags[peak_idx] + 1e-10)
+            g = np.log(hr_mags[peak_idx + 1] + 1e-10)
+            denom = a - 2 * b + g
+            if abs(denom) > 1e-10:
+                p = 0.5 * (a - g) / denom
+                peak_freq = hr_freqs[peak_idx - 1] + \
+                    p * (hr_freqs[peak_idx] - hr_freqs[peak_idx - 1])
+            else:
+                peak_freq = hr_freqs[peak_idx]
+        else:
+            peak_freq = hr_freqs[peak_idx]
+
+        hr_bpm = peak_freq * 60.0
+        quality = np.clip(
+            (hr_mags[peak_idx] / (np.mean(hr_mags) + 1e-10)) * 12,
+            0, 100)
         if hr_bpm < 45 or hr_bpm > 180:
             quality *= 0.1
             hr_bpm = 0.0
@@ -564,53 +568,54 @@ class RPPGProcessor:
         hr_bpm = 60.0 / np.median(clean)
         cv = np.std(clean) / (np.mean(clean) + 1e-10)
         quality = np.clip(100 - cv * 200, 0, 100)
-
         if hr_bpm < 45 or hr_bpm > 180:
             quality *= 0.1
             hr_bpm = 0.0
         return hr_bpm, quality
 
-    # -------------------- 双路融合 --------------------
+    # -------------------- [V9.2] peak 优先融合 --------------------
     def estimate_hr_combined(self, pulse, timestamps):
+        """
+        peak 更准, FFT 很乱。
+        策略:
+          两者都有且接近 (<8): peak×0.6 + fft×0.4 (peak 为主)
+          两者都有但远:       如果 peak 质量 >= 25, 直接用 peak
+                             否则取质量高的
+          仅 peak:            直接用 peak
+          仅 FFT:             直接用 FFT (保底)
+        """
         hr_fft, q_fft = self.estimate_hr_fft(pulse, timestamps)
         hr_peak, q_peak = self.estimate_hr_peak(pulse, timestamps)
         self.last_hr_fft = hr_fft
         self.last_hr_peak = hr_peak
 
         fv, pv = hr_fft > 0, hr_peak > 0
+
         if fv and pv:
             d = abs(hr_fft - hr_peak)
             if d < 8:
-                return (hr_fft + hr_peak) / 2, max(q_fft, q_peak), "avg"
-            elif d < 20:
-                if q_fft >= q_peak:
-                    return hr_fft, q_fft * 0.9, "fft"
-                return hr_peak, q_peak * 0.9, "peak"
+                # 接近: peak 为主 60%, FFT 辅助 40%
+                return (hr_peak * 0.6 + hr_fft * 0.4,
+                        max(q_fft, q_peak), "p60f40")
             else:
-                if q_fft > q_peak * 1.3:
-                    return hr_fft, q_fft * 0.7, "fft"
-                if q_peak > q_fft * 1.3:
-                    return hr_peak, q_peak * 0.7, "peak"
-                return 0.0, 0.0, "none"
-        elif fv:
-            return hr_fft, q_fft, "fft"
+                # 远: peak 质量合格就用 peak
+                if q_peak >= 25:
+                    return hr_peak, q_peak, "peak"
+                # peak 质量也低, 取质量高的
+                if q_peak >= q_fft:
+                    return hr_peak, q_peak * 0.9, "peak"
+                return hr_fft, q_fft * 0.9, "fft"
         elif pv:
             return hr_peak, q_peak, "peak"
+        elif fv:
+            return hr_fft, q_fft, "fft"
         return 0.0, 0.0, "none"
 
-    # -------------------- [V8.2] 心率限制 + 快速 EMA --------------------
+    # -------------------- 心率限制 + EMA --------------------
     def apply_hr_limits(self, raw_hr, quality, now):
-        """
-        四层过滤:
-        1. 质量门槛 >= 20
-        2. 中值平滑 (窗口 7)
-        3. 速度限制 (8 BPM/s)
-        4. EMA (alpha=0.12 高质量, 0.05 低质量)
-        """
-        if quality < 20:
-            return self.hr
+        if quality < 15:
+            return self._hr_internal
 
-        # 中值
         self.hr_raw_history.append(raw_hr)
         if len(self.hr_raw_history) > HR_MEDIAN_WIN * 3:
             self.hr_raw_history.pop(0)
@@ -620,27 +625,25 @@ class RPPGProcessor:
         else:
             hr_med = raw_hr
 
-        # 速度限制
-        if self.hr > 0 and self.last_hr_time > 0:
+        if self._hr_internal > 0 and self.last_hr_time > 0:
             dt_s = now - self.last_hr_time
             if dt_s > 0:
                 mx = HR_MAX_DELTA_SEC * dt_s
-                delta = hr_med - self.hr
+                delta = hr_med - self._hr_internal
                 if abs(delta) > mx:
-                    hr_med = self.hr + np.sign(delta) * mx
+                    hr_med = self._hr_internal + np.sign(delta) * mx
 
         if hr_med < 45 or hr_med > 180:
-            return self.hr
+            return self._hr_internal
 
-        # EMA 低通
-        alpha = EMA_ALPHA_HIGH if quality >= 30 else EMA_ALPHA_LOW
-        if self.hr > 0:
-            hr_ema = alpha * hr_med + (1 - alpha) * self.hr
+        if self._hr_internal > 0:
+            self._hr_internal = EMA_ALPHA * hr_med + \
+                (1 - EMA_ALPHA) * self._hr_internal
         else:
-            hr_ema = hr_med
+            self._hr_internal = hr_med
 
         self.last_hr_time = now
-        return hr_ema
+        return self._hr_internal
 
     # -------------------- 诊断 --------------------
     def get_diagnostics(self):
@@ -653,7 +656,7 @@ class RPPGProcessor:
             diags.append("LIGHT_CHANGE")
         elif self.best_skin_ratio < 0.3:
             diags.append("LOW_SKIN")
-        elif self.signal_quality < 20:
+        elif self.signal_quality < 15:
             diags.append("LOW_SNR")
         elif len(self.rgb_buffer) < MIN_BUFFER_COMPUTE:
             diags.append("BUFFERING")
@@ -672,12 +675,13 @@ class RPPGProcessor:
                 self.bbox_lost = False
                 self.bbox_lost_frames = 0
             else:
-                if (self.last_landmarks is not None and
-                        self.bbox_lost_frames < BBOX_RETAIN_FRAMES):
+                if (self.last_landmarks is not None
+                        and self.bbox_lost_frames < BBOX_RETAIN_FRAMES):
                     self.bbox_lost_frames += 1
                     self.bbox_lost = True
                     self.face_detected = True
-                    self.face_confidence = max(0, self.face_confidence - 0.03)
+                    self.face_confidence = max(0,
+                        self.face_confidence - 0.03)
                 else:
                     self.last_landmarks = None
                     self.face_detected = False
@@ -707,7 +711,8 @@ class RPPGProcessor:
         self._handle_face_detection(frame, rgb_frame)
 
         if self.last_landmarks is not None:
-            roi_list = self.define_rois_from_mesh(frame, self.last_landmarks)
+            roi_list = self.define_rois_from_mesh(
+                frame, self.last_landmarks)
             result = self.extract_fused_rgb(frame, roi_list)
 
             if result[0] is not None:
@@ -735,7 +740,8 @@ class RPPGProcessor:
                         self.paused_reason = "motion"
                 else:
                     if self.motion_frames > 0:
-                        self.motion_frames = max(0, self.motion_frames - 2)
+                        self.motion_frames = max(
+                            0, self.motion_frames - 2)
                     if self.motion_frames == 0:
                         self.signal_paused = False
                         self.paused_reason = ""
@@ -748,29 +754,46 @@ class RPPGProcessor:
                             self.rgb_buffer.pop(0)
                             self.time_buffer.pop(0)
 
-                        if (len(self.rgb_buffer) >= MIN_BUFFER_COMPUTE and
-                                self.processed_frames % COMPUTE_INTERVAL == 0):
-
-                            pulse = self.pos_extract(np.array(self.rgb_buffer))
-                            if pulse is not None and len(pulse) > POS_WINDOW * 2:
+                        if (len(self.rgb_buffer) >= MIN_BUFFER_COMPUTE
+                                and self.processed_frames %
+                                COMPUTE_INTERVAL == 0):
+                            pulse = self.pos_extract(
+                                np.array(self.rgb_buffer))
+                            if (pulse is not None
+                                    and len(pulse) > POS_WINDOW * 2):
                                 hr_raw, quality, method = \
                                     self.estimate_hr_combined(
                                         pulse, self.time_buffer)
                                 if self.light_change_detected:
                                     quality *= 0.5
                                 if hr_raw > 0:
-                                    new_hr = self.apply_hr_limits(
-                                        hr_raw, quality, now)
-                                    self.hr = new_hr
+                                    self._hr_internal = \
+                                        self.apply_hr_limits(
+                                            hr_raw, quality, now)
                                     self.signal_quality = quality
                                     self.hr_method = method
-                                    self.hr_output_history.append(
-                                        round(new_hr, 1))
-                                    if len(self.hr_output_history) > 120:
-                                        self.hr_output_history.pop(0)
+
+                                    if (now - self.last_display_update
+                                            >= DISPLAY_UPDATE_SEC):
+                                        candidate = self._hr_internal
+                                        if self.hr > 0:
+                                            delta = candidate - self.hr
+                                            if abs(delta) > \
+                                                    MAX_DISPLAY_CHANGE:
+                                                candidate = self.hr + \
+                                                    np.sign(delta) * \
+                                                    MAX_DISPLAY_CHANGE
+                                        self.hr = candidate
+                                        self.last_display_update = now
+                                        self.hr_output_history.append(
+                                            round(candidate, 1))
+                                        if len(self.hr_output_history) > 120:
+                                            self.hr_output_history.pop(0)
+
                                     self.logger.log(
-                                        new_hr, quality, method,
-                                        best_skin, self.motion_score,
+                                        self._hr_internal, quality,
+                                        method, best_skin,
+                                        self.motion_score,
                                         self.fps, method,
                                         self.last_hr_peak,
                                         self.last_hr_fft)
@@ -798,31 +821,28 @@ class RPPGProcessor:
     # -------------------- HUD --------------------
     def draw_hud(self, frame):
         h, w = frame.shape[:2]
-
         overlay = frame.copy()
         cv2.rectangle(overlay, (0, 0), (w, 82), (0, 0, 0), -1)
         cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
 
-        # 绘制全部 3 个 ROI
         ROI_COLORS = {
             "forehead":    (0, 200, 255),
             "left_cheek":  (0, 230, 118),
             "right_cheek": (255, 180, 0),
         }
         ROI_LABELS = {
-            "forehead":    "Forehead",
-            "left_cheek":  "L-Cheek",
-            "right_cheek": "R-Cheek",
+            "forehead":    "FH",
+            "left_cheek":  "LC",
+            "right_cheek": "RC",
         }
 
         for name, (x1, y1, x2, y2), skin_r in self.all_roi_rects:
             color = ROI_COLORS.get(name, (200, 200, 200))
-            label = f"{ROI_LABELS.get(name, name)} {skin_r:.0%}"
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 1)
+            label = f"{ROI_LABELS.get(name, name)} {skin_r:.0%}"
             cv2.putText(frame, label, (x1, y1 - 5),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.32, color, 1)
 
-        # 心率
         if self.hr > 0:
             hr_str = f"{self.hr:.0f} BPM"
             if self.signal_paused:
@@ -863,13 +883,15 @@ class RPPGProcessor:
                     f"fft:{self.last_hr_fft:.0f} "
                     f"peak:{self.last_hr_peak:.0f}")
             cv2.putText(frame, line, (100, 58),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.3, (0, 180, 100), 1)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.3,
+                        (0, 180, 100), 1)
         else:
             cv2.putText(frame, "NO FACE DETECTED",
                         (100, 58), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
                         (0, 80, 255), 1)
 
-        fps_str = f"{self.fps:.0f}fps buf:{len(self.rgb_buffer)}/{BUFFER_SIZE}"
+        fps_str = (f"{self.fps:.0f}fps "
+                   f"buf:{len(self.rgb_buffer)}/{BUFFER_SIZE}")
         cv2.putText(frame, fps_str, (w - 210, 58),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.35, (80, 80, 80), 1)
 
@@ -982,14 +1004,17 @@ def get_hr():
 if __name__ == '__main__':
     try:
         print("=" * 58)
-        print("  rPPG Monitor V8.2 (Accurate ROI + Responsive)")
-        print("  ROI: Face bbox(468pts) + eyebrow boundary")
-        print("  EMA: alpha=0.12(high)/0.05(low)")
-        print("  Weights: forehead=0.5, cheeks=1.2")
+        print("  rPPG Monitor V9.2")
+        print("  ROI: 468点bbox + 眉毛分线 + 鼻尖分左右")
+        print("  侧脸: 窄侧 < 28% 时自动跳过")
+        print("  融合: peak为主60% / FFT辅助40%")
+        print(f"  显示: 每{DISPLAY_UPDATE_SEC:.0f}s刷新, "
+              f"单次≤{MAX_DISPLAY_CHANGE}BPM")
         print("-" * 58)
         print("  http://localhost:5000")
         print("=" * 58)
-        app.run(host='0.0.0.0', port=5000, threaded=True, debug=False)
+        app.run(host='0.0.0.0', port=5000,
+                threaded=True, debug=False)
     except KeyboardInterrupt:
         print("\n[INFO] 正在关闭...")
     finally:
