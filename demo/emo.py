@@ -1,11 +1,8 @@
 import cv2
-import base64
 import time
 import threading
 import numpy as np
-import mediapipe as mp
-from flask import Flask, request, jsonify
-from deepface import DeepFace
+from flask import Flask, request, jsonify, Response
 
 app = Flask(__name__)
 
@@ -14,80 +11,205 @@ app = Flask(__name__)
 # ======================
 IP_CAMERA_URL = "http://10.215.158.45:8080/video"
 LOCAL_CAMERA = 0
-g_camera_src = IP_CAMERA_URL
+g_camera_src = LOCAL_CAMERA
 g_processor = None
 
+ONNX_MODEL_PATH = r"C:\Users\purriste\Desktop\PYProject\rppg\backend\core\models\emotion-ferplus-8.onnx"
+
+FER_LABELS = ['neutral', 'happiness', 'surprise', 'sadness',
+              'anger', 'disgust', 'fear', 'contempt']
+
+EMOJI_MAP = {
+    'neutral': '😐', 'happiness': '😊', 'surprise': '😲',
+    'sadness': '😢', 'anger': '😠', 'disgust': '🤢',
+    'fear': '😨', 'contempt': '🤨', '未检测到人脸': '❓'
+}
+LABEL_ZH = {
+    'neutral': '平静', 'happiness': '高兴', 'surprise': '惊讶',
+    'sadness': '悲伤', 'anger': '愤怒', 'disgust': '厌恶',
+    'fear': '恐惧', 'contempt': '轻蔑', '未检测到人脸': '未检测到人脸'
+}
+
 
 # ======================
-# 极速情绪检测器（MediaPipe检测 + DeepFace分类）
+# FER+ 推理（无 CLAHE + 直接输出 + 激进 neutral 惩罚）
 # ======================
-class EmotionDetector:
+class FerPlusDetector:
+
+    def __init__(self, model_path):
+        self.net = cv2.dnn.readNetFromONNX(model_path)
+        self.net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
+        self.net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
+
+    def predict(self, face_bgr):
+        gray = cv2.cvtColor(face_bgr, cv2.COLOR_BGR2GRAY)
+        gray = cv2.resize(gray, (64, 64))
+        blob = gray.astype(np.float32).reshape(1, 1, 64, 64)
+        self.net.setInput(blob)
+        scores = self.net.forward()[0]
+
+        probs = self._softmax(scores)
+
+        probs[0] *= 0.6
+        probs[1] *= 0.85
+        probs[3] *= 1.15
+        probs[4] *= 0.85
+        probs = probs / probs.sum()
+
+        sorted_idx = np.argsort(probs)[::-1]
+        if sorted_idx[0] == 0:
+            gap = probs[0] - probs[sorted_idx[1]]
+            if gap < 0.12:
+                probs[0] *= 0.05
+                probs = probs / probs.sum()
+
+        cls = int(np.argmax(probs))
+        return FER_LABELS[cls], float(probs[cls])
+
+    @staticmethod
+    def _softmax(x):
+        e = np.exp(x - np.max(x))
+        return e / e.sum()
+
+
+# ======================
+# 人脸检测（高质量 Haar + 人脸对齐 + CLAHE 增强）
+# ======================
+class FaceDetector:
+
     def __init__(self):
-        # 用 MediaPipe 做人脸检测（CPU上极速，约 5ms）
-        self.face_detector = mp.solutions.face_detection.FaceDetection(
-            model_selection=0, min_detection_confidence=0.5
-        )
+        data_dir = cv2.data.haarcascades
+        self.frontal = cv2.CascadeClassifier(
+            data_dir + "haarcascade_frontalface_default.xml")
+        self.frontal_alt2 = cv2.CascadeClassifier(
+            data_dir + "haarcascade_frontalface_alt2.xml")
+        self.profile = cv2.CascadeClassifier(
+            data_dir + "haarcascade_profileface.xml")
+        self.eye_tree = cv2.CascadeClassifier(
+            data_dir + "haarcascade_eye_tree_eyeglasses.xml")
+        self.clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        self._last_rotate_time = 0
 
-    def detect_emotions(self, frame):
-        # 1. MediaPipe 极速定位人脸
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        h, w, _ = frame.shape
-        results = self.face_detector.process(rgb_frame)
-        
-        if not results.detections:
-            return []
+    def detect(self, frame, no_face_count=0):
+        h, w = frame.shape[:2]
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        gray = self.clahe.apply(gray)
 
-        formatted = []
-        for detection in results.detections:
-            bbox = detection.location_data.relative_bounding_box
-            x_min = int(bbox.xmin * w)
-            y_min = int(bbox.ymin * h)
-            box_w = int(bbox.width * w)
-            box_h = int(bbox.height * h)
+        boxes = []
 
-            # 上下左右各扩 15% 边界，防止切得太死影响情绪判断
-            pad_w = int(box_w * 0.15)
-            pad_h = int(box_h * 0.15)
-            x1 = max(0, x_min - pad_w)
-            y1 = max(0, y_min - pad_h)
-            x2 = min(w, x_min + box_w + 2 * pad_w)
-            y2 = min(h, y_min + box_h + 2 * pad_h)
-
-            # 2. 抠出纯净的人脸区域（去除背景干扰，提升准确度）
-            face_crop = frame[y1:y2, x1:x2]
-            if face_crop.size == 0:
+        for cascade in [self.frontal_alt2, self.frontal]:
+            if cascade.empty():
                 continue
+            faces = cascade.detectMultiScale(
+                gray, scaleFactor=1.1, minNeighbors=4, minSize=(50, 50))
+            for (x, y, bw, bh) in faces:
+                boxes.append((x, y, x + bw, y + bh))
 
-            # 3. DeepFace 仅做情绪分类（关键：跳过内部检测，极速）
-            try:
-                emo_result = DeepFace.analyze(
-                    img_path=face_crop,
-                    actions=["emotion"],
-                    enforce_detection=False,  # 核心：跳过耗时的 RetinaFace 检测
-                    silent=True,
-                    anti_spoofing=False,
-                )
-                
-                # DeepFace 返回格式兼容处理
-                emo_data = emo_result[0]["emotion"] if isinstance(emo_result, list) else emo_result["emotion"]
-                
-                # 百分制转 0~1 浮点数
-                normalized_emotions = {k: v / 100.0 for k, v in emo_data.items()}
-                
-                formatted.append({
-                    "box": [x1, y1, x2 - x1, y2 - y1],
-                    "emotions": normalized_emotions,
-                })
-            except Exception as e:
-                pass # 抠图太小等偶发错误直接跳过，避免卡线程
+        if boxes:
+            return self._nms(boxes)
 
-        return formatted
+        if not self.profile.empty():
+            for (x, y, bw, bh) in self.profile.detectMultiScale(
+                    gray, scaleFactor=1.1, minNeighbors=3, minSize=(50, 50)):
+                boxes.append((x, y, x + bw, y + bh))
+            gray_flip = cv2.flip(gray, 1)
+            for (x, y, bw, bh) in self.profile.detectMultiScale(
+                    gray_flip, scaleFactor=1.1, minNeighbors=3, minSize=(50, 50)):
+                boxes.append((w - x - bw, y, w - x, y + bh))
+
+        if boxes:
+            return self._nms(boxes)
+
+        if no_face_count >= 1 and (time.time() - self._last_rotate_time > 0.3):
+            self._last_rotate_time = time.time()
+            boxes = self._rotate_detect(gray, w, h)
+
+        return self._nms(boxes)
+
+    def _rotate_detect(self, gray, w, h):
+        # 缩小到 480px 做旋转检测，减少计算量
+        scale = min(1.0, 480.0 / w)
+        sw, sh = int(w * scale), int(h * scale)
+        small = cv2.resize(gray, (sw, sh))
+
+        boxes = []
+        # ★ 降低阈值：旋转后图像有插值模糊，需要更宽松的参数
+        # minNeighbors=2（允许一些误检，NMS 会清理）
+        # minSize=(25,25)（缩小图里的最小尺寸）
+        for angle in [-20, -15, -10, -5, 5, 10, 15, 20]:
+            M = cv2.getRotationMatrix2D((sw / 2, sh / 2), angle, 1.0)
+            rot = cv2.warpAffine(small, M, (sw, sh))
+            M_inv = cv2.invertAffineTransform(M)
+
+            for cascade in [self.frontal_alt2, self.frontal]:
+                if cascade.empty():
+                    continue
+                faces = cascade.detectMultiScale(
+                    rot, scaleFactor=1.08, minNeighbors=2, minSize=(25, 25))
+                for (x, y, bw, bh) in faces:
+                    pts = np.array([
+                        [x, y], [x + bw, y],
+                        [x, y + bh], [x + bw, y + bh]
+                    ], dtype=np.float64)
+                    pts = cv2.transform(
+                        pts.reshape(1, -1, 2), M_inv).reshape(-1, 2) / scale
+                    x1 = int(max(0, pts[:, 0].min()))
+                    y1 = int(max(0, pts[:, 1].min()))
+                    x2 = int(min(w, pts[:, 0].max()))
+                    y2 = int(min(h, pts[:, 1].max()))
+                    if (x2 - x1) > 30 and (y2 - y1) > 30:
+                        boxes.append((x1, y1, x2, y2))
+
+            # 侧面也要在旋转图里试
+            if not self.profile.empty():
+                faces = self.profile.detectMultiScale(
+                    rot, scaleFactor=1.08, minNeighbors=2, minSize=(25, 25))
+                for (x, y, bw, bh) in faces:
+                    pts = np.array([
+                        [x, y], [x + bw, y],
+                        [x, y + bh], [x + bw, y + bh]
+                    ], dtype=np.float64)
+                    pts = cv2.transform(
+                        pts.reshape(1, -1, 2), M_inv).reshape(-1, 2) / scale
+                    x1 = int(max(0, pts[:, 0].min()))
+                    y1 = int(max(0, pts[:, 1].min()))
+                    x2 = int(min(w, pts[:, 0].max()))
+                    y2 = int(min(h, pts[:, 1].max()))
+                    if (x2 - x1) > 30 and (y2 - y1) > 30:
+                        boxes.append((x1, y1, x2, y2))
+
+        return boxes
+
+    @staticmethod
+    def _nms(boxes, iou_thresh=0.35):
+        if not boxes:
+            return []
+        boxes = list(boxes)
+        boxes.sort(key=lambda b: (b[2] - b[0]) * (b[3] - b[1]), reverse=True)
+        keep = []
+        while boxes:
+            best = boxes.pop(0)
+            keep.append(best)
+            boxes = [b for b in boxes
+                     if FaceDetector._iou(best, b) < iou_thresh]
+        return keep
+
+    @staticmethod
+    def _iou(a, b):
+        x1 = max(a[0], b[0]); y1 = max(a[1], b[1])
+        x2 = min(a[2], b[2]); y2 = min(a[3], b[3])
+        inter = max(0, x2 - x1) * max(0, y2 - y1)
+        union = ((a[2] - a[0]) * (a[3] - a[1])
+                 + (b[2] - b[0]) * (b[3] - b[1]) - inter)
+        return inter / (union + 1e-6)
 
 
 # ======================
-# 摄像头 + 情绪处理器
+# 主处理器
+# ★ 改动3：旋转检测节流（最多 0.3 秒一次，不会持续卡）
 # ======================
 class FaceProcessor:
+
     def __init__(self, video_url):
         self.video_url = video_url
         self.cap = cv2.VideoCapture(video_url)
@@ -97,32 +219,54 @@ class FaceProcessor:
             self.running = False
             return
 
-        self.detector = EmotionDetector()
+        self.face_detector = FaceDetector()
+        self.fer = FerPlusDetector(ONNX_MODEL_PATH)
 
         self.frame_lock = threading.Lock()
         self.raw_frame = None
-        self.faces = []
-        self.emotions = {}
-        
-        # EMA 平滑算法（抗跳变）
-        self.ema_alpha = 0.25    # 降到 0.25，进一步压制毛刺跳变
-        self.smoothed_scores = {}
+        self.annotated_jpeg = None
+
+        self.box = None
+        self.label = "未检测到人脸"
+        self.conf = 0.0
+
+        self._stab_cnt = 0
+        self._stab_label = "未检测到人脸"
+        self._stab_conf = 0.0
+        self._MIN_STABLE = 2
+        self._no_face_count = 0
 
         self.running = True
-        self._capture_thread = threading.Thread(target=self._capture_loop, daemon=True)
-        self._detect_thread = threading.Thread(target=self._detect_loop, daemon=True)
-        self._capture_thread.start()
-        self._detect_thread.start()
+        self._t_cap = threading.Thread(target=self._capture_loop, daemon=True)
+        self._t_det = threading.Thread(target=self._detect_loop, daemon=True)
+        self._t_cap.start()
+        self._t_det.start()
 
     def _capture_loop(self):
+        retry_timer = 0
         while self.running:
-            ret, frame = self.cap.read()
-            if not ret:
-                print("⚠️ 摄像头断开，重连中...")
+            ok, frame = self.cap.read()
+            if not ok:
                 self.cap.release()
-                time.sleep(2)
-                self.cap = cv2.VideoCapture(self.video_url)
-                continue
+                now = time.time()
+                if retry_timer == 0:
+                    retry_timer = now
+                elif now - retry_timer >= 3:
+                    retry_timer = 0
+                    if self.video_url == IP_CAMERA_URL:
+                        print("⚠️ IP摄像头连接失败，切换到本地摄像头")
+                        self.video_url = LOCAL_CAMERA
+                    else:
+                        print("⚠️ 本地摄像头失败，尝试重连IP摄像头")
+                        self.video_url = IP_CAMERA_URL
+                    self.cap = cv2.VideoCapture(self.video_url)
+                    time.sleep(0.5)
+                    continue
+                else:
+                    time.sleep(0.5)
+                    continue
+            else:
+                retry_timer = 0
             with self.frame_lock:
                 self.raw_frame = frame
             time.sleep(0.01)
@@ -134,74 +278,82 @@ class FaceProcessor:
                 if self.raw_frame is not None:
                     frame = self.raw_frame.copy()
             if frame is None:
-                time.sleep(0.1)
+                time.sleep(0.05)
                 continue
 
             try:
-                results = self.detector.detect_emotions(frame)
-                self.faces = []
+                faces = self.face_detector.detect(frame, self._no_face_count)
 
-                if results:
-                    results.sort(key=lambda r: r["box"][2] * r["box"][3], reverse=True)
-                    best = results[0]
-                    x, y, w, h = best["box"]
-                    self.faces = [(x, y, w, h)]
-
-                    emo_scores = best["emotions"]
-                    
-                    if not self.smoothed_scores:
-                        self.smoothed_scores = emo_scores.copy()
-                    else:
-                        for k in emo_scores:
-                            old_val = self.smoothed_scores.get(k, emo_scores[k])
-                            self.smoothed_scores[k] = self.ema_alpha * emo_scores[k] + (1 - self.ema_alpha) * old_val
-                    
-                    top_emotion = max(self.smoothed_scores, key=self.smoothed_scores.get)
-                    self.emotions = {
-                        "emotion": top_emotion,
-                        "confidence": self.smoothed_scores[top_emotion],
-                    }
+                if len(faces) == 0:
+                    self._no_face_count += 1
+                    self._stab_cnt = 0
+                    self._stab_label = "未检测到人脸"
+                    self._stab_conf = 0.0
+                    self.box = None
+                    self.label = "未检测到人脸"
+                    self.conf = 0.0
                 else:
-                    self.emotions = {"emotion": "未检测到人脸", "confidence": 0}
-                    for k in self.smoothed_scores:
-                        self.smoothed_scores[k] *= 0.7
+                    self._no_face_count = 0
+
+                    best = max(faces, key=lambda f: (f[2] - f[0]) * (f[3] - f[1]))
+                    x1, y1, x2, y2 = best
+
+                    bw, bh = x2 - x1, y2 - y1
+                    pad = int(max(bw, bh) * 0.3)
+                    cx1 = max(0, x1 - pad)
+                    cy1 = max(0, y1 - pad)
+                    cx2 = min(frame.shape[1], x2 + pad)
+                    cy2 = min(frame.shape[0], y2 + pad)
+
+                    crop = frame[cy1:cy2, cx1:cx2]
+                    if crop.size > 0:
+                        label, conf = self.fer.predict(crop)
+
+                        if label == self._stab_label:
+                            self._stab_cnt += 1
+                            self._stab_conf = 0.5 * conf + 0.5 * self._stab_conf
+                        else:
+                            self._stab_label = label
+                            self._stab_conf = conf
+                            self._stab_cnt = 1
+
+                        if self._stab_cnt >= self._MIN_STABLE:
+                            self.label = self._stab_label
+                            self.conf = self._stab_conf
+
+                        self.box = (cx1, cy1, cx2, cy2)
 
             except Exception as e:
-                print("❌ 检测出错:", e)
+                print("❌ 检测异常:", e)
+                import traceback
+                traceback.print_exc()
 
-            # 因为单次分析已经从 500ms 降到 50ms，这里把等待降到 0.05，提升帧率
-            time.sleep(0.05) 
+            self._render(frame)
 
-    def get_ui_frame(self):
-        with self.frame_lock:
-            if self.raw_frame is None:
-                return None
-            frame = self.raw_frame.copy()
-
-        for (x, y, w, h) in self.faces:
-            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 200, 255), 2)
-            label = self.emotions.get("emotion", "")
-            conf = self.emotions.get("confidence", 0)
-            text = f"{label} ({conf:.0%})"
-            cv2.rectangle(frame, (x, y - 30), (x + w, y), (0, 200, 255), -1)
-            cv2.putText(frame, text, (x + 4, y - 8),
+    def _render(self, frame):
+        draw = frame.copy()
+        if self.box is not None:
+            x1, y1, x2, y2 = self.box
+            cv2.rectangle(draw, (x1, y1), (x2, y2), (0, 200, 255), 2)
+            emoji = EMOJI_MAP.get(self.label, "")
+            text = f"{emoji} {self.label} ({self.conf:.0%})"
+            (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+            cv2.rectangle(draw, (x1, y1 - th - 8), (x1 + tw + 4, y1),
+                          (0, 200, 255), -1)
+            cv2.putText(draw, text, (x1 + 2, y1 - 4),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-
-        _, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-        return base64.b64encode(buffer).decode("utf-8")
+        ok, buf = cv2.imencode('.jpg', draw, [cv2.IMWRITE_JPEG_QUALITY, 75])
+        self.annotated_jpeg = buf.tobytes() if ok else None
 
     def stop(self):
         self.running = False
         self.cap.release()
 
     def wait_stopped(self):
-        self._capture_thread.join(timeout=3)
-        self._detect_thread.join(timeout=3)
+        self._t_cap.join(timeout=3)
+        self._t_det.join(timeout=3)
 
 
-# ======================
-# 初始化与路由（保持不变）
-# ======================
 def init_processor():
     global g_processor
     if g_processor:
@@ -209,37 +361,45 @@ def init_processor():
         g_processor.wait_stopped()
     g_processor = FaceProcessor(g_camera_src)
 
+
+# ======================
+# 路由
+# ======================
 @app.route("/switch_camera", methods=["POST"])
 def switch_camera():
     global g_camera_src
-    data = request.get_json()
-    cam_type = data.get("cam", "")
-    if cam_type == "ip":
+    data = request.get_json() or {}
+    cam = data.get("cam", "")
+    if cam == "ip":
         g_camera_src = IP_CAMERA_URL
-    elif cam_type == "local":
+    elif cam == "local":
         g_camera_src = LOCAL_CAMERA
     else:
         return jsonify(code=400, msg="无效的摄像头类型")
     init_processor()
-    return jsonify(code=200, msg=f"已切换到 {'IP摄像头' if cam_type == 'ip' else '本地摄像头'}")
+    return jsonify(code=200, msg=f"已切换到 {'IP摄像头' if cam == 'ip' else '本地摄像头'}")
 
-@app.route("/get_frame")
-def get_frame():
-    if g_processor:
-        frame_b64 = g_processor.get_ui_frame()
-        if frame_b64:
-            return frame_b64
-    return ""
+
+@app.route("/video_feed")
+def video_feed():
+    def generate():
+        while True:
+            if g_processor and g_processor.annotated_jpeg:
+                yield (b"--frame\r\n"
+                       b"Content-Type: image/jpeg\r\n\r\n"
+                       + g_processor.annotated_jpeg + b"\r\n")
+            time.sleep(0.033)
+    return Response(generate(),
+                   mimetype="multipart/x-mixed-replace; boundary=frame")
+
 
 @app.route("/get_emotion")
 def get_emotion():
     if g_processor:
-        return jsonify(g_processor.emotions)
+        return jsonify(emotion=g_processor.label, confidence=g_processor.conf)
     return jsonify(emotion="未初始化", confidence=0)
 
-# ======================
-# 前端页面
-# ======================
+
 @app.route("/")
 def index():
     return '''
@@ -248,85 +408,81 @@ def index():
     <head>
         <meta charset="UTF-8">
         <style>
-            body { background:#1a1a1a; color:#fff; text-align:center; margin:0; padding:20px; font-family:sans-serif; }
-            button { padding:12px 24px; margin:10px; border:none; border-radius:8px; cursor:pointer; font-size:15px; transition:all 0.3s; }
-            button:hover { transform:scale(1.05); }
-            #btn-ip { background:#ff7222; color:#fff; }
-            #btn-local { background:#22aaff; color:#fff; }
-            button:disabled { opacity:0.4; cursor:not-allowed; transform:none; }
-            img { max-width:800px; width:100%; border:3px solid #ff7222; border-radius:8px; }
-            #emotion-display { margin-top:20px; font-size:28px; font-weight:bold; min-height:40px; }
-            #toast { position:fixed; top:20px; right:20px; background:#333; color:#fff; padding:14px 24px; border-radius:8px; opacity:0; transition:opacity 0.3s; font-size:14px; pointer-events:none; }
+            body { background:#111; color:#fff; text-align:center; margin:0;
+                   padding:20px; font-family:system-ui,sans-serif; }
+            button { padding:10px 20px; margin:8px; border:none; border-radius:6px;
+                     font-size:15px; cursor:pointer; }
+            #btn-ip { background:#ff7a22; color:#fff; }
+            #btn-local { background:#2299ff; color:#fff; }
+            button:disabled { opacity:0.35; cursor:not-allowed; }
+            #live { max-width:800px; width:100%; border:3px solid #ff7a22;
+                    border-radius:8px; display:block; margin:12px auto 0; }
+            #emotion-display { margin-top:18px; font-size:26px;
+                               font-weight:bold; min-height:36px; }
+            #toast { position:fixed; top:18px; right:18px; background:#333;
+                     color:#fff; padding:12px 20px; border-radius:6px; opacity:0;
+                     transition:opacity 0.25s; font-size:14px; pointer-events:none; }
             #toast.show { opacity:1; }
         </style>
     </head>
     <body>
         <h2>😊 实时情绪识别</h2>
         <div>
-            <button id="btn-ip" onclick="switchCam('ip', this)">📡 IP摄像头</button>
-            <button id="btn-local" onclick="switchCam('local', this)">💻 本地摄像头</button>
+            <button id="btn-ip" onclick="switchCam('ip',this)">📡 IP摄像头</button>
+            <button id="btn-local" onclick="switchCam('local',this)">💻 本地摄像头</button>
         </div>
-        <br>
-        <img id="live" src="" alt="等待画面...">
+        <img id="live" src="/video_feed" alt="等待画面...">
         <div id="emotion-display"></div>
         <div id="toast"></div>
         <script>
-            const liveImg = document.getElementById("live");
-            const emoDiv = document.getElementById("emotion-display");
-
+            const emoDiv = document.getElementById('emotion-display');
+            const EMOJI = {
+                'neutral':'😐','happiness':'😊','surprise':'😲','sadness':'😢',
+                'anger':'😠','disgust':'🤢','fear':'😨','contempt':'🤨',
+                '未检测到人脸':'❓'
+            };
+            const ZH = {
+                'neutral':'平静','happiness':'高兴','surprise':'惊讶','sadness':'悲伤',
+                'anger':'愤怒','disgust':'厌恶','fear':'恐惧','contempt':'轻蔑',
+                '未检测到人脸':'未检测到人脸'
+            };
             setInterval(() => {
-                fetch("/get_frame")
-                    .then(r => r.text())
-                    .then(b64 => { if (b64) liveImg.src = "data:image/jpeg;base64," + b64; })
-                    .catch(() => {});
-            }, 200);
-
-            setInterval(() => {
-                fetch("/get_emotion")
-                    .then(r => r.json())
-                    .then(data => {
-                        if (data.emotion && data.emotion !== "未初始化") {
-                            const emojiMap = {
-                                "happy": "😊", "surprise": "😲", "sad": "😢",
-                                "angry": "😠", "fear": "😨", "disgust": "🤢",
-                                "neutral": "😐", "未检测到人脸": "❓"
-                            };
-                            const emoji = emojiMap[data.emotion] || "🤔";
-                            const pct = (data.confidence * 100).toFixed(0);
-                            emoDiv.innerHTML = emoji + " " + data.emotion
-                                + " <span style='color:#aaa;font-size:18px;'>(" + pct + "%)</span>";
-                        }
-                    })
-                    .catch(() => {});
+                fetch('/get_emotion').then(r=>r.json()).then(d => {
+                    if(d.emotion && d.emotion!=='未初始化'){
+                        const pct=(d.confidence*100).toFixed(0);
+                        emoDiv.innerHTML = (EMOJI[d.emotion]||'🤔')+' '
+                            +(ZH[d.emotion]||d.emotion)
+                            +' <span style="color:#aaa;font-size:18px;">('+pct+'%)</span>';
+                    }
+                }).catch(()=>{});
             }, 300);
-
-            function switchCam(type, btn) {
-                document.querySelectorAll("button").forEach(b => b.disabled = true);
-                showToast("🔄 正在切换摄像头...");
-                fetch("/switch_camera", {
-                    method: "POST",
-                    headers: {"Content-Type": "application/json"},
-                    body: JSON.stringify({cam: type})
+            function switchCam(type){
+                document.querySelectorAll('button').forEach(b=>b.disabled=true);
+                showToast('🔄 切换中...');
+                fetch('/switch_camera',{
+                    method:'POST',
+                    headers:{'Content-Type':'application/json'},
+                    body:JSON.stringify({cam:type})
                 })
-                .then(r => r.json())
-                .then(data => {
-                    showToast(data.code === 200 ? "✅ " + data.msg : "❌ 切换失败");
-                })
-                .catch(() => showToast("❌ 网络错误"))
-                .finally(() => document.querySelectorAll("button").forEach(b => b.disabled = false));
+                .then(r=>r.json())
+                .then(d=>showToast(d.code===200?'✅ '+d.msg:'❌ 失败'))
+                .catch(()=>showToast('❌ 网络错误'))
+                .finally(()=>document.querySelectorAll('button').forEach(b=>b.disabled=false));
             }
-
-            function showToast(msg) {
-                const t = document.getElementById("toast");
-                t.textContent = msg; t.classList.add("show");
+            function showToast(msg){
+                const t=document.getElementById('toast');
+                t.textContent=msg; t.classList.add('show');
                 clearTimeout(t._timer);
-                t._timer = setTimeout(() => t.classList.remove("show"), 2500);
+                t._timer=setTimeout(()=>t.classList.remove('show'),2500);
             }
         </script>
     </body>
     </html>
     '''
 
+
 if __name__ == "__main__":
+    print("① 正在加载模型...")
     init_processor()
+    print("② 启动完成 http://127.0.0.1:5000")
     app.run(host="127.0.0.1", port=5000, debug=False, use_reloader=False)
