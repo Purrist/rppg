@@ -235,6 +235,9 @@ class FaceProcessor:
         self._stab_conf = 0.0
         self._MIN_STABLE = 2
         self._no_face_count = 0
+        self._sleep_mode = False
+        self._sleep_check_counter = 0
+        self._just_woke = False
 
         self.running = True
         self._t_cap = threading.Thread(target=self._capture_loop, daemon=True)
@@ -278,10 +281,40 @@ class FaceProcessor:
                 if self.raw_frame is not None:
                     frame = self.raw_frame.copy()
             if frame is None:
-                time.sleep(0.05)
+                time.sleep(0.1)
                 continue
 
             try:
+                if self._sleep_mode:
+                    self._sleep_check_counter += 1
+                    if self._sleep_check_counter >= 5:
+                        self._sleep_check_counter = 0
+                        faces = self.face_detector.detect(frame, self._no_face_count)
+                        if len(faces) > 0:
+                            self._sleep_mode = False
+                            self._just_woke = True
+                            self._no_face_count = 0
+                            print("☀️ 唤醒检测模式")
+                            best = max(faces, key=lambda f: (f[2] - f[0]) * (f[3] - f[1]))
+                            x1, y1, x2, y2 = best
+                            bw, bh = x2 - x1, y2 - y1
+                            pad = int(max(bw, bh) * 0.3)
+                            cx1 = max(0, x1 - pad)
+                            cy1 = max(0, y1 - pad)
+                            cx2 = min(frame.shape[1], x2 + pad)
+                            cy2 = min(frame.shape[0], y2 + pad)
+                            crop = frame[cy1:cy2, cx1:cx2]
+                            if crop.size > 0:
+                                label, conf = self.fer.predict(crop)
+                                self.label = label
+                                self.conf = conf
+                                self.box = (cx1, cy1, cx2, cy2)
+                            self._render(frame)
+                            continue
+                    time.sleep(0.2)
+                    self._render(frame)
+                    continue
+
                 faces = self.face_detector.detect(frame, self._no_face_count)
 
                 if len(faces) == 0:
@@ -292,7 +325,16 @@ class FaceProcessor:
                     self.box = None
                     self.label = "未检测到人脸"
                     self.conf = 0.0
+                    if self._no_face_count >= 5:
+                        self._sleep_mode = True
+                        print("😴 进入休眠模式")
                 else:
+                    if self._just_woke:
+                        self._just_woke = False
+                    if self._sleep_mode:
+                        self._sleep_mode = False
+                        self._just_woke = True
+                        print("☀️ 唤醒检测模式")
                     self._no_face_count = 0
 
                     best = max(faces, key=lambda f: (f[2] - f[0]) * (f[3] - f[1]))
