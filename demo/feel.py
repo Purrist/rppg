@@ -7,6 +7,10 @@
 活动量：MediaPipe Pose（关键点位移）
 """
 
+import os
+# 禁用 onnxruntime 警告
+os.environ['ORT_LOGGING_LEVEL'] = 'ERROR'
+
 import cv2
 import numpy as np
 from flask import Flask, Response, jsonify, send_file, request
@@ -22,7 +26,8 @@ app = Flask(__name__)
 # ═══════════════════════════════════════════
 # 配置
 # ═══════════════════════════════════════════
-LOCAL_CAMERA_ID = 1
+MOTION_CAMERA_ID = 1  # 用于活动量检测
+EMOTION_CAMERA_ID = 0  # 用于情绪/属性/专注度检测（优先）
 DEFAULT_IP_CAMERA_URL = "http://10.215.158.45:8080/video"
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -78,8 +83,8 @@ DF_TO_6 = {'happy': 'happy', 'surprise': 'surprised', 'angry': 'angry',
 
 try:
     import onnxruntime as ort; HAS_ORT = True
-except ImportError:
-    HAS_ORT = False; print("[WARN] onnxruntime 未安装")
+except Exception as e:
+    HAS_ORT = False; print(f"[WARN] onnxruntime 未安装: {e}")
 try:
     from deepface import DeepFace; HAS_DF = True; print("[OK] deepface")
 except ImportError:
@@ -94,14 +99,47 @@ except ImportError:
 # ThreadedCamera
 # ═══════════════════════════════════════════
 class ThreadedCamera:
-    def __init__(self, src, buffer_size=1):
-        self.cap = cv2.VideoCapture(src)
-        self._ok = self.cap.isOpened()
-        if self._ok:
-            try: self.cap.set(cv2.CAP_PROP_BUFFERSIZE, buffer_size)
-            except: pass
-        self._frame = None; self._running = True; self._lock = threading.Lock()
-        threading.Thread(target=self._read, daemon=True).start()
+    def __init__(self, src, buffer_size=1, timeout=3.0):
+        self.src = src
+        self.cap = None
+        self._ok = False
+        self._frame = None
+        self._running = True
+        self._lock = threading.Lock()
+        
+        is_ip_camera = isinstance(src, str) and ('http' in src or 'rtsp' in src)
+        
+        if is_ip_camera:
+            # IP摄像头：添加3秒超时检测
+            start_time = time.time()
+            while time.time() - start_time < timeout:
+                self.cap = cv2.VideoCapture(src)
+                if self.cap.isOpened():
+                    self._ok = True
+                    try:
+                        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, buffer_size)
+                    except:
+                        pass
+                    threading.Thread(target=self._read, daemon=True).start()
+                    print(f"[OK] IP摄像头连接成功: {src}")
+                    return
+                time.sleep(0.1)
+            # 超时，返回失败状态
+            print(f"[ERROR] IP摄像头连接超时 ({timeout}秒): {src}")
+            self.cap = None
+            self._ok = False
+        else:
+            # 本地摄像头：直接尝试打开
+            self.cap = cv2.VideoCapture(src)
+            self._ok = self.cap.isOpened()
+            if self._ok:
+                try:
+                    self.cap.set(cv2.CAP_PROP_BUFFERSIZE, buffer_size)
+                except:
+                    pass
+                threading.Thread(target=self._read, daemon=True).start()
+            else:
+                print(f"[ERROR] 无法打开本地摄像头: {src}")
 
     def _read(self):
         while self._running:
@@ -366,27 +404,52 @@ class Processor:
         elif self.ferplus: self.backend = "onnx"
         else: self.backend = "rule"
 
-        # 摄像头
-        self.local_cap = ThreadedCamera(LOCAL_CAMERA_ID)
-        if self.local_cap.isOpened():
-            self.local_running = True; print(f"[OK] 本地摄像头 {LOCAL_CAMERA_ID}")
-        else: print("[WARN] 本地摄像头失败")
-        self.ip_cap = ThreadedCamera(DEFAULT_IP_CAMERA_URL)
-        if self.ip_cap.isOpened():
-            self.ip_running = True; print("[OK] IP 摄像头")
-        else: print("[WARN] IP 摄像头失败")
+        # 摄像头分配：
+        # 摄像头1：用于活动量检测（motion）
+        # 摄像头0：用于情绪/属性/专注度（emotion，优先）
+        # IP摄像头：摄像头0失败时的备选
 
-        if not self.local_running and not self.ip_running:
+        # 活动量摄像头（摄像头1）
+        self.motion_cap = ThreadedCamera(MOTION_CAMERA_ID)
+        if self.motion_cap.isOpened():
+            self.motion_running = True
+            print(f"[OK] 活动量摄像头 (ID={MOTION_CAMERA_ID})")
+        else:
+            print(f"[WARN] 活动量摄像头 (ID={MOTION_CAMERA_ID}) 失败")
+            self.motion_cap = None
+            self.motion_running = False
+
+        # 情绪分析摄像头（摄像头0，失败则尝试IP）
+        self.emotion_cap = None
+        self.emotion_running = False
+        self.emotion_cap = ThreadedCamera(EMOTION_CAMERA_ID)
+        if self.emotion_cap.isOpened():
+            self.emotion_running = True
+            self.emotion_source = f"本地摄像头{EMOTION_CAMERA_ID}"
+            print(f"[OK] 情绪分析摄像头 (ID={EMOTION_CAMERA_ID})")
+        else:
+            print(f"[WARN] 情绪分析摄像头 (ID={EMOTION_CAMERA_ID}) 失败，尝试IP摄像头...")
+            self.emotion_cap = ThreadedCamera(DEFAULT_IP_CAMERA_URL)
+            if self.emotion_cap.isOpened():
+                self.emotion_running = True
+                self.emotion_source = "IP摄像头"
+                print("[OK] 情绪分析使用 IP 摄像头")
+            else:
+                print("[WARN] IP摄像头也连接失败，情绪分析不可用")
+                self.emotion_cap = None
+
+        if not self.motion_running and not self.emotion_running:
             raise RuntimeError("摄像头无法打开")
-        if self.local_running:
-            threading.Thread(target=self._local_w, daemon=True).start()
-        if self.ip_running:
-            threading.Thread(target=self._ip_w, daemon=True).start()
+
+        if self.motion_running:
+            threading.Thread(target=self._motion_w, daemon=True).start()
+        if self.emotion_running:
+            threading.Thread(target=self._emotion_w, daemon=True).start()
 
     def stop(self):
         self.running = False
-        if self.local_cap: self.local_cap.release()
-        if self.ip_cap: self.ip_cap.release()
+        if self.motion_cap: self.motion_cap.release()
+        if self.emotion_cap: self.emotion_cap.release()
 
     def set_backend(self, b):
         with self.lock:
@@ -594,11 +657,11 @@ class Processor:
                 if a < len(ps) and b < len(ps):
                     cv2.line(f, ps[a], ps[b], (0, 200, 140), 1)
 
-    # ──────── 本地摄像头线程（活动量） ────────
-    def _local_w(self):
+    # ──────── 活动量摄像头线程（摄像头1） ────────
+    def _motion_w(self):
         while self.running:
             try:
-                frame = self.local_cap.read()
+                frame = self.motion_cap.read()
                 if frame is None: time.sleep(0.01); continue
                 h, w = frame.shape[:2]
                 r = self.pose_detector.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
@@ -622,14 +685,14 @@ class Processor:
                         cv2.rectangle(frame, (0, 0), (w, 36), (0, 0, 0), -1)
                         cv2.putText(frame, "NO PERSON", (10, 24),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 100, 100), 1)
-                    self._update_person(); self._update_fps(); self.local_frame_out = frame
+                    self._update_person(); self._update_fps(); self.motion_frame_out = frame
             except: time.sleep(0.01)
 
-    # ──────── IP 摄像头线程（情绪+属性+专注度） ────────
-    def _ip_w(self):
+    # ──────── 情绪分析摄像头线程（摄像头0/IP） ────────
+    def _emotion_w(self):
         while self.running:
             try:
-                frame = self.ip_cap.read()
+                frame = self.emotion_cap.read()
                 if frame is None: time.sleep(0.01); continue
                 h, w = frame.shape[:2]
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -710,7 +773,7 @@ class Processor:
                         cv2.rectangle(frame, (0, 0), (w, 36), (0, 0, 0), -1)
                         cv2.putText(frame, "NO FACE", (10, 24),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 100, 100), 1)
-                    self._update_person(); self._update_fps(); self.ip_frame_out = frame
+                    self._update_person(); self._update_fps(); self.emotion_frame_out = frame
             except: time.sleep(0.01)
 
     # ──────── API 数据 ────────
@@ -739,8 +802,9 @@ class Processor:
                            'history': list(self.motion_history)[-60:],
                            'accumulated': round(self.motion_accumulator, 2)},
                 'attribute': {'method': self.attr_method},
-                'system': {'local_fps': round(self.local_fps, 1),
-                           'ip_fps': round(self.ip_fps, 1),
+                'system': {'motion_fps': round(self.local_fps, 1),
+                           'emotion_fps': round(self.ip_fps, 1),
+                           'emotion_source': getattr(self, 'emotion_source', 'N/A'),
                            'backend': self.backend,
                            'emotion_method': self.emotion_method,
                            'attr_method': self.attr_method,
@@ -775,14 +839,14 @@ def _stream(fa, label, dw=640, dh=360):
             if ok: yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + j.tobytes() + b'\r\n')
         time.sleep(0.033)
 
-@app.route('/video_local')
-def video_local():
-    return Response(_stream('local_frame_out', 'Local Camera Offline'),
+@app.route('/video_motion')
+def video_motion():
+    return Response(_stream('motion_frame_out', 'Motion Camera Offline'),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
 
-@app.route('/video_ip')
-def video_ip():
-    return Response(_stream('ip_frame_out', 'IP Camera Offline'),
+@app.route('/video_emotion')
+def video_emotion():
+    return Response(_stream('emotion_frame_out', 'Emotion Camera Offline'),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
 
 @app.route('/api/status')

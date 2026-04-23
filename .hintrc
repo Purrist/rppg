@@ -4,7 +4,8 @@
   ],
   "hints": {
     "typescript-config/is-valid": "off",
-    "no-inline-styles": "off"
+    "no-inline-styles": "off",
+    "meta-viewport": "off"
   },
   "browserslist": [
     "defaults",

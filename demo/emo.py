@@ -9,7 +9,7 @@ app = Flask(__name__)
 # ======================
 # 摄像头配置
 # ======================
-IP_CAMERA_URL = "http://10.215.158.45:8080/video"
+IP_CAMERA_URL = "http://10.158.10.79:8080/video"
 LOCAL_CAMERA = 0
 g_camera_src = LOCAL_CAMERA
 g_processor = None

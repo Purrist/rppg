@@ -143,21 +143,53 @@ class RPPGProcessor:
 
     # -------------------- 摄像头管理 --------------------
 
-    def _open_cap(self, src):
+    def _open_cap(self, src, timeout=3.0):
+        start_time = time.time()
         cap = cv2.VideoCapture(src)
-        if not cap.isOpened():
-            print(f"[ERROR] 无法打开视频源: {src}")
+        
+        # 检查是否为IP摄像头（字符串类型）
+        is_ip_camera = isinstance(src, str) and ('http' in src or 'rtsp' in src)
+        
+        if is_ip_camera:
+            # 对于IP摄像头，添加超时检测
+            while time.time() - start_time < timeout:
+                if cap.isOpened():
+                    try:
+                        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                    except Exception:
+                        pass
+                    print(f"[OK] IP摄像头连接成功: {src}")
+                    return cap
+                time.sleep(0.1)
+            # 超时，返回None
+            print(f"[ERROR] IP摄像头连接超时 ({timeout}秒): {src}")
+            cap.release()
             return None
-        try:
-            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        except Exception:
-            pass
-        return cap
+        else:
+            # 对于本地摄像头，直接检查
+            if not cap.isOpened():
+                print(f"[ERROR] 无法打开本地摄像头: {src}")
+                return None
+            try:
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            except Exception:
+                pass
+            return cap
 
     def start(self):
         if self.camera_url:
             self.cap = self._open_cap(self.camera_url)
-            print(f"[OK] 摄像头 (IP): {self.camera_url}")
+            if self.cap is None:
+                # IP摄像头连接失败，切换到本地摄像头
+                print("[INFO] 切换到本地摄像头...")
+                self.camera_url = None
+                self.camera_id = CAMERA_ID_DEFAULT
+                self.cap = self._open_cap(self.camera_id)
+                if self.cap is None:
+                    raise RuntimeError("无法打开任何摄像头")
+                print(f"[OK] 摄像头 (本地): {self.camera_id}")
+            else:
+                print(f"[OK] 摄像头 (IP): {self.camera_url}")
         else:
             self.cap = self._open_cap(self.camera_id)
             print(f"[OK] 摄像头 (本地): {self.camera_id}")
@@ -208,9 +240,13 @@ class RPPGProcessor:
                     self.camera_id = None
                     self.cap = self._open_cap(str(src_val))
                 if self.cap is None:
+                    # 连接失败，切换到本地摄像头
+                    print("[INFO] 摄像头连接失败，切换到本地摄像头...")
                     self.camera_url = None
-                    self.camera_id = 0
-                    self.cap = self._open_cap(0)
+                    self.camera_id = CAMERA_ID_DEFAULT
+                    self.cap = self._open_cap(CAMERA_ID_DEFAULT)
+                    if self.cap is None:
+                        print("[ERROR] 无法打开本地摄像头")
 
     def _reset_state(self):
         self.rgb_buffer.clear()
@@ -872,8 +908,8 @@ class RPPGProcessor:
 # ============================================================
 
 processor = RPPGProcessor()
-processor.camera_url = DEFAULT_IP_CAMERA_URL
-processor.camera_id = None
+processor.camera_url = None
+processor.camera_id = CAMERA_ID_DEFAULT
 processor.start()
 
 
