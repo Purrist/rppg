@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>AU 实时情绪推理</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#0f1117;color:#e0e0e0;padding:16px}
+h2{margin-bottom:12px;color:#58a6ff}
+.wrap{display:flex;gap:16px;max-width:1200px;margin:0 auto}
+.left{flex:0 0 520px;display:flex;flex-direction:column;gap:12px}
+.right{flex:1;display:flex;flex-direction:column;gap:12px}
+.card{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:14px}
+.card h3{font-size:13px;color:#8b949e;margin-bottom:10px;text-transform:uppercase;letter-spacing:1px}
+video,img{width:100%;border-radius:8px;display:block}
+/* 状态 */
+.row{display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid #21262d}
+.row:last-child{border:none}
+.lbl{color:#8b949e;font-size:13px}
+.val{font-size:15px;font-weight:600}
+.val.happy{color:#3fb950}.val.sad{color:#f85149}.val.calm{color:#8b949e}
+.val.uncalibrated{color:#d29922}.val.no_face{color:#f85149}
+/* 情绪条 */
+.bar-wrap{margin:3px 0}
+.bar-label{font-size:12px;color:#8b949e;display:flex;justify-content:space-between}
+.bar-bg{height:8px;background:#21262d;border-radius:4px;margin-top:2px;overflow:hidden}
+.bar-fill{height:100%;border-radius:4px;transition:width .3s}
+.bar-fill.calm{background:#8b949e}.bar-fill.happy{background:#3fb950}.bar-fill.sad{background:#f85149}
+/* AU 条 */
+.au-row{display:flex;align-items:center;gap:8px;margin:3px 0;font-size:12px}
+.au-name{width:32px;color:#8b949e;text-align:right;flex-shrink:0}
+.au-label{width:56px;color:#6e7681;flex-shrink:0}
+.au-bar-bg{flex:1;height:6px;background:#21262d;border-radius:3px;overflow:hidden}
+.au-bar-fill{height:100%;border-radius:3px;transition:width .2s}
+.au-bar-fill.pos{background:#3fb950}.au-bar-fill.neg{background:#f85149}.au-bar-fill.neu{background:#8b949e}
+.au-val{width:32px;text-align:right;color:#c9d1d9;font-variant-numeric:tabular-nums}
+/* 校准按钮 */
+.btn-row{display:flex;gap:8px;flex-wrap:wrap}
+.btn{padding:6px 14px;border:1px solid #30363d;border-radius:6px;background:#21262d;
+     color:#c9d1d9;cursor:pointer;font-size:13px;transition:all .15s}
+.btn:hover{background:#30363d;border-color:#58a6ff}
+.btn.active{background:#1f6feb;border-color:#58a6ff;color:#fff}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+#calib-info{font-size:12px;color:#d29922;margin-top:8px;min-height:18px}
+/* 阈值 */
+.cfg-row{display:flex;align-items:center;gap:8px;margin:4px 0;font-size:12px}
+.cfg-row label{width:50px;color:#8b949e}
+.cfg-row input[type=range]{flex:1;accent-color:#58a6ff}
+.cfg-row .cv{width:36px;text-align:right;color:#c9d1d9;font-variant-numeric:tabular-nums}
+.cfg-group{margin-top:6px}
+.cfg-group summary{font-size:12px;color:#58a6ff;cursor:pointer;margin-bottom:4px}
+.cfg-inner{padding-left:12px}
+</style>
+</head>
+<body>
+<h2>📷 AU 实时情绪推理</h2>
+<div class="wrap">
+  <!-- 左栏 -->
+  <div class="left">
+    <div class="card"><img src="/video_feed" alt="stream"></div>
+    <div class="card">
+      <h3>关键 Action Units</h3>
+      <div id="au-bars"></div>
+    </div>
+  </div>
+  <!-- 右栏 -->
+  <div class="right">
+    <div class="card">
+      <h3>实时状态</h3>
+      <div class="row"><span class="lbl">姿态</span><span class="val" id="s-pose">-</span></div>
+      <div class="row"><span class="lbl">情绪</span><span class="val uncalibrated" id="s-emo">未校准</span></div>
+      <div class="row"><span class="lbl">置信度</span><span class="val" id="s-conf">0.00</span></div>
+      <div class="row"><span class="lbl">角度 P/Y/R</span><span class="val" id="s-ang">0 / 0 / 0</span></div>
+    </div>
+    <div class="card">
+      <h3>情绪分数</h3>
+      <div id="emo-bars"></div>
+    </div>
+    <div class="card">
+      <h3>分姿态校准</h3>
+      <p style="font-size:12px;color:#6e7681;margin-bottom:8px">保持对应姿态 + 平静表情，点击按钮采集基线（~1秒）</p>
+      <div class="btn-row">
+        <button class="btn" onclick="calib('front')">😐 平视</button>
+        <button class="btn" onclick="calib('up')">😐 抬头</button>
+        <button class="btn" onclick="calib('down')">😐 低头</button>
+        <button class="btn" onclick="calib('side')">😐 侧脸</button>
+      </div>
+      <div id="calib-info"></div>
+    </div>
+    <div class="card">
+      <h3>姿态权重调节</h3>
+      <div id="cfg-panel"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const AU_SHOW=['AU12','AU6','AU25','AU7','AU5','AU15','AU4','AU17','AU1','AU9'];
+const AU_LBL={'AU12':'嘴角上拉','AU6':'颧骨提升','AU25':'嘴唇分开','AU7':'眼睑收紧',
+              'AU5':'上睑抬起','AU15':'嘴角下拉','AU4':'皱眉','AU17':'下巴上提',
+              'AU1':'内眉上抬','AU9':'鼻皱'};
+const AU_TYPE={'AU12':'pos','AU6':'pos','AU25':'neu','AU7':'neu','AU5':'neu',
+               'AU15':'neg','AU4':'neg','AU17':'neg','AU1':'neu','AU9':'neg'};
+const POSES=['front','up','down','side'];
+const POSE_CN={front:'平视',up:'抬头',down:'低头',side:'侧脸'};
+const EMOTIONS=['calm','happy','sad'];
+const EMO_CN={calm:'平静',happy:'高兴',sad:'沮丧'};
+
+let calibPose=null;
+
+// 初始化 AU 条
+{
+  const c=document.getElementById('au-bars');
+  AU_SHOW.forEach(n=>{
+    c.innerHTML+=`<div class="au-row">
+      <span class="au-name">${n}</span><span class="au-label">${AU_LBL[n]}</span>
+      <div class="au-bar-bg"><div class="au-bar-fill ${AU_TYPE[n]}" id="aub-${n}" style="width:0"></div></div>
+      <span class="au-val" id="auv-${n}">0</span></div>`;
+  });
+}
+
+// 初始化情绪条
+EMOTIONS.forEach(e=>{
+  document.getElementById('emo-bars').innerHTML+=
+    `<div class="bar-wrap"><div class="bar-label"><span>${EMO_CN[e]}</span><span id="emov-${e}">0</span></div>
+     <div class="bar-bg"><div class="bar-fill ${e}" id="emob-${e}" style="width:0"></div></div></div>`;
+});
+
+// 初始化权重面板
+{
+  const c=document.getElementById('cfg-panel');
+  POSES.forEach(p=>{
+    let rows=['mouth','eyes','eyebrows'].map(k=>
+      `<div class="cfg-row"><label>${k}</label>
+       <input type="range" min="0" max="3" step="0.1" value="1" id="w-${p}-${k}"
+        oninput="updateWeight('${p}','${k}',this.value)">
+       <span class="cv" id="wv-${p}-${k}">1.0</span></div>`).join('');
+    c.innerHTML+=`<details class="cfg-group"><summary>${POSE_CN[p]}</summary><div class="cfg-inner">${rows}</div></details>`;
+  });
+}
+
+function updateWeight(p,k,v){
+  document.getElementById('wv-'+p+'-'+k).textContent=parseFloat(v).toFixed(1);
+}
+
+async function calib(pose){
+  if(calibPose) return;
+  calibPose=pose;
+  document.getElementById('calib-info').textContent='采集中...';
+  document.querySelectorAll('.btn').forEach(b=>b.disabled=true);
+  await fetch('/api/calibrate/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pose})});
+}
+
+async function pushConfig(){
+  const cfg={};
+  POSES.forEach(p=>{
+    cfg[p]={weights:{
+      mouth:parseFloat(document.getElementById('w-'+p+'-mouth').value),
+      eyes:parseFloat(document.getElementById('w-'+p+'-eyes').value),
+      eyebrows:parseFloat(document.getElementById('w-'+p+'-eyebrows').value)
+    }};
+  });
+  await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});
+}
+
+// 轮询
+setInterval(async ()=>{
+  try{
+    const r=await fetch('/api/status');
+    const s=await r.json();
+
+    // 状态
+    document.getElementById('s-pose').textContent=s.pose||'-';
+    const emoEl=document.getElementById('s-emo');
+    emoEl.textContent=s.emotion==='uncalibrated'?'未校准':s.emotion==='no_face'?'无人脸':(EMO_CN[s.emotion]||s.emotion);
+    emoEl.className='val '+(s.emotion||'');
+    document.getElementById('s-conf').textContent=(s.confidence||0).toFixed(2);
+    document.getElementById('s-ang').textContent=`${s.pitch} / ${s.yaw} / ${s.roll}`;
+
+    // 情绪条
+    EMOTIONS.forEach(e=>{
+      const v=((s.scores||{})[e]||0)*100;
+      document.getElementById('emob-'+e).style.width=v+'%';
+      document.getElementById('emov-'+e).textContent=v.toFixed(0)+'%';
+    });
+
+    // AU 条
+    AU_SHOW.forEach(n=>{
+      const v=s.au[n]||0;
+      document.getElementById('aub-'+n).style.width=v+'%';
+      document.getElementById('auv-'+n).textContent=Math.round(v);
+    });
+
+    // 校准状态
+    if(s.calibrating){
+      document.getElementById('calib-info').textContent=`${POSE_CN[s.calib_pose]||s.calib_pose} 采集中: ${s.calib_count}/30`;
+      if(s.calib_count>=30){
+        calibPose=null;
+        document.getElementById('calib-info').textContent='✅ 校准完成';
+        document.querySelectorAll('.btn').forEach(b=>b.disabled=false);
+        loadConfig();
+      }
+    } else if(calibPose){
+      calibPose=null;
+      document.querySelectorAll('.btn').forEach(b=>b.disabled=false);
+    }
+
+  }catch(e){}
+}, 200);
+
+// 加载配置到面板
+async function loadConfig(){
+  try{
+    const r=await fetch('/api/config');
+    const cfg=await r.json();
+    POSES.forEach(p=>{
+      if(cfg[p]&&cfg[p].weights){
+        ['mouth','eyes','eyebrows'].forEach(k=>{
+          const el=document.getElementById('w-'+p+'-'+k);
+          const vl=document.getElementById('wv-'+p+'-'+k);
+          if(el){el.value=cfg[p].weights[k]; vl.textContent=cfg[p].weights[k].toFixed(1);}
+        });
+      }
+    });
+  }catch(e){}
+}
+loadConfig();
+// 权重变化时自动推送
+setInterval(pushConfig, 2000);
+</script>
+
+</body>
+</html>

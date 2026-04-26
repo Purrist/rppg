@@ -5,13 +5,13 @@
 *.sublime-project
 .DS_Store
 
+# 3DDFA_V2 (不需要版本控制)
+3DDFA_V2/
+demo/debug_aligned
 # Python (Backend)
-backend/__pycache__/
-backend/perception/__pycache__/
-backend/games/__pycache__/
-backend/core/__pycache__/
+__pycache__/
+*.pyc
 backend/core/models/
-backend/*.pyc
 backend/.env
 backend/.venv
 backend/env/

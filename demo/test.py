@@ -1,177 +1,310 @@
-import os, sys, traceback as tb
+"""
+test.py —— 终极最优解（全姿态精准版）
+  核心突破:
+    1. 恢复【纯 2D 仿射对齐】（绝对不用 3D 透视）:
+       - MediaPipe Mesh 提取左右眼角
+       - 算旋转角 -> 算缩放 -> warpAffine 强行拉平
+       - 解决: 低头时下巴消失(被误判不高兴)、侧脸五官歪斜(误判)的问题
+    2. 保留【纯净 3 分类合并】:
+       - 高兴 = happiness
+       - 平静 = neutral + surprise + contempt
+       - 不高兴 = sadness + anger + disgust + fear
+    3. 新增【时序平滑滤波】:
+       - 解决: 文字因为逐帧波动导致的疯狂闪烁问题
+"""
+import os, sys, time, threading, traceback as tb, base64
+from datetime import datetime
 from queue import Queue
-import cv2, time, threading
-import numpy as np
-import mediapipe as mp
-from flask import Flask, jsonify, Response
+from collections import deque
+
+import cv2, numpy as np, mediapipe as mp
+from flask import Flask, request, jsonify, Response
 
 app = Flask(__name__)
 
+IP_CAMERA_URL = "http://10.158.10.79:8080/video"
 LOCAL_CAMERA = 0
 g_camera_src = LOCAL_CAMERA
 g_processor = None
 
+ONNX_MODEL_PATH = r"C:\Users\purriste\Desktop\PYProject\rppg\backend\core\models\emotion-ferplus-8.onnx"
+FER_LABELS = ['neutral', 'happiness', 'surprise', 'sadness',
+              'anger', 'disgust', 'fear', 'contempt']
 
-class Processor:
-    def __init__(self, src):
-        self.src = src
-        # 关键：DirectShow 后端 + 缓冲区设为1，降低延迟
-        self.cap = cv2.VideoCapture(src, cv2.CAP_DSHOW)
-        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+RUN_START = datetime.now().strftime("%Y%m%d_%H%M%S")
+DEBUG_DIR = os.path.join(SCRIPT_DIR, "debug_aligned", RUN_START)
+os.makedirs(DEBUG_DIR, exist_ok=True)
+MAX_DBG = 30
 
-        if not self.cap.isOpened():
-            print(f"[ERR] 摄像头打开失败: {src}")
-            self.running = False
-            return
 
-        print(f"[OK] 摄像头: {src}")
+class EmotionDetector3Class:
+    """纯净版 FER+ 推理，只做合并，不加人工权重。"""
+    def __init__(self, path):
+        self.net = cv2.dnn.readNetFromONNX(path)
+        self.net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
+        self.net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
+        print(f"[OK] FER+ (3-Class Merge): {os.path.basename(path)}")
 
-        # MediaPipe FaceMesh
-        self.mp_face_mesh = mp.solutions.face_mesh
-        self.face_mesh = self.mp_face_mesh.FaceMesh(
+    def predict(self, bgr):
+        g = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+        g = cv2.resize(g, (64, 64))
+        self.net.setInput(g.astype(np.float32).reshape(1, 1, 64, 64))
+        scores = self.net.forward()[0]
+        probs = self._sm(scores)
+        
+        p_happy = probs[1]
+        p_calm = probs[0] + probs[2] + probs[7]
+        p_upset = probs[3] + probs[4] + probs[5] + probs[6]
+        
+        total = p_happy + p_calm + p_upset + 1e-6
+        p_happy /= total; p_calm /= total; p_upset /= total
+        
+        final_probs = [p_calm, p_happy, p_upset]
+        labels_3c = ["calm", "happy", "upset"]
+        idx = int(np.argmax(final_probs))
+        return labels_3c[idx], final_probs
+
+    @staticmethod
+    def _sm(x):
+        e = np.exp(x - np.max(x))
+        return e / e.sum()
+
+
+class AlignedFaceDetector:
+    """
+    最优解核心：基于 Mesh 的纯 2D 仿射对齐。
+    解决低头/侧脸时五官在 64x64 中位移导致的误判。
+    """
+    def __init__(self):
+        print("[INIT] MediaPipe FaceMesh (2D Alignment) ...")
+        self.mesh = mp.solutions.face_mesh.FaceMesh(
             static_image_mode=False,
             max_num_faces=1,
             refine_landmarks=False,
             min_detection_confidence=0.5,
             min_tracking_confidence=0.5
         )
+        # 预热
+        _ = self.mesh.process(np.zeros((480, 640, 3), dtype=np.uint8))
+        print("[OK] FaceMesh ready")
 
-        # 🔥 关键：预热！在循环外完成 TFLite 初始化，避免阻塞
-        dummy = np.zeros((480, 640, 3), dtype=np.uint8)
-        _ = self.face_mesh.process(cv2.cvtColor(dummy, cv2.COLOR_BGR2RGB))
-        print("[OK] MediaPipe 预热完成")
+    def detect(self, frame):
+        h, w = frame.shape[:2]
+        try:
+            res = self.mesh.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        except:
+            return None, None
+            
+        if not res.multi_face_landmarks:
+            return None, None
 
-        # 6点 3D 面部模型（单位：厘米，相对比例正确即可）
-        self.face_3d = np.array([
-            [0.0,  0.0,  0.0],    # 鼻尖 1
-            [-2.2, 1.7, -0.5],    # 左眼外角 33
-            [2.2,  1.7, -0.5],    # 右眼外角 263
-            [-1.5, -1.0, -0.5],   # 左嘴角 61
-            [1.5, -1.0, -0.5],    # 右嘴角 291
-            [0.0, -3.3, -1.0]     # 下巴 152
-        ], dtype=np.float64)
-        self.lm_indices = [1, 33, 263, 61, 291, 152]
+        lm = res.multi_face_landmarks[0]
+        pts = np.array([[p.x * w, p.y * h] for p in lm.landmark], dtype=np.float32)
 
-        # 多线程架构
-        self.frame_queue = Queue(maxsize=3)
+        # 关键点：左眼外角(33)，右眼外角(263)
+        le = pts[33]
+        re = pts[263]
+
+        # 1. 计算两眼中心与旋转角度
+        eye_center = ((le + re) / 2.0).astype(np.float32)
+        dY = re[1] - le[1]
+        dX = re[0] - le[0]
+        angle = np.degrees(np.arctan2(dY, dX))
+
+        # 2. 计算两眼距离，决定输出框大小
+        dist = np.linalg.norm(re - le)
+        # 放大系数 2.8 确保低头时下巴不被裁掉，抬头时额头不被裁掉
+        size = int(dist * 2.8)
+        size = max(100, min(size, 500)) # 安全限制
+
+        # 3. 构造 2D 仿射矩阵（只旋转不平移）
+        M = cv2.getRotationMatrix2D(tuple(eye_center), angle, scale=1.0)
+
+        # 4. 计算平移量：让 eye_center 在输出图的正中偏上 (留出下巴空间)
+        target_x = size / 2.0
+        target_y = size * 0.35  # 0.35 是黄金比例，上方留少，下方留多给下巴
+        M[0, 2] += target_x - eye_center[0]
+        M[1, 2] += target_y - eye_center[1]
+
+        # 5. 执行 2D 仿射变换 (绝对不会产生透视拉伸畸变)
+        aligned = cv2.warpAffine(frame, M, (size, size), flags=cv2.INTER_LINEAR)
+
+        # 返回对齐后的图，以及原画面上的外接矩形用于画框
+        xs, ys = pts[:, 0], pts[:, 1]
+        box = (int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max()))
+        
+        return aligned, box
+
+
+class Processor:
+    def __init__(self, src):
+        self.src = src
+        self.cap = None
+        self._open_cam(src)
+        print(f"[OK] cam: {src}")
+        print(f"[DEBUG] 对齐后视角 -> {DEBUG_DIR}")
+        
+        self.det = AlignedFaceDetector()
+        self.fer = EmotionDetector3Class(ONNX_MODEL_PATH)
+        
+        self.q = Queue(maxsize=2)
         self.lock = threading.Lock()
         self.jpeg = None
+        self.box = None
+        self.label = "calm"
+        self.conf = 0.0
+        
+        # 时序平滑窗口 (保留最近 3 次结果，防抖动)
+        self.history = deque(maxlen=3)
+        
+        self._nf = 0
+        self._zz = False
+        self._zc = 0
+        self._dbg_b64 = []
         self.running = True
-
-        self.pitch = 0.0
-        self.yaw = 0.0
-        self.roll = 0.0
-
+        
         threading.Thread(target=self._grab, daemon=True).start()
         threading.Thread(target=self._work, daemon=True).start()
 
+    def _open_cam(self, src):
+        try: self.cap.release()
+        except: pass
+        try:
+            self.cap = cv2.VideoCapture(src, cv2.CAP_DSHOW)
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            if self.cap.isOpened(): return
+        except: pass
+        self.cap = cv2.VideoCapture(src)
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+    def _switch_cam(self):
+        old = self.src
+        self.src = LOCAL_CAMERA if old == IP_CAMERA_URL else IP_CAMERA_URL
+        tag = "本地" if self.src == LOCAL_CAMERA else "IP"
+        print(f"[WARN] {old} 失败, 自动切到{tag}")
+        self._open_cam(self.src)
+
     def _grab(self):
-        """采集线程：只读帧，入队"""
         rt = 0
         while self.running:
             ok, f = self.cap.read()
             if not ok:
                 self.cap.release()
                 now = time.time()
-                if rt == 0:
-                    rt = now
+                if rt == 0: rt = now
                 elif now - rt >= 3:
-                    rt = 0
-                    self.cap = cv2.VideoCapture(self.src, cv2.CAP_DSHOW)
-                    time.sleep(0.5)
-                else:
-                    time.sleep(0.5)
+                    rt = 0; self._switch_cam(); time.sleep(0.5)
+                else: time.sleep(0.5)
                 continue
             rt = 0
-            if self.frame_queue.full():
-                try:
-                    self.frame_queue.get_nowait()
-                except Exception:
-                    pass
-            self.frame_queue.put(f)
+            if self.q.full():
+                try: self.q.get_nowait()
+                except: pass
+            self.q.put(f)
             time.sleep(0.01)
 
-    def _get_head_pose(self, face_landmarks, w, h):
-        """solvePnP 解算头部姿态"""
-        face_2d = []
-        for idx in self.lm_indices:
-            lm = face_landmarks.landmark[idx]
-            face_2d.append([lm.x * w, lm.y * h])
-        face_2d = np.array(face_2d, dtype=np.float64)
-
-        focal_length = w
-        cam_matrix = np.array([
-            [focal_length, 0, w / 2],
-            [0, focal_length, h / 2],
-            [0, 0, 1]
-        ], dtype=np.float64)
-        dist_coeffs = np.zeros((4, 1))
-
-        success, rvec, tvec = cv2.solvePnP(
-            self.face_3d, face_2d, cam_matrix, dist_coeffs,
-            flags=cv2.SOLVEPNP_ITERATIVE
-        )
-        if not success:
-            return None, None, None
-
-        rmat, _ = cv2.Rodrigues(rvec)
-        yaw = np.arctan2(rmat[1][0], rmat[0][0]) * 180 / np.pi
-        pitch = np.arctan2(-rmat[2][0], np.sqrt(rmat[2][1]**2 + rmat[2][2]**2)) * 180 / np.pi
-        roll = np.arctan2(rmat[2][1], rmat[2][2]) * 180 / np.pi
-
-        def norm(a):
-            while a > 180:
-                a -= 360
-            while a < -180:
-                a += 360
-            return a
-
-        return norm(pitch), norm(yaw), norm(roll)
+    def _smooth(self, label, probs):
+        """滑动窗口平滑，解决文字闪烁问题"""
+        self.history.append((label, probs))
+        score_map = {"calm": 0.0, "happy": 0.0, "upset": 0.0}
+        for l, p in self.history:
+            score_map[l] += p[0] if l=="calm" else (p[1] if l=="happy" else p[2])
+        
+        final_label = max(score_map, key=score_map.get)
+        final_conf = score_map[final_label] / len(self.history)
+        return final_label, final_conf
 
     def _work(self):
-        """推理线程：每2帧做一次头部姿态，渲染后编码为 JPEG"""
-        frame_counter = 0
+        fc = 0
         while self.running:
+            try: f = self.q.get(timeout=0.5)
+            except: continue
+            fc += 1
+            
             try:
-                frame = self.frame_queue.get(timeout=0.1)
-            except Exception:
-                continue
+                if self._zz:
+                    self._zc += 1
+                    if self._zc >= 5:
+                        self._zc = 0
+                        crop, box = self.det.detect(f)
+                        if crop is not None:
+                            self._zz = False; self._nf = 0
+                            lb, pr = self.fer.predict(crop)
+                            lb, cf = self._smooth(lb, pr)
+                            self.label = lb; self.conf = cf; self.box = box
+                            self._save(crop, lb)
+                    time.sleep(0.2)
+                    self._render(f)
+                    continue
 
-            frame_counter += 1
-            h, w = frame.shape[:2]
+                # 核心调用：获取【2D仿射对齐后】的人脸
+                crop, box = self.det.detect(f)
+                
+                if crop is None:
+                    self._nf += 1
+                    self.label = "calm"; self.conf = 0; self.box = None
+                    self.history.clear() # 丢脸时清空历史，避免恢复时拖泥带水
+                    if self._nf >= 5: self._zz = True
+                else:
+                    self._nf = 0
+                    if self._zz: self._zz = False
+                    
+                    if fc % 2 == 0:
+                        lb, pr = self.fer.predict(crop)
+                        lb, cf = self._smooth(lb, pr)
+                        self.label = lb; self.conf = cf; self.box = box
+                        self._save(crop, lb)
+                    else:
+                        self.box = box
+            except Exception as e:
+                print(f"[ERR] {e}"); tb.print_exc()
+                
+            self._render(f)
 
-            # 每2帧推理一次，节流
-            if frame_counter % 2 == 0:
-                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                result = self.face_mesh.process(rgb)
+    def _save(self, crop, label):
+        try:
+            # 关键：这里保存的是对齐后、送入模型前的图，方便你直观验证
+            debug_crop = cv2.resize(crop, (64, 64))
+            ts = datetime.now().strftime("%H%M%S")
+            fname = f"{ts}_{label}.jpg"
+            cv2.imwrite(os.path.join(DEBUG_DIR, fname), debug_crop)
+            
+            _, buf = cv2.imencode(".jpg", debug_crop, [cv2.IMWRITE_JPEG_QUALITY, 60])
+            b64 = base64.b64encode(buf.tobytes()).decode()
+            self._dbg_b64.append({"name": fname, "b64": b64})
+            if len(self._dbg_b64) > MAX_DBG:
+                self._dbg_b64 = self._dbg_b64[-MAX_DBG:]
+        except: pass
 
-                if result.multi_face_landmarks:
-                    p, y, r = self._get_head_pose(result.multi_face_landmarks[0], w, h)
-                    if p is not None:
-                        with self.lock:
-                            self.pitch, self.yaw, self.roll = p, y, r
-
-            # 读取当前姿态（带锁）
-            with self.lock:
-                p, y, r = self.pitch, self.yaw, self.roll
-
-            # 渲染到画面
+    def _render(self, frame):
+        try:
+            if frame is None: return
             d = frame.copy()
-            text = f"Pitch:{p:.0f}  Yaw:{y:.0f}  Roll:{r:.0f}"
-            cv2.putText(d, text, (10, 35),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 0), 2)
-
-            # 画一个参考坐标轴（可选，直观显示朝向）
-            # 这里简化为文字，避免遮挡
-
+            if self.box:
+                x1, y1, x2, y2 = self.box
+                color = (0, 200, 255)
+                if self.label == "happy": color = (0, 255, 100)
+                elif self.label == "upset": color = (0, 0, 255)
+                
+                cv2.rectangle(d, (x1, y1), (x2, y2), color, 2)
+                Z = {"calm": "Calm", "happy": "Happy", "upset": "Upset"}
+                txt = f"{Z[self.label]} ({self.conf:.0%})"
+                tw, th = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)[0]
+                cv2.rectangle(d, (x1, y1 - th - 8), (x1 + tw + 4, y1), color, -1)
+                cv2.putText(d, txt, (x1 + 2, y1 - 4),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            
             ok, buf = cv2.imencode(".jpg", d, [cv2.IMWRITE_JPEG_QUALITY, 75])
             if ok:
                 with self.lock:
                     self.jpeg = buf.tobytes()
+        except: pass
 
     def stop(self):
         self.running = False
-        self.cap.release()
+        try: self.cap.release()
+        except: pass
 
 
 def init():
@@ -182,84 +315,160 @@ def init():
     g_processor = Processor(g_camera_src)
 
 
+@app.route("/switch_camera", methods=["POST"])
+def sw():
+    global g_camera_src
+    d = request.get_json() or {}
+    c = d.get("cam", "")
+    if c == "ip": g_camera_src = IP_CAMERA_URL
+    elif c == "local": g_camera_src = LOCAL_CAMERA
+    else: return jsonify(code=400)
+    init()
+    return jsonify(code=200)
+
+
 @app.route("/video_feed")
-def video_feed():
-    def gen():
+def vf():
+    def g():
         while True:
             if g_processor and g_processor.jpeg:
                 yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
                        + g_processor.jpeg + b"\r\n")
             time.sleep(0.033)
-    return Response(gen(), mimetype="multipart/x-mixed-replace; boundary=frame")
+    return Response(g, mimetype="multipart/x-mixed-replace; boundary=frame")
 
 
-@app.route("/get_pose")
-def get_pose():
+@app.route("/get_emotion")
+def ge():
     if g_processor:
         with g_processor.lock:
-            return jsonify(
-                pitch=g_processor.pitch,
-                yaw=g_processor.yaw,
-                roll=g_processor.roll
-            )
-    return jsonify(pitch=0, yaw=0, roll=0)
+            return jsonify(emotion=g_processor.label,
+                           confidence=g_processor.conf)
+    return jsonify(emotion="calm", confidence=0)
+
+
+@app.route("/debug_images")
+def di():
+    if not g_processor: return jsonify([])
+    return jsonify(getattr(g_processor, "_dbg_b64", []))
 
 
 @app.route("/")
-def index():
-    return """<!DOCTYPE html>
-<html>
+def idx():
+    return _HTML
+
+
+_HTML = r'''<!DOCTYPE html>
+<html lang="zh-CN">
 <head>
-    <meta charset="utf-8">
-    <title>头部姿态估计</title>
-    <style>
-        body { font-family: 'Segoe UI', sans-serif; background: #0d1117; color: #c9d1d9;
-               text-align: center; margin: 0; padding: 30px; }
-        h1 { color: #58a6ff; margin-bottom: 20px; }
-        #box { display: inline-block; border: 2px solid #30363d; border-radius: 12px;
-               overflow: hidden; background: #161b22; }
-        img { display: block; width: 640px; height: 480px; object-fit: cover; }
-        #info { margin-top: 20px; font-size: 1.6em; font-family: monospace; }
-        .tag { color: #8b949e; }
-        .val { color: #3fb950; font-weight: bold; }
-    </style>
+<meta charset="UTF-8">
+<style>
+body{background:#0d1117;color:#c9d1d9;text-align:center;margin:0;padding:20px;font-family:'Segoe UI',sans-serif}
+h2{color:#58a6ff}
+.box{display:inline-block;border:2px solid #30363d;border-radius:12px;overflow:hidden;background:#161b22;margin-top:10px}
+#live{display:block;width:640px;height:480px;object-fit:cover}
+
+#ed{
+  margin-top:20px; font-size:2.2em; font-weight:bold; min-height:50px;
+  padding:10px; border-radius:8px;
+  transition: all 0.3s;
+}
+#ed.happy{color:#3fb950; background:rgba(63,185,80,0.1); border:1px solid #3fb950}
+#ed.calm{color:#58a6ff; background:rgba(88,166,255,0.1); border:1px solid #58a6ff}
+#ed.upset{color:#f85149; background:rgba(248,81,73,0.1); border:1px solid #f85149}
+
+.cf{color:#8b949e;font-size:.4em;display:block;margin-top:4px}
+
+#dt{margin-top:20px;color:#58a6ff;font-size:1em}
+#dg{
+  display:flex; flex-wrap:wrap; justify-content:center; gap:10px;
+  margin-top:8px; padding:10px;
+  max-height:300px; overflow-y:auto;
+  background:#161b22; border-radius:8px; border:1px solid #30363d;
+}
+#dg::-webkit-scrollbar{width:8px}
+#dg::-webkit-scrollbar-track{background:#0d1117;border-radius:4px}
+#dg::-webkit-scrollbar-thumb{background:#30363d;border-radius:4px}
+
+.di{position:relative;width:110px;height:110px;flex-shrink:0;border-radius:6px;overflow:hidden;border:1px solid #30363d}
+.di img{width:100%;height:100%;object-fit:cover;display:block;image-rendering:pixelated}
+.di span{
+  position:absolute;bottom:0;left:0;right:0;
+  background:rgba(0,0,0,0.85); color:#fff;
+  font-size:11px; text-align:center; padding:3px 0;
+}
+.di span.happy{color:#3fb950}
+.di span.calm{color:#58a6ff}
+.di span.upset{color:#f85149}
+
+button{padding:10px 20px;margin:8px;border:none;border-radius:6px;font-size:15px;cursor:pointer;color:#fff}
+#bi{background:#ff7a22}#bl{background:#2299ff}
+button:disabled{opacity:.35}
+</style>
 </head>
 <body>
-    <h1>🎯 头部姿态估计（Web 版）</h1>
-    <div id="box">
-        <img src="/video_feed" alt="video stream">
-    </div>
-    <div id="info">
-        <span class="tag">Pitch:</span> <span class="val" id="p">--</span>° &nbsp;&nbsp;
-        <span class="tag">Yaw:</span>   <span class="val" id="y">--</span>° &nbsp;&nbsp;
-        <span class="tag">Roll:</span>  <span class="val" id="r">--</span>°
-    </div>
-    <script>
-        async function poll() {
-            try {
-                const res = await fetch('/get_pose');
-                const d = await res.json();
-                document.getElementById('p').textContent = d.pitch.toFixed(1);
-                document.getElementById('y').textContent = d.yaw.toFixed(1);
-                document.getElementById('r').textContent = d.roll.toFixed(1);
-            } catch(e) {}
-            setTimeout(poll, 80);
-        }
-        poll();
-    </script>
+<h2>全姿态精准 3 分类 (基于 2D 仿射对齐)</h2>
+<div>
+<button id="bi" onclick="sw('ip')">IP Camera</button>
+<button id="bl" onclick="sw('local')">Local Camera</button>
+</div>
+<div class="box"><img id="live" src="/video_feed"></div>
+
+<div id="ed" class="calm">加载中...</div>
+
+<div id="dt">Debug 模型真实视角 (已对齐拉平 64x64)</div>
+<div id="dg"></div>
+
+<script>
+var Z={calm:"平静",happy:"高兴",upset:"不高兴"};
+var ed=document.getElementById("ed");
+var dg=document.getElementById("dg");
+
+setInterval(function(){
+  fetch("/get_emotion").then(function(r){return r.json()}).then(function(d){
+    var p=(d.confidence*100).toFixed(0);
+    ed.className = d.emotion;
+    ed.innerHTML = Z[d.emotion] + '<span class="cf">置信度: '+p+'%</span>';
+  }).catch(function(){});
+},300);
+
+setInterval(function(){
+  fetch("/debug_images").then(function(r){return r.json()}).then(function(arr){
+    dg.innerHTML="";
+    for(var i=arr.length-1;i>=0;i--){
+      var d=document.createElement("div"); d.className="di";
+      var im=document.createElement("img");
+      im.src="data:image/jpeg;base64,"+arr[i].b64;
+      var sp=document.createElement("span");
+      var parts=arr[i].name.replace(".jpg","").split("_");
+      sp.className = parts[1];
+      sp.textContent=parts[0]+" "+Z[parts[1]];
+      d.appendChild(im); d.appendChild(sp); dg.appendChild(d);
+    }
+  }).catch(function(){});
+},1000);
+
+function sw(c){
+  document.querySelectorAll("button").forEach(function(b){b.disabled=true});
+  fetch("/switch_camera",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({cam:c})}).then(function(){}).catch(function(){})
+    .finally(function(){document.querySelectorAll("button").forEach(function(b){b.disabled=false})});
+}
+</script>
 </body>
-</html>"""
+</html>'''
 
 
 if __name__ == "__main__":
-    print("=" * 50)
-    print("  头部姿态估计 —— Web 流式版本")
-    print("  ❌ 无 cv2.imshow  |  ✅ 浏览器查看")
-    print("=" * 50)
+    print("=" * 60)
+    print("  策略升级: 恢复【纯2D仿射对齐(不变形)】 + 【时序平滑防抖】")
+    print("  效果: 低头/抬头/侧脸时，眼睛被强制拉平，下巴不丢失")
+    print("  验证: 查看 debug_aligned 目录，眼睛必定在同一水平线")
+    print("=" * 60)
     try:
         init()
-        print("[RUN] 打开浏览器访问: http://127.0.0.1:5000")
+        print("[RUN] http://127.0.0.1:5000")
         app.run(host="127.0.0.1", port=5000,
                 debug=False, use_reloader=False, threaded=True)
-    except Exception:
+    except:
         tb.print_exc()
