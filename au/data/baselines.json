@@ -1065,7 +1065,7 @@
   },
   "_config": {
     "front": {
-      "h_thresh": 2,
+      "h_thresh": 1.5,
       "s_thresh": 3
     },
     "up": {

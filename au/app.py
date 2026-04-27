@@ -60,8 +60,7 @@ class FaceDetector:
 # ── SpeechDetector ────────────────────────────────────
 class SpeechDetector:
     def __init__(self):
-        self.history = deque(maxlen=30)
-        self.width_history = deque(maxlen=30)
+        self.history = deque(maxlen=36)
         self.speaking = False
         self._spk_cnt = 0
         self._quiet_cnt = 0
@@ -69,52 +68,42 @@ class SpeechDetector:
     def update(self, lm):
         eye_dist = max(np.linalg.norm(lm[33][:2] - lm[263][:2]), 1.0)
         lip_open = abs(lm[14][1] - lm[13][1]) / eye_dist
-        lip_width = abs(lm[61][0] - lm[291][0]) / eye_dist
-
         self.history.append(lip_open)
-        self.width_history.append(lip_width)
-
-        if len(self.history) < 12:
+        if len(self.history) < 24:
             return False
 
         arr = np.array(self.history)
-        arr_w = np.array(self.width_history)
-        diffs = np.abs(np.diff(arr))
+        recent = arr[-24:]
 
-        # 1. 嘴唇开合速度（提高阈值）
-        speed = np.mean(diffs[-10:])
-        # 2. 嘴唇开合幅度
-        amplitude = np.max(arr[-15:]) - np.min(arr[-15:])
-        # 3. 嘴唇宽度变化（说话时嘴宽度也会变化）
-        width_var = np.var(arr_w[-10:])
+        # 1. 5帧滑动平均消除逐帧抖动
+        kernel = np.ones(5) / 5
+        smoothed = np.convolve(recent, kernel, mode='valid')
 
-        # 4. 检测周期性变化（说话时会有规律的开合）
-        if len(arr) >= 20:
-            recent = arr[-20:]
-            peaks = 0
-            troughs = 0
-            for i in range(2, len(recent)-2):
-                if recent[i] > recent[i-1] and recent[i] > recent[i+1] and recent[i] - recent[i-2] > 0.005:
-                    peaks += 1
-                if recent[i] < recent[i-1] and recent[i] < recent[i+1] and recent[i-2] - recent[i] > 0.005:
-                    troughs += 1
-            has_periodic = (peaks >= 2 and troughs >= 1) or (troughs >= 2 and peaks >= 1)
+        # 2. 平滑后振幅：抖动~0.01，说话~0.04+
+        sm_range = np.max(smoothed) - np.min(smoothed)
+        if sm_range < 0.035:
+            raw = False
         else:
-            has_periodic = False
-
-        # 5. 检查是否真的在说话（排除大笑等情况）
-        # 说话时：有速度 + 有幅度 + 有周期性 + 宽度也在变化
-        raw = (speed > 0.012 and amplitude > 0.04 and has_periodic and width_var > 0.00005)
+            # 3. 平滑信号围绕均值的过零次数（需幅度>0.005才算有效交叉）
+            sm_mean = np.mean(smoothed)
+            centered = smoothed - sm_mean
+            crossings = 0
+            for i in range(1, len(centered)):
+                if (centered[i] * centered[i-1] < 0
+                        and abs(centered[i]) > 0.005
+                        and abs(centered[i-1]) > 0.005):
+                    crossings += 1
+            # 说话：20帧平滑窗口内至少3次有效过零
+            raw = crossings >= 3
 
         if raw:
             self._spk_cnt += 1; self._quiet_cnt = 0
         else:
             self._quiet_cnt += 1; self._spk_cnt = 0
 
-        # 更严格的判定条件
-        if self._spk_cnt >= 5:
+        if self._spk_cnt >= 3:
             self.speaking = True
-        elif self._quiet_cnt >= 8:
+        elif self._quiet_cnt >= 10:
             self.speaking = False
         return self.speaking
 
@@ -380,9 +369,7 @@ class EmotionMapper:
         if abs(pitch) > self.config.get('pitch_limit', 30):
             return pose, 'out_of_range', 0., {'calm':0,'happy':0,'sad':0}
         if speaking:
-            self.last_emotion = 'calm'
-            self.switch_cnt = 0
-            return pose, 'speaking', 0., {'calm':0.6,'happy':0,'sad':0}
+            return pose, 'speaking', 0., {e: (0.5 if e == self.last_emotion else 0.05) for e in EMOTIONS}
         calm_bl = self.baselines[pose]['calm']
         if calm_bl is None:
             return pose, 'uncalibrated', 0., {'calm':1,'happy':0,'sad':0}
@@ -425,7 +412,11 @@ class EmotionMapper:
         scores = {'happy': h_act/total, 'sad': s_act/total, 'calm': c_act/total}
 
         if self.last_emotion == 'calm':
-            if h_act >= thr['h_thresh'] and s_act < thr['s_thresh']*.8:
+            if h_act >= thr['h_thresh'] * 2.5 and s_act < thr['s_thresh'] * 0.5:
+                raw = 'happy'
+            elif s_act >= thr['s_thresh'] * 2.5 and h_act < thr['h_thresh'] * 0.5:
+                raw = 'sad'
+            elif h_act >= thr['h_thresh'] and s_act < thr['s_thresh']*.8:
                 raw = 'happy'
             elif s_act >= thr['s_thresh'] and h_act < thr['h_thresh']*.8:
                 raw = 'sad'
@@ -437,13 +428,18 @@ class EmotionMapper:
             raw = 'calm' if s_act < thr['s_thresh']*.4 else 'sad'
         else:
             raw = 'calm'
-
         if raw != self.last_emotion:
-            self.switch_cnt += 1
-            if self.switch_cnt < 8:
-                best = self.last_emotion
-            else:
+            # 强信号立即切换（2.5倍阈值），普通信号4帧防抖
+            urgent = (raw == 'happy' and h_act >= thr['h_thresh'] * 2.5) or \
+                     (raw == 'sad' and s_act >= thr['s_thresh'] * 2.5)
+            if urgent:
                 best = raw; self.last_emotion = raw; self.switch_cnt = 0
+            else:
+                self.switch_cnt += 1
+                if self.switch_cnt < 4:
+                    best = self.last_emotion
+                else:
+                    best = raw; self.last_emotion = raw; self.switch_cnt = 0
         else:
             self.switch_cnt = 0; best = raw
 
@@ -473,6 +469,8 @@ class Engine:
         self.prev_emotion = None
         self.t0 = time.time()
         self._fc = 0
+        self._cached_au = None
+        self._cached_pose = (0., 0., 0.)
         self.status = dict(
             pose='-',emotion='uncalibrated',confidence=0.,
             pitch=0.,yaw=0.,roll=0.,
@@ -501,9 +499,15 @@ class Engine:
 
                     if lm is not None:
                         speaking = self.speech_det.update(lm)
-                        pitch, yaw, roll = self.pose_est.estimate(frame, lm)
-                        au = self.au_ext.predict(frame, lm)
                         self._fc += 1
+                        if self._fc % 3 == 0 or self._cached_au is None:
+                            pitch, yaw, roll = self.pose_est.estimate(frame, lm)
+                            au = self.au_ext.predict(frame, lm)
+                            self._cached_pose = (pitch, yaw, roll)
+                            self._cached_au = au
+                        else:
+                            pitch, yaw, roll = self._cached_pose
+                            au = self._cached_au
 
                         if self.mapper.calibrating and au:
                             cp, ce = self.mapper.calibrating
@@ -520,11 +524,10 @@ class Engine:
 
                         pose, emotion, conf, scores = self.mapper.predict(au, pitch, yaw, speaking=speaking)
 
-                        if self._fc % 3 == 0:
-                            self.timeline.append({
-                                't': round(time.time()-self.t0, 2),
-                                'e': emotion,
-                                's': {k: round(v,3) for k,v in scores.items()}})
+                        self.timeline.append({
+                            't': round(time.time()-self.t0, 2),
+                            'e': emotion,
+                            's': {k: round(v,3) for k,v in scores.items()}})
 
                         if emotion != self.prev_emotion and emotion not in ('no_face','uncalibrated','out_of_range','speaking'):
                             _, buf = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
