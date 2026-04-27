@@ -12,8 +12,8 @@ import torch
 import mediapipe as mp
 from flask import Flask, render_template, Response, jsonify, request
 from sixdrepnet import SixDRepNet
-from au_net.ANFL import MEFARG
-
+from au_net.MEFL import MEFARG
+#from au_net.ANFL import MEFARG
 # ── 常量 ──────────────────────────────────────────────
 AU_MAIN = ['AU1','AU2','AU4','AU5','AU6','AU7','AU9','AU10',
            'AU11','AU12','AU13','AU14','AU15','AU16','AU17','AU18',
@@ -74,11 +74,11 @@ class PoseEstimator:
 
 # ── AUExtractor ───────────────────────────────────────
 class AUExtractor:
-    def __init__(self, arc='resnet18', ckpt='checkpoints/OpenGprahAU-ResNet18_first_stage.pth'):
+    def __init__(self, arc='resnet50', ckpt='checkpoints/OpenGprahAU-ResNet50_second_stage.pth'):
+    #def __init__(self, arc='resnet18', ckpt='checkpoints/OpenGprahAU-ResNet18_first_stage.pth'):
         self.sz = 224
         self.dev = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.net = MEFARG(num_main_classes=27, num_sub_classes=14,
-                          backbone=arc, neighbor_num=4, metric='dots')
+        self.net = MEFARG(num_main_classes=27, num_sub_classes=14, backbone=arc)
         if os.path.exists(ckpt):
             ckpt_data = torch.load(ckpt, map_location=self.dev)
             state_dict = {k.replace("module.", ""): v for k, v in ckpt_data["state_dict"].items()}
@@ -117,55 +117,81 @@ class AUExtractor:
 
 # ── EmotionMapper ────────────────────────────────────
 class EmotionMapper:
-    POSES = ['front','up','down','side']
-    EMOTIONS = ['calm','happy','sad']
+    POSES = ['front', 'up', 'down', 'side']
+    EMOTIONS = ['calm', 'happy', 'sad']
 
-    def __init__(self, history=5, persist_path=None):
-        self.baselines = {p:None for p in self.POSES}
-        self.buffers   = {p:[]   for p in self.POSES}
+    def __init__(self, history=8, persist_path=None):
+        self.baselines = {p: None for p in self.POSES}
+        self.buffers = {p: [] for p in self.POSES}
         self.calibrating = None
         self.hist = deque(maxlen=history)
+        # 每种姿态的激活阈值（z-score 单位）
         self.config = {
-            'front': {'happy_thresh':.5,'sad_thresh':.5,'weights':{'mouth':1.,'eyes':1.,'eyebrows':1.}},
-            'up':    {'happy_thresh':.5,'sad_thresh':.5,'weights':{'mouth':1.,'eyes':1.,'eyebrows':1.}},
-            'down':  {'happy_thresh':.5,'sad_thresh':.5,'weights':{'mouth':.1,'eyes':1.8,'eyebrows':1.8}},
-            'side':  {'happy_thresh':.5,'sad_thresh':.5,'weights':{'mouth':.2,'eyes':1.5,'eyebrows':1.5}},
+            'front': {'h_thresh': 1.5, 's_thresh': 1.5},
+            'up':    {'h_thresh': 1.5, 's_thresh': 1.5},
+            'down':  {'h_thresh': 1.2, 's_thresh': 1.2},
+            'side':  {'h_thresh': 1.2, 's_thresh': 1.2},
         }
         self.last_emotion = 'calm'
         self.switch_cnt = 0
-        self.persist_path = persist_path or os.path.join(os.path.dirname(__file__),'data','baselines.json')
+        self.persist_path = persist_path or os.path.join(
+            os.path.dirname(__file__), 'data', 'baselines.json')
         self._load()
 
-    # -- 持久化 --
+    # ── 持久化（均值 + 标准差）──
     def _load(self):
         if os.path.exists(self.persist_path):
             try:
-                with open(self.persist_path,'r',encoding='utf-8') as f:
+                with open(self.persist_path, 'r', encoding='utf-8') as f:
                     d = json.load(f)
                 for p in self.POSES:
-                    if p in d and d[p]: self.baselines[p] = {k:float(v) for k,v in d[p].items()}
-                print(f"[Mapper] 基线已加载")
-            except: pass
+                    if p in d and d[p]:
+                        self.baselines[p] = {
+                            'mu':    {k: float(v) for k, v in d[p]['mu'].items()},
+                            'sigma': {k: max(float(v), 0.1) for k, v in d[p]['sigma'].items()},
+                        }
+                print(f"[Mapper] 基线已加载: {list(k for k,v in self.baselines.items() if v)}")
+            except Exception as e:
+                print(f"[Mapper] 加载失败（将重新校准）: {e}")
 
     def _save(self):
         try:
             os.makedirs(os.path.dirname(self.persist_path), exist_ok=True)
-            d = {p:self.baselines[p] for p in self.POSES if self.baselines[p]}
-            with open(self.persist_path,'w',encoding='utf-8') as f: json.dump(d,f,indent=2,ensure_ascii=False)
-        except: pass
+            d = {}
+            for p in self.POSES:
+                if self.baselines[p]:
+                    d[p] = {
+                        'mu': self.baselines[p]['mu'],
+                        'sigma': self.baselines[p]['sigma'],
+                    }
+            with open(self.persist_path, 'w', encoding='utf-8') as f:
+                json.dump(d, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            print(f"[Mapper] 保存失败: {e}")
 
-    # -- 校准 --
+    # ── 校准 ──
     def start_calib(self, pose):
-        if pose not in self.POSES: return False
-        self.calibrating = pose; self.buffers[pose] = []; return True
+        if pose not in self.POSES:
+            return False
+        self.calibrating = pose
+        self.buffers[pose] = []
+        return True
 
     def finish_calib(self, pose):
-        buf = self.buffers.get(pose,[])
-        if len(buf) < 15:
-            self.calibrating = None; return False
+        buf = self.buffers.get(pose, [])
+        if len(buf) < 20:
+            self.calibrating = None
+            return False
         keys = list(buf[0].keys())
-        self.baselines[pose] = {k:float(np.mean([f[k] for f in buf])) for k in keys}
-        self.calibrating = None; self._save(); return True
+        mu    = {k: float(np.mean([f[k] for f in buf])) for k in keys}
+        sigma = {k: max(float(np.std([f[k] for f in buf])), 0.1) for k in keys}
+        self.baselines[pose] = {'mu': mu, 'sigma': sigma}
+        self.calibrating = None
+        self._save()
+        # 打印关键 AU 的基线，方便调试
+        for au in ['AU12', 'AU6', 'AU15', 'AU4', 'AU25']:
+            print(f"  {au}: μ={mu.get(au,0):.1f}  σ={sigma.get(au,0):.1f}")
+        return True
 
     def feed_calib(self, au):
         if self.calibrating and self.calibrating in self.buffers:
@@ -173,62 +199,86 @@ class EmotionMapper:
             return len(self.buffers[self.calibrating])
         return 0
 
-    # -- 姿态判断 --
+    # ── 姿态 ──
     @staticmethod
     def get_pose(pitch, yaw):
         if abs(yaw) > 35: return 'side'
-        if pitch > 15:  return 'up'
-        if pitch < -20: return 'down'
+        if pitch >  15:    return 'up'
+        if pitch < -20:    return 'down'
         return 'front'
 
-    # -- 核心：AU → 情绪 --
+    # ── 核心：AU → 情绪（z-score）──
     def predict(self, au, pitch, yaw):
         if au is None:
-            return 'unknown','no_face',0.,{'calm':0,'happy':0,'sad':0}
+            return 'unknown', 'no_face', 0., {'calm':1,'happy':0,'sad':0}
+
         pose = self.get_pose(pitch, yaw)
         bl = self.baselines[pose]
-        w  = self.config[pose]['weights']
-        g  = lambda n: au.get(n, 0.)
 
-        # 有基线用相对值，无基线用绝对值
-        if bl:
-            a = lambda n: max(0., g(n) - bl.get(n, 0.))
-        else:
-            a = g
+        # 未校准
+        if bl is None:
+            return pose, 'uncalibrated', 0., {'calm':1,'happy':0,'sad':0}
 
-        # 高兴激活度
-        h = (a('AU12')/100)*.35*w['mouth'] + (a('AU6')/100)*.25*w['eyes'] \
-          + (a('AU25')/100)*.10*w['mouth'] + (a('AU7')/100)*.15*w['eyes'] \
-          + (a('AU5')/100)*.15*w['eyes']
-        # 沮丧激活度
-        s = (a('AU15')/100)*.35*w['mouth'] + (a('AU4')/100)*.25*w['eyebrows'] \
-          + (a('AU17')/100)*.20*w['mouth'] + (a('AU1')/100)*.20*w['eyebrows']
-        # 平静
-        mx = max(h, s)
-        c = max(0., 1. - mx*1.5)
-        t = h+s+c+1e-6
-        scores = {'happy':h/t, 'sad':s/t, 'calm':c/t}
+        mu, sigma = bl['mu'], bl['sigma']
+        thr = self.config[pose]
 
-        # 状态机 + 迟滞
+        # z-score：正值 = 比基线高，负值 = 比基线低
+        def z(name):
+            if name not in mu or name not in sigma:
+                return 0.0
+            return (au.get(name, 0.0) - mu[name]) / sigma[name]
+
+        # ── 高兴：AU12（嘴角上拉）主导，AU6（颧骨）辅助 ──
+        z12 = z('AU12');  z6 = z('AU6');  z25 = z('AU25')
+        h_act = 0.0
+        if z12 > 0.8 and z6 > -0.5:
+            h_act = max(0, z12) * 0.55 + max(0, z6) * 0.30 + max(0, z25) * 0.15
+
+        # ── 沮丧：AU15（嘴角下拉）主导，AU4/AU1 辅助 ──
+        z15 = z('AU15');  z4 = z('AU4');  z1 = z('AU1');  z17 = z('AU17')
+        s_act = 0.0
+        if z15 > 0.8:
+            s_act = max(0, z15) * 0.50 + max(0, z4) * 0.20 + max(0, z1) * 0.15 + max(0, z17) * 0.15
+
+        # ── 平静 = 默认态，只有强激活才能切换走 ──
+        c_act = 1.0
+        if h_act > thr['h_thresh']:
+            c_act = max(0.0, 1.0 - (h_act - thr['h_thresh']) * 0.4)
+        elif s_act > thr['s_thresh']:
+            c_act = max(0.0, 1.0 - (s_act - thr['s_thresh']) * 0.4)
+
+        # 归一化
+        total = h_act + s_act + c_act + 1e-6
+        scores = {'happy': h_act/total, 'sad': s_act/total, 'calm': c_act/total}
+
+        # ── 状态机（5 帧迟滞 ≈ 0.5 秒）──
         raw = max(scores, key=scores.get)
         if self.last_emotion == 'calm':
-            if raw=='happy' and h<.5: raw='calm'
-            elif raw=='sad' and s<.5: raw='calm'
+            if raw == 'happy' and h_act < thr['h_thresh']:
+                raw = 'calm'
+            elif raw == 'sad' and s_act < thr['s_thresh']:
+                raw = 'calm'
         else:
-            if raw=='calm' and mx>.25: raw=self.last_emotion
+            if raw == 'calm':
+                if self.last_emotion == 'happy' and h_act > thr['h_thresh'] * 0.6:
+                    raw = 'happy'
+                elif self.last_emotion == 'sad' and s_act > thr['s_thresh'] * 0.6:
+                    raw = 'sad'
 
         if raw != self.last_emotion:
             self.switch_cnt += 1
-            if self.switch_cnt < 3: best = self.last_emotion
-            else: best = raw; self.last_emotion = raw; self.switch_cnt = 0
+            if self.switch_cnt < 5:
+                best = self.last_emotion
+            else:
+                best = raw; self.last_emotion = raw; self.switch_cnt = 0
         else:
             self.switch_cnt = 0; best = raw
 
+        # 时序平滑
         self.hist.append(scores)
-        smooth = {e:float(np.mean([x[e] for x in self.hist])) for e in self.EMOTIONS}
+        smooth = {e: float(np.mean([x[e] for x in self.hist])) for e in self.EMOTIONS}
         conf = smooth[best]
 
-        if bl is None: best = 'uncalibrated'
         return pose, best, float(conf), smooth
 
 # ── InferenceEngine ──────────────────────────────────
@@ -240,7 +290,8 @@ class Engine:
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         self.det = FaceDetector()
         self.pose_est = PoseEstimator()
-        self.au_ext = AUExtractor()
+        #self.au_ext = AUExtractor()
+        self.au_ext = AUExtractor(arc='resnet50',ckpt='checkpoints/OpenGprahAU-ResNet50_second_stage.pth')
         persist = os.path.join(os.path.dirname(__file__),'data','baselines.json')
         self.mapper = EmotionMapper(history=5, persist_path=persist)
         self.annotated = None
@@ -253,78 +304,87 @@ class Engine:
                            au={}, features={})
 
     def loop(self):
-        if not self.cap.isOpened():
-            print("[Engine] ❌ 摄像头打不开！检查是否被其他程序占用，或换个摄像头索引")
-            return
-        print("[Engine] ✅ 摄像头已打开，推理线程启动")
-        self.running = True
-        while self.running:
-            try:
-                ret, frame = self.cap.read()
-                if not ret: time.sleep(.01); continue
-                if int(time.time()*3) % 3 == 0:  # 每秒只打印一次
-                    print(f"[Frame] shape={frame.shape}, mean={frame.mean():.1f}")
-                ann = frame.copy()
-                lm = self.det.process(frame)
-                if int(time.time()*2) % 2 == 0:
-                    print(f"[Face] detected={lm is not None}")
-                if lm is not None:
-                    pitch,yaw,roll = self.pose_est.estimate(frame, lm)
-                    au = self.au_ext.predict(frame, lm)
+        try:
+            if not self.cap.isOpened():
+                print("[Engine] ❌ 摄像头打不开！检查是否被其他程序占用，或换个摄像头索引")
+                return
+            print("[Engine] ✅ 摄像头已打开，推理线程启动")
+            self.running = True
+            while self.running:
+                try:
+                    ret, frame = self.cap.read()
+                    if not ret: time.sleep(.01); continue
+                    ann = frame.copy()
+                    lm = self.det.process(frame)
+                    if lm is not None:
+                        pitch,yaw,roll = self.pose_est.estimate(frame, lm)
+                        au = self.au_ext.predict(frame, lm)
+                        # 每 30 帧打印一次 AU 原始值，方便调试
+                        if hasattr(self, '_dbg_cnt'):
+                            self._dbg_cnt += 1
+                        else:
+                            self._dbg_cnt = 0
+                        if au and self._dbg_cnt % 30 == 0:
+                            print(f"[AU值] 12={au.get('AU12',0):.1f}  6={au.get('AU6',0):.1f}  "
+                                f"15={au.get('AU15',0):.1f}  4={au.get('AU4',0):.1f}  "
+                                f"25={au.get('AU25',0):.1f}  1={au.get('AU1',0):.1f}")                        
+                        # 校准采集
+                        if self.mapper.calibrating and au:
+                            cnt = self.mapper.feed_calib(au)
+                            with self.lock: self.status['calib_count'] = cnt
+                            cv2.putText(ann, f"CALIB {self.mapper.calibrating.upper()}: {cnt}/30",
+                                        (20,40), cv2.FONT_HERSHEY_SIMPLEX, .7, (0,255,0), 2)
+                            if cnt >= 30:
+                                self.mapper.finish_calib(self.mapper.calibrating)
+                                with self.lock:
+                                    self.status['calibrating']=False
+                                    self.status['calib_pose']=None
+                                    self.status['calib_count']=0
 
-                    # 校准采集
-                    if self.mapper.calibrating and au:
-                        cnt = self.mapper.feed_calib(au)
-                        with self.lock: self.status['calib_count'] = cnt
-                        cv2.putText(ann, f"CALIB {self.mapper.calibrating.upper()}: {cnt}/30",
-                                    (20,40), cv2.FONT_HERSHEY_SIMPLEX, .7, (0,255,0), 2)
-                        if cnt >= 30:
-                            self.mapper.finish_calib(self.mapper.calibrating)
-                            with self.lock:
-                                self.status['calibrating']=False
-                                self.status['calib_pose']=None
-                                self.status['calib_count']=0
+                        pose, emotion, conf, scores = self.mapper.predict(au, pitch, yaw)
 
-                    pose, emotion, conf, scores = self.mapper.predict(au, pitch, yaw)
+                        # 绘制关键点
+                        for i in KP_IDX:
+                            cv2.circle(ann,(int(lm[i][0]),int(lm[i][1])),2,(0,255,0),-1)
+                        # 姿态
+                        cv2.putText(ann,f"P:{pitch:5.1f} Y:{yaw:5.1f} R:{roll:5.1f}",
+                                    (10,30), cv2.FONT_HERSHEY_SIMPLEX,.6,(255,255,255),2)
+                        # 情绪
+                        clr = {'happy':(0,255,0),'sad':(0,0,255),'calm':(128,128,128),
+                               'uncalibrated':(0,255,255),'no_face':(0,0,255)}
+                        c = clr.get(emotion,(128,128,128))
+                        cv2.putText(ann,f"{emotion.upper()} {conf:.2f}",
+                                    (10,65), cv2.FONT_HERSHEY_SIMPLEX,.9,c,2)
+                        # 关键 AU
+                        if au:
+                            txt = "  ".join(f"{n}:{au[n]:.0f}" for n in AU_SHOW[:5])
+                            cv2.putText(ann, txt, (10,95), cv2.FONT_HERSHEY_SIMPLEX,.45,(200,200,200),1)
+                            txt2 = "  ".join(f"{n}:{au[n]:.0f}" for n in AU_SHOW[5:])
+                            cv2.putText(ann, txt2, (10,115), cv2.FONT_HERSHEY_SIMPLEX,.45,(200,200,200),1)
 
-                    # 绘制关键点
-                    for i in KP_IDX:
-                        cv2.circle(ann,(int(lm[i][0]),int(lm[i][1])),2,(0,255,0),-1)
-                    # 姿态
-                    cv2.putText(ann,f"P:{pitch:5.1f} Y:{yaw:5.1f} R:{roll:5.1f}",
-                                (10,30), cv2.FONT_HERSHEY_SIMPLEX,.6,(255,255,255),2)
-                    # 情绪
-                    clr = {'happy':(0,255,0),'sad':(0,0,255),'calm':(128,128,128),
-                           'uncalibrated':(0,255,255),'no_face':(0,0,255)}
-                    c = clr.get(emotion,(128,128,128))
-                    cv2.putText(ann,f"{emotion.upper()} {conf:.2f}",
-                                (10,65), cv2.FONT_HERSHEY_SIMPLEX,.9,c,2)
-                    # 关键 AU
-                    if au:
-                        txt = "  ".join(f"{n}:{au[n]:.0f}" for n in AU_SHOW[:5])
-                        cv2.putText(ann, txt, (10,95), cv2.FONT_HERSHEY_SIMPLEX,.45,(200,200,200),1)
-                        txt2 = "  ".join(f"{n}:{au[n]:.0f}" for n in AU_SHOW[5:])
-                        cv2.putText(ann, txt2, (10,115), cv2.FONT_HERSHEY_SIMPLEX,.45,(200,200,200),1)
-
+                        with self.lock:
+                            self.status.update(
+                                pose=pose, emotion=emotion, confidence=round(conf,3),
+                                pitch=round(pitch,1), yaw=round(yaw,1), roll=round(roll,1),
+                                scores={k:round(v,3) for k,v in scores.items()},
+                                au={k:round(v,1) for k,v in au.items()} if au else {})
+                    else:
+                        cv2.putText(ann,"NO FACE",(20,80),cv2.FONT_HERSHEY_SIMPLEX,1.,(0,0,255),2)
+                        with self.lock:
+                            self.status['emotion']='no_face'
+                            self.status['au']={}
+                            self.status['scores']={'calm':0,'happy':0,'sad':0}
                     with self.lock:
-                        self.status.update(
-                            pose=pose, emotion=emotion, confidence=round(conf,3),
-                            pitch=round(pitch,1), yaw=round(yaw,1), roll=round(roll,1),
-                            scores={k:round(v,3) for k,v in scores.items()},
-                            au={k:round(v,1) for k,v in au.items()} if au else {})
-                else:
-                    cv2.putText(ann,"NO FACE",(20,80),cv2.FONT_HERSHEY_SIMPLEX,1.,(0,0,255),2)
-                    with self.lock:
-                        self.status['emotion']='no_face'
-                        self.status['au']={}
-                        self.status['scores']={'calm':0,'happy':0,'sad':0}
-                with self.lock:
-                    self.annotated = ann
-                time.sleep(.03)
-            except Exception as e:
-                print(f"[Engine] 推理异常: {e}")
-                import traceback; traceback.print_exc()
-                time.sleep(1)
+                        self.annotated = ann
+                    time.sleep(.03)
+                except Exception as e:
+                    print(f"[Engine] 推理异常: {e}")
+                    import traceback; traceback.print_exc()
+                    time.sleep(1)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self.running = False
 
     def get_frame(self):
         with self.lock:
