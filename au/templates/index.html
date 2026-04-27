@@ -6,109 +6,136 @@
 <title>AU 实时情绪推理</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{background:#1a1a2e;color:#eee;font-family:'Segoe UI',sans-serif;display:flex;height:100vh}
-video,img{display:block}
-.panel{width:360px;padding:16px;overflow-y:auto;display:flex;flex-direction:column;gap:14px;border-right:1px solid #333}
-.panel-r{border-right:none;border-left:1px solid #333}
-.feed{flex:1;display:flex;align-items:center;justify-content:center;background:#111}
-.feed img{max-width:100%;max-height:100%;object-fit:contain}
-h3{font-size:13px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px}
-.card{background:#16213e;border-radius:8px;padding:12px}
-.emotion-big{font-size:28px;font-weight:700;text-align:center;padding:8px 0}
-.emotion-big.calm{color:#8e8e8e}
-.emotion-big.happy{color:#4ecca3}
-.emotion-big.sad{color:#e74c3c}
-.emotion-big.uncalibrated{color:#f39c12}
-.emotion-big.out_of_range{color:#e67e22}
-.emotion-big.no_face{color:#e74c3c}
-.bar-row{display:flex;align-items:center;gap:8px;margin:3px 0;font-size:13px}
-.bar-row .lbl{width:45px;text-align:right;color:#aaa}
-.bar-row .bar{flex:1;height:16px;background:#0f3460;border-radius:4px;overflow:hidden;position:relative}
-.bar-row .fill{height:100%;border-radius:4px;transition:width .15s}
-.bar-row .val{width:38px;font-size:12px;color:#aaa}
-.fill.calm{background:#8e8e8e}
-.fill.happy{background:#4ecca3}
-.fill.sad{background:#e74c3c}
-.au-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;font-size:12px}
-.au-grid .au-item{display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px solid #1a1a3e}
-.au-grid .au-name{color:#aaa}
-.au-grid .au-val{color:#4ecca3;font-weight:600;min-width:36px;text-align:right}
-.info-row{display:flex;justify-content:space-between;font-size:13px;padding:2px 0}
-.info-row .k{color:#888}
-.info-row .v{color:#ddd}
-.calib-btns{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.calib-btns button{padding:10px;border:1px solid #333;border-radius:6px;background:#16213e;color:#eee;cursor:pointer;font-size:13px;transition:all .15s}
-.calib-btns button:hover{background:#0f3460;border-color:#4ecca3}
-.calib-btns button.active{background:#4ecca3;color:#111;border-color:#4ecca3}
-.slider-row{display:flex;align-items:center;gap:10px;margin:6px 0}
-.slider-row label{width:90px;font-size:13px;color:#aaa;flex-shrink:0}
-.slider-row input[type=range]{flex:1;accent-color:#4ecca3}
-.slider-row .sv{width:32px;font-size:13px;color:#4ecca3;text-align:right}
+body{background:#0d1117;color:#c9d1d9;font-family:'Segoe UI','Microsoft YaHei',sans-serif;display:flex;height:100vh;overflow:hidden}
+.left{width:420px;flex-shrink:0;display:flex;flex-direction:column;border-right:1px solid #21262d}
+.left .feed{flex:1;background:#000;display:flex;align-items:center;justify-content:center;min-height:0}
+.left .feed img{width:100%;height:100%;object-fit:contain}
+.snap-area{border-top:1px solid #21262d;padding:10px}
+.snap-area h3{font-size:12px;color:#8b949e;margin-bottom:6px}
+.snap-list{display:flex;gap:6px;overflow:hidden}
+.snap-item{width:70px;height:52px;border-radius:4px;overflow:hidden;position:relative;flex-shrink:0;border:2px solid transparent}
+.snap-item img{width:100%;height:100%;object-fit:cover}
+.snap-item .lbl{position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.7);font-size:9px;text-align:center;padding:1px 0;color:#fff}
+.snap-item.happy{border-color:#4ecca3}
+.snap-item.sad{border-color:#e74c3c}
+.snap-item.calm{border-color:#8b949e}
+.right{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:12px}
+.card{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:12px}
+h3{font-size:12px;color:#8b949e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
+/* Emotion display */
+.emo-big{text-align:center;font-size:26px;font-weight:700;padding:4px 0}
+.emo-big.calm{color:#8b949e}.emo-big.happy{color:#4ecca3}.emo-big.sad{color:#e74c3c}
+.emo-big.uncalibrated{color:#d29922}.emo-big.out_of_range{color:#e3722b}.emo-big.no_face{color:#e74c3c}
+.emo-info{display:flex;justify-content:space-between;font-size:12px;color:#8b949e}
+/* Score bars */
+.bar-row{display:flex;align-items:center;gap:6px;margin:3px 0;font-size:12px}
+.bar-row .lbl{width:36px;text-align:right;color:#8b949e}
+.bar-row .bar{flex:1;height:14px;background:#0d1117;border-radius:3px;overflow:hidden}
+.bar-row .fill{height:100%;border-radius:3px;transition:width .2s}
+.bar-row .val{width:34px;font-size:11px;color:#8b949e}
+.fill.calm{background:#8b949e}.fill.happy{background:#4ecca3}.fill.sad{background:#e74c3c}
+/* Timeline chart */
+.chart-wrap{position:relative}
+.chart-wrap canvas{width:100%;height:140px;display:block;border-radius:4px;cursor:grab}
+.chart-wrap canvas:active{cursor:grabbing}
+.chart-live{position:absolute;top:6px;right:6px;font-size:11px;background:#238636;color:#fff;padding:2px 8px;border-radius:10px;cursor:pointer;display:none}
+.chart-live.hidden{display:inline-block}
+/* Pose & AU info */
+.info-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:2px 10px;font-size:12px}
+.info-grid .k{color:#8b949e}.info-grid .v{color:#c9d1d9;text-align:right}
+.au-grid{display:grid;grid-template-columns:1fr 1fr;gap:2px 12px;font-size:12px;margin-top:6px}
+.au-item{display:flex;justify-content:space-between;padding:1px 0}
+.au-name{color:#8b949e}.au-val{color:#4ecca3;font-weight:600;min-width:30px;text-align:right}
+/* Calibration matrix */
+.calib-table{width:100%;border-collapse:collapse}
+.calib-table th,.calib-table td{text-align:center;padding:4px;font-size:12px}
+.calib-table th{color:#8b949e;font-weight:normal}
+.calib-table td.pose-label{color:#8b949e;text-align:right;padding-right:8px}
+.calib-cell{width:56px;height:32px;border:1px solid #30363d;border-radius:4px;background:#0d1117;
+  color:#484f58;cursor:pointer;font-size:14px;transition:all .15s}
+.calib-cell:hover{border-color:#58a6ff}
+.calib-cell.done{background:#1a3a2a;color:#4ecca3;border-color:#2ea043}
+.calib-cell.active{background:#1c2d41;color:#58a6ff;border-color:#58a6ff;animation:pulse 1s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}
+.calib-status{font-size:12px;margin-top:6px;min-height:16px}
+.calib-status.ok{color:#4ecca3}
+.calib-status.err{color:#e74c3c}
+/* Threshold sliders */
+.thresh-group{margin-bottom:6px}
+.thresh-group .tg-title{font-size:12px;color:#8b949e;margin-bottom:2px}
+.slider-row{display:flex;align-items:center;gap:6px;margin:2px 0;font-size:11px}
+.slider-row label{width:40px;color:#8b949e;flex-shrink:0}
+.slider-row input[type=range]{flex:1;accent-color:#4ecca3;height:4px}
+.slider-row .sv{width:28px;text-align:right;color:#4ecca3;font-variant-numeric:tabular-nums}
 </style>
 </head>
 <body>
 
-<!-- 左面板：AU值 + 姿态 -->
-<div class="panel">
-  <div class="card">
-    <h3>姿态 / 角度</h3>
-    <div class="info-row"><span class="k">姿态</span><span class="v" id="pose">-</span></div>
-    <div class="info-row"><span class="k">Pitch</span><span class="v" id="pitch">0</span></div>
-    <div class="info-row"><span class="k">Yaw</span><span class="v" id="yaw">0</span></div>
-    <div class="info-row"><span class="k">Roll</span><span class="v" id="roll">0</span></div>
-  </div>
-  <div class="card">
-    <h3>关键 Action Units</h3>
-    <div class="au-grid" id="au-grid"></div>
+<!-- Left: video + snapshots -->
+<div class="left">
+  <div class="feed"><img src="/video_feed" alt="feed"></div>
+  <div class="snap-area">
+    <h3>最近情绪变化</h3>
+    <div class="snap-list" id="snap-list"></div>
   </div>
 </div>
 
-<!-- 中间：视频 -->
-<div class="feed">
-  <img src="/video_feed" alt="feed">
-</div>
-
-<!-- 右面板：情绪 + 校准 + 阈值 -->
-<div class="panel panel-r">
+<!-- Right: controls -->
+<div class="right">
+  <!-- Emotion -->
   <div class="card">
-    <h3>实时情绪</h3>
-    <div class="emotion-big" id="emotion-text">未校准</div>
-    <div class="info-row"><span class="k">置信度</span><span class="v" id="conf">0.00</span></div>
+    <div class="emo-big" id="emo-text">未校准</div>
+    <div class="emo-info">
+      <span id="emo-pose">姿态 -</span>
+      <span id="emo-conf">置信度 0.00</span>
+    </div>
   </div>
+
+  <!-- Score bars -->
   <div class="card">
     <h3>情绪分数</h3>
     <div class="bar-row"><span class="lbl">平静</span><div class="bar"><div class="fill calm" id="bar-calm" style="width:0%"></div></div><span class="val" id="val-calm">0%</span></div>
     <div class="bar-row"><span class="lbl">高兴</span><div class="bar"><div class="fill happy" id="bar-happy" style="width:0%"></div></div><span class="val" id="val-happy">0%</span></div>
     <div class="bar-row"><span class="lbl">沮丧</span><div class="bar"><div class="fill sad" id="bar-sad" style="width:0%"></div></div><span class="val" id="val-sad">0%</span></div>
   </div>
+
+  <!-- Timeline -->
   <div class="card">
-    <h3>分姿态校准</h3>
-    <p style="font-size:12px;color:#888;margin-bottom:8px">保持对应姿态 + 平静表情，点击按钮</p>
-    <div class="calib-btns" id="calib-btns">
-      <button onclick="calib('front')">😐 平视</button>
-      <button onclick="calib('up')">😐 抬头</button>
-      <button onclick="calib('down')">😐 低头</button>
-      <button onclick="calib('side')">😐 侧脸</button>
+    <h3>情绪时间线（拖动查看，滚轮缩放）</h3>
+    <div class="chart-wrap">
+      <canvas id="chart"></canvas>
+      <div class="chart-live hidden" id="chart-live" onclick="chartLive()">LIVE</div>
     </div>
-    <div id="calib-status" style="font-size:12px;color:#4ecca3;margin-top:6px;min-height:16px"></div>
   </div>
+
+  <!-- Pose & AU -->
   <div class="card">
-    <h3>情绪阈值调节</h3>
-    <p style="font-size:11px;color:#666;margin-bottom:6px">值越小越灵敏，越大越难触发</p>
-    <div class="slider-row">
-      <label>高兴阈值</label>
-      <input type="range" min="0.5" max="4" step="0.1" id="sl-h" oninput="updateCfg()">
-      <span class="sv" id="sv-h">1.5</span>
+    <h3>姿态 / 角度</h3>
+    <div class="info-grid">
+      <span class="k">姿态</span><span class="v" id="v-pose">-</span>
+      <span class="k">Pitch</span><span class="v" id="v-pitch">0</span>
+      <span class="k">Yaw</span><span class="v" id="v-yaw">0</span>
     </div>
-    <div class="slider-row">
-      <label>沮丧阈值</label>
-      <input type="range" min="0.5" max="4" step="0.1" id="sl-s" oninput="updateCfg()">
-      <span class="sv" id="sv-s">1.5</span>
-    </div>
-    <div class="slider-row">
-      <label>角度限制</label>
-      <input type="range" min="15" max="45" step="1" id="sl-p" oninput="updateCfg()">
-      <span class="sv" id="sv-p">30°</span>
+    <h3 style="margin-top:8px">关键 Action Units</h3>
+    <div class="au-grid" id="au-grid"></div>
+  </div>
+
+  <!-- Calibration 4x3 -->
+  <div class="card">
+    <h3>校准矩阵（4 姿态 x 3 情绪）</h3>
+    <p style="font-size:11px;color:#484f58;margin-bottom:6px">点击单元格 → 保持该姿态+表情 → 等待自动完成（30帧）</p>
+    <table class="calib-table" id="calib-table"></table>
+    <div class="calib-status" id="calib-status"></div>
+  </div>
+
+  <!-- Thresholds per pose -->
+  <div class="card">
+    <h3>各姿态情绪阈值（值越小越灵敏）</h3>
+    <div id="thresh-area"></div>
+    <div class="slider-row" style="margin-top:6px">
+      <label style="width:60px">角度限制</label>
+      <input type="range" min="15" max="45" step="1" id="sl-pitch" oninput="updateCfg()">
+      <span class="sv" id="sv-pitch">30°</span>
     </div>
   </div>
 </div>
@@ -117,105 +144,248 @@ h3{font-size:13px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-
 const AU_SHOW = ['AU12','AU6','AU25','AU7','AU5','AU15','AU4','AU17','AU1','AU9'];
 const AU_LABEL = {AU12:'嘴角上拉',AU6:'颧骨提升',AU25:'嘴唇分开',AU7:'眼睑收紧',
   AU5:'上睑抬起',AU15:'嘴角下拉',AU4:'皱眉',AU17:'下巴上提',AU1:'内眉上抬',AU9:'鼻皱'};
-const EMOJI = {calm:'😐',happy:'😊',sad:'😢',uncalibrated:'❓',no_face:'👁️',out_of_range:'🚫'};
+const POSES = ['front','up','down','side'];
+const EMOS = ['calm','happy','sad'];
+const POSE_CN = {front:'平视',up:'抬头',down:'低头',side:'侧脸'};
+const EMO_CN = {calm:'平静',happy:'高兴',sad:'沮丧'};
+const EMO_EMOJI = {calm:'😐',happy:'😊',sad:'😢'};
 
-// 初始化 AU 网格
+// ── Init AU grid ──
 const auGrid = document.getElementById('au-grid');
 AU_SHOW.forEach(k => {
-  const d = document.createElement('div');
-  d.className = 'au-item';
+  const d = document.createElement('div'); d.className='au-item';
   d.innerHTML = `<span class="au-name">${AU_LABEL[k]||k}</span><span class="au-val" id="au-${k}">0</span>`;
   auGrid.appendChild(d);
 });
 
-// 轮询状态
-let calibrating = null;
-function poll(){
-  fetch('/api/status').then(r=>r.json()).then(d=>{
-    // 姿态
-    document.getElementById('pose').textContent = d.pose||'-';
-    document.getElementById('pitch').textContent = d.pitch||0;
-    document.getElementById('yaw').textContent = d.yaw||0;
-    document.getElementById('roll').textContent = d.roll||0;
+// ── Init calibration table ──
+function renderCalibTable(calibrated, calibPose, calibEmo, calibCnt) {
+  let h = '<tr><th></th>';
+  EMOS.forEach(e => h += `<th>${EMO_EMOJI[e]} ${EMO_CN[e]}</th>`);
+  h += '</tr>';
+  POSES.forEach(p => {
+    h += `<tr><td class="pose-label">${POSE_CN[p]}</td>`;
+    EMOS.forEach(e => {
+      const done = calibrated[p] && calibrated[p].includes(e);
+      const active = calibPose===p && calibEmo===e;
+      let cls = 'calib-cell';
+      if (active) cls += ' active';
+      else if (done) cls += ' done';
+      const txt = active ? calibCnt+'/'+30 : (done ? '✓' : '—');
+      h += `<td><button class="${cls}" onclick="startCalib('${p}','${e}')">${txt}</button></td>`;
+    });
+    h += '</tr>';
+  });
+  document.getElementById('calib-table').innerHTML = h;
+}
+renderCalibTable({}, null, null, 0);
 
-    // 情绪
-    const emo = d.emotion||'uncalibrated';
-    const el = document.getElementById('emotion-text');
-    el.textContent = (EMOJI[emo]||'') + ' ' + emo.toUpperCase();
-    el.className = 'emotion-big ' + emo;
-    document.getElementById('conf').textContent = (d.confidence||0).toFixed(2);
+// ── Init threshold sliders ──
+function renderThresh(cfg) {
+  let h = '';
+  POSES.forEach(p => {
+    if (!cfg[p]) return;
+    h += `<div class="thresh-group"><div class="tg-title">${POSE_CN[p]}</div>`;
+    h += `<div class="slider-row"><label>高兴</label><input type="range" min="0.3" max="4" step="0.1"
+      value="${cfg[p].h_thresh||1.2}" data-pose="${p}" data-key="h_thresh" oninput="updateCfg()">
+      <span class="sv">${(cfg[p].h_thresh||1.2).toFixed(1)}</span></div>`;
+    h += `<div class="slider-row"><label>沮丧</label><input type="range" min="0.3" max="4" step="0.1"
+      value="${cfg[p].s_thresh||1.2}" data-pose="${p}" data-key="s_thresh" oninput="updateCfg()">
+      <span class="sv">${(cfg[p].s_thresh||1.2).toFixed(1)}</span></div>`;
+    h += '</div>';
+  });
+  document.getElementById('thresh-area').innerHTML = h;
+}
 
-    // 分数条
-    const sc = d.scores||{};
-    ['calm','happy','sad'].forEach(e=>{
+// ── Timeline chart ──
+const chartCanvas = document.getElementById('chart');
+const ctx = chartCanvas.getContext('2d');
+let chartData = [];
+let viewEnd = 0, viewSpan = 30, autoScroll = true;
+let dragActive = false, dragX0 = 0, dragVE = 0;
+
+chartCanvas.addEventListener('mousedown', e => {
+  dragActive = true; autoScroll = false; dragX0 = e.clientX; dragVE = viewEnd;
+  document.getElementById('chart-live').classList.remove('hidden');
+});
+window.addEventListener('mousemove', e => {
+  if (!dragActive) return;
+  const dx = e.clientX - dragX0;
+  const tpp = viewSpan / chartCanvas.clientWidth;
+  viewEnd = dragVE - dx * tpp;
+});
+window.addEventListener('mouseup', () => { dragActive = false; });
+chartCanvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  const f = e.deltaY > 0 ? 1.15 : 0.87;
+  viewSpan = Math.max(5, Math.min(300, viewSpan * f));
+}, {passive:false});
+
+function chartLive() {
+  autoScroll = true;
+  document.getElementById('chart-live').classList.add('hidden');
+}
+
+function drawChart() {
+  const dpr = window.devicePixelRatio || 1;
+  const cw = chartCanvas.clientWidth, ch = chartCanvas.clientHeight;
+  chartCanvas.width = cw * dpr; chartCanvas.height = ch * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  ctx.fillStyle = '#0d1117'; ctx.fillRect(0, 0, cw, ch);
+
+  const pad = {l:32, r:8, t:18, b:20};
+  const pw = cw - pad.l - pad.r, ph = ch - pad.t - pad.b;
+  const vs = viewEnd - viewSpan;
+
+  // Grid
+  ctx.strokeStyle = '#21262d'; ctx.lineWidth = .5;
+  for (let i = 0; i <= 4; i++) {
+    const y = pad.t + ph * i / 4;
+    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(pad.l + pw, y); ctx.stroke();
+  }
+  // Time ticks
+  const step = viewSpan > 120 ? 30 : viewSpan > 40 ? 10 : viewSpan > 15 ? 5 : 2;
+  ctx.fillStyle = '#484f58'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
+  const t0 = Math.ceil(vs / step) * step;
+  for (let t = t0; t <= viewEnd; t += step) {
+    const x = pad.l + (t - vs) / viewSpan * pw;
+    if (x < pad.l || x > pad.l + pw) continue;
+    ctx.fillText(t + 's', x, ch - 4);
+    ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, pad.t + ph); ctx.stroke();
+  }
+  // Y labels
+  ctx.textAlign = 'right';
+  for (let i = 0; i <= 4; i++) {
+    ctx.fillText((i*25)+'%', pad.l - 3, pad.t + ph*(1-i/4) + 3);
+  }
+
+  // Data
+  const vis = chartData.filter(d => d.t >= vs - 1 && d.t <= viewEnd + 1);
+  if (vis.length < 2) return;
+
+  const colors = {calm:'#8b949e', happy:'#4ecca3', sad:'#e74c3c'};
+  for (const emo of EMOS) {
+    ctx.strokeStyle = colors[emo]; ctx.lineWidth = 1.5; ctx.beginPath();
+    let started = false;
+    for (const d of vis) {
+      const x = pad.l + (d.t - vs) / viewSpan * pw;
+      const y = pad.t + ph * (1 - (d.s[emo] || 0));
+      if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  // Legend
+  ctx.font = '10px sans-serif'; ctx.textAlign = 'left';
+  let lx = pad.l + 4;
+  for (const [e, c] of Object.entries(colors)) {
+    ctx.fillStyle = c; ctx.fillRect(lx, pad.t + 2, 10, 3);
+    ctx.fillText(EMO_CN[e], lx + 13, pad.t + 8); lx += 50;
+  }
+}
+
+// ── Calibration ──
+function startCalib(pose, emotion) {
+  fetch('/api/calibrate/start', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({pose, emotion})}).then(r=>r.json()).then(d => {
+    if (!d.ok) {
+      document.getElementById('calib-status').textContent = '❌ 无法启动校准';
+      document.getElementById('calib-status').className = 'calib-status err';
+    }
+  });
+}
+
+// ── Config update ──
+let cfgTimer = null;
+function updateCfg() {
+  const cfg = {};
+  document.querySelectorAll('#thresh-area input[type=range]').forEach(sl => {
+    const p = sl.dataset.pose, k = sl.dataset.key;
+    if (!cfg[p]) cfg[p] = {};
+    cfg[p][k] = parseFloat(sl.value);
+    sl.nextElementSibling.textContent = parseFloat(sl.value).toFixed(1);
+  });
+  cfg.pitch_limit = parseInt(document.getElementById('sl-pitch').value);
+  document.getElementById('sv-pitch').textContent = cfg.pitch_limit + '°';
+  clearTimeout(cfgTimer);
+  cfgTimer = setTimeout(() => {
+    fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(cfg)});
+  }, 300);
+}
+
+// ── Polling ──
+let lastSnapLen = 0;
+function poll() {
+  fetch('/api/status').then(r=>r.json()).then(d => {
+    // Emotion
+    const emo = d.emotion || 'uncalibrated';
+    const el = document.getElementById('emo-text');
+    el.textContent = (EMO_EMOJI[emo]||'') + ' ' + (EMO_CN[emo]||emo).toUpperCase();
+    el.className = 'emo-big ' + emo;
+    document.getElementById('emo-pose').textContent = '姿态 ' + (d.pose||'-');
+    document.getElementById('emo-conf').textContent = '置信度 ' + (d.confidence||0).toFixed(2);
+
+    // Bars
+    const sc = d.scores || {};
+    EMOS.forEach(e => {
       const pct = Math.round((sc[e]||0)*100);
       document.getElementById('bar-'+e).style.width = pct+'%';
       document.getElementById('val-'+e).textContent = pct+'%';
     });
 
-    // AU 值
-    const au = d.au||{};
-    AU_SHOW.forEach(k=>{
-      document.getElementById('au-'+k).textContent = (au[k]||0).toFixed(0);
+    // Pose/Angle
+    document.getElementById('v-pose').textContent = POSE_CN[d.pose] || d.pose || '-';
+    document.getElementById('v-pitch').textContent = d.pitch || 0;
+    document.getElementById('v-yaw').textContent = d.yaw || 0;
+
+    // AU
+    const au = d.au || {};
+    AU_SHOW.forEach(k => document.getElementById('au-'+k).textContent = (au[k]||0).toFixed(0));
+
+    // Calib table
+    renderCalibTable(d.calibrated||{}, d.calib_pose, d.calib_emotion, d.calib_count);
+    if (d.calibrating) {
+      document.getElementById('calib-status').textContent = `采集中 ${POSE_CN[d.calib_pose]||d.calib_pose} / ${EMO_CN[d.calib_emo]||d.calib_emo}：${d.calib_count}/30`;
+      document.getElementById('calib-status').className = 'calib-status ok';
+    }
+
+    // Thresholds (only init once or when empty)
+    if (!document.getElementById('thresh-area').children.length && d.config) renderThresh(d.config);
+    if (d.config && d.config.pitch_limit !== undefined) {
+      document.getElementById('sl-pitch').value = d.config.pitch_limit;
+      document.getElementById('sv-pitch').textContent = d.config.pitch_limit + '°';
+    }
+  });
+}
+
+function pollTimeline() {
+  fetch('/api/timeline').then(r=>r.json()).then(d => {
+    chartData = d;
+    if (autoScroll && d.length > 0) viewEnd = d[d.length-1].t + 2;
+    drawChart();
+  });
+}
+
+function pollSnapshots() {
+  fetch('/api/snaps').then(r=>r.json()).catch(()=>fetch('/api/snapshots').then(r=>r.json())).then(d => {
+    const list = document.getElementById('snap-list');
+    list.innerHTML = '';
+    (d||[]).forEach(s => {
+      const div = document.createElement('div');
+      div.className = 'snap-item ' + s.e;
+      div.innerHTML = `<img src="data:image/jpeg;base64,${s.img}"><div class="lbl">${s.t.toFixed(1)}s</div>`;
+      list.appendChild(div);
     });
-
-    // 校准状态
-    if(d.calibrating){
-      calibrating = d.calib_pose;
-      document.getElementById('calib-status').textContent = `采集中 ${d.calib_count}/30 ...`;
-      document.querySelectorAll('#calib-btns button').forEach(b=>{
-        b.classList.toggle('active', b.textContent.includes(
-          calibrating==='front'?'平视':calibrating==='up'?'抬头':calibrating==='down'?'低头':'侧脸'));
-      });
-    } else if(calibrating){
-      calibrating = null;
-      document.getElementById('calib-status').textContent = '✅ 完成';
-      document.querySelectorAll('#calib-btns button').forEach(b=>b.classList.remove('active'));
-    }
-
-    // 同步滑块
-    const cfg = d.config||{};
-    if(cfg.h_thresh !== undefined){
-      document.getElementById('sl-h').value = cfg.h_thresh;
-      document.getElementById('sv-h').textContent = cfg.h_thresh.toFixed(1);
-    }
-    if(cfg.s_thresh !== undefined){
-      document.getElementById('sl-s').value = cfg.s_thresh;
-      document.getElementById('sv-s').textContent = cfg.s_thresh.toFixed(1);
-    }
-    if(cfg.pitch_limit !== undefined){
-      document.getElementById('sl-p').value = cfg.pitch_limit;
-      document.getElementById('sv-p').textContent = cfg.pitch_limit + '°';
-    }
   });
 }
+
 setInterval(poll, 150);
+setInterval(pollTimeline, 1000);
+setInterval(pollSnapshots, 1000);
 poll();
-
-// 校准
-function calib(pose){
-  if(calibrating) return;
-  fetch('/api/calibrate/start',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({pose})}).then(r=>r.json()).then(()=>{
-    document.getElementById('calib-status').textContent = '采集中 0/30 ...';
-  });
-}
-
-// 阈值调节
-let cfgTimer = null;
-function updateCfg(){
-  const h = parseFloat(document.getElementById('sl-h').value);
-  const s = parseFloat(document.getElementById('sl-s').value);
-  const p = parseInt(document.getElementById('sl-p').value);
-  document.getElementById('sv-h').textContent = h.toFixed(1);
-  document.getElementById('sv-s').textContent = s.toFixed(1);
-  document.getElementById('sv-p').textContent = p + '°';
-  clearTimeout(cfgTimer);
-  cfgTimer = setTimeout(()=>{
-    fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({h_thresh:h, s_thresh:s, pitch_limit:p})});
-  }, 200);
-}
+setTimeout(() => { pollTimeline(); pollSnapshots(); }, 500);
 </script>
 </body>
 </html>
+
