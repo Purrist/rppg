@@ -161,7 +161,7 @@ AU_SHOW.forEach(k => {
 // ── Init calibration table ──
 function renderCalibTable(calibrated, calibPose, calibEmo, calibCnt) {
   let h = '<tr><th></th>';
-  EMOS.forEach(e => h += `<th>${EMO_EMOJI[e]} ${EMO_CN[e]}</th>`);
+  EMOS.forEach(e => h += `<th>${EMO_EMOJI[e]}${EMO_CN[e]}</th>`);
   h += '</tr>';
   POSES.forEach(p => {
     h += `<tr><td class="pose-label">${POSE_CN[p]}</td>`;
@@ -172,10 +172,21 @@ function renderCalibTable(calibrated, calibPose, calibEmo, calibCnt) {
       if (active) cls += ' active';
       else if (done) cls += ' done';
       const txt = active ? calibCnt+'/'+30 : (done ? '✓' : '—');
-      h += `<td><button class="${cls}" onclick="startCalib('${p}','${e}')">${txt}</button></td>`;
+      // 删除按钮（只在已校准时显示）
+      const delBtn = done && !active
+        ? `<button onclick="event.stopPropagation();deleteCalib('${p}','${e}')"
+             style="margin-left:3px;background:none;border:none;color:#f85149;cursor:pointer;font-size:13px;padding:0 2px;line-height:1"
+             title="删除此基线">×</button>`
+        : '';
+      h += `<td><button class="${cls}" onclick="startCalib('${p}','${e}')">${txt}</button>${delBtn}</td>`;
     });
     h += '</tr>';
   });
+  h += `<tr><td colspan="4" style="padding-top:8px;text-align:center">
+    <button onclick="deleteAllCalib()"
+      style="background:#21262d;border:1px solid #30363d;color:#f85149;padding:5px 16px;border-radius:4px;cursor:pointer;font-size:12px">
+      🗑 全部重置
+    </button></td></tr>`;
   document.getElementById('calib-table').innerHTML = h;
 }
 renderCalibTable({}, null, null, 0);
@@ -292,6 +303,29 @@ function startCalib(pose, emotion) {
     if (!d.ok) {
       document.getElementById('calib-status').textContent = '❌ 无法启动校准';
       document.getElementById('calib-status').className = 'calib-status err';
+    }
+  });
+}
+
+function deleteCalib(pose, emotion) {
+  if (!confirm(`确认删除 ${POSE_CN[pose]} /${EMO_CN[emotion]} 的校准数据？`)) return;
+  fetch('/api/calibrate/delete', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({pose, emotion})}).then(r=>r.json()).then(d => {
+    if (d.ok) {
+      document.getElementById('calib-status').textContent = `已删除 ${POSE_CN[pose]}/${EMO_CN[emotion]}`;
+      document.getElementById('calib-status').className = 'calib-status err';
+      setTimeout(() => { document.getElementById('calib-status').textContent = ''; }, 2000);
+    }
+  });
+}
+
+function deleteAllCalib() {
+  if (!confirm('确认删除所有校准数据？此操作不可撤销！')) return;
+  fetch('/api/calibrate/delete_all', {method:'POST'}).then(r=>r.json()).then(d => {
+    if (d.ok) {
+      document.getElementById('calib-status').textContent = '已清空全部校准数据';
+      document.getElementById('calib-status').className = 'calib-status err';
+      setTimeout(() => { document.getElementById('calib-status').textContent = ''; }, 2000);
     }
   });
 }

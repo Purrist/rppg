@@ -152,7 +152,16 @@ class EmotionMapper:
                         'sigma': {k:max(float(v),0.1) for k,v in d[p]['sigma'].items()},
                     }
             loaded = [f"{p}/{e}" for p in POSES for e in EMOTIONS if self.baselines[p][e]]
-            if loaded: print(f"[Mapper] 已加载: {loaded}")
+            if loaded: print(f"[Mapper] 已加载基线: {loaded}")
+            # 加载阈值配置
+            if '_config' in d:
+                for k, v in d['_config'].items():
+                    if k in self.config:
+                        if isinstance(self.config[k], dict) and isinstance(v, dict):
+                            self.config[k].update(v)
+                        else:
+                            self.config[k] = v
+                print(f"[Mapper] 已加载阈值配置")
         except Exception as ex:
             print(f"[Mapper] 加载失败: {ex}")
 
@@ -165,6 +174,7 @@ class EmotionMapper:
                 for e in EMOTIONS:
                     if self.baselines[p][e]:
                         d[p][e] = {'mu': self.baselines[p][e]['mu'], 'sigma': self.baselines[p][e]['sigma']}
+            d['_config'] = self.config
             with open(self.persist_path, 'w', encoding='utf-8') as f:
                 json.dump(d, f, indent=2, ensure_ascii=False)
         except Exception as ex:
@@ -201,6 +211,20 @@ class EmotionMapper:
 
     def get_calibrated(self):
         return {p: [e for e in EMOTIONS if self.baselines[p][e]] for p in POSES}
+
+    def delete_baseline(self, pose, emotion):
+        if pose in self.baselines and emotion in self.baselines[pose]:
+            self.baselines[pose][emotion] = None
+            self._save()
+            return True
+        return False
+
+    def delete_all_baselines(self):
+        for p in POSES:
+            for e in EMOTIONS:
+                self.baselines[p][e] = None
+        self._save()
+        return True
 
     @staticmethod
     def get_pose(pitch, yaw):
@@ -332,9 +356,9 @@ class Engine:
                         self._fc += 1
 
                         # Debug AU print
-                        if au and self._fc % 60 == 0:
-                            print(f"[AU] 12={au.get('AU12',0):.1f} 6={au.get('AU6',0):.1f} "
-                                  f"15={au.get('AU15',0):.1f} 4={au.get('AU4',0):.1f} 25={au.get('AU25',0):.1f}")
+                        # if au and self._fc % 60 == 0:
+                        #     print(f"[AU] 12={au.get('AU12',0):.1f} 6={au.get('AU6',0):.1f} "
+                        #           f"15={au.get('AU15',0):.1f} 4={au.get('AU4',0):.1f} 25={au.get('AU25',0):.1f}")
 
                         # Calibration
                         if self.mapper.calibrating and au:
@@ -427,6 +451,7 @@ class Engine:
                     mc[k].update(v)
                 else:
                     mc[k] = v
+        self.mapper._save()
 
     def shutdown(self):
         self.running = False; self.cap.release(); self.det.release()
@@ -470,6 +495,17 @@ def api_config():
         engine.update_config(request.get_json() or {})
         return jsonify({"ok": True})
     return jsonify(engine.mapper.config)
+
+@app.route("/api/calibrate/delete", methods=["POST"])
+def calib_delete():
+    d = request.get_json() or {}
+    ok = engine.mapper.delete_baseline(d.get("pose","front"), d.get("emotion","calm"))
+    return jsonify({"ok": ok})
+
+@app.route("/api/calibrate/delete_all", methods=["POST"])
+def calib_delete_all():
+    engine.mapper.delete_all_baselines()
+    return jsonify({"ok": True})
 
 if __name__ == "__main__":
     try:

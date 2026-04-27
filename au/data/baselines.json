@@ -1062,5 +1062,24 @@
         "AUR14": 0.1
       }
     }
+  },
+  "_config": {
+    "front": {
+      "h_thresh": 2,
+      "s_thresh": 3
+    },
+    "up": {
+      "h_thresh": 0.3,
+      "s_thresh": 4
+    },
+    "down": {
+      "h_thresh": 0.3,
+      "s_thresh": 1
+    },
+    "side": {
+      "h_thresh": 1,
+      "s_thresh": 1
+    },
+    "pitch_limit": 40
   }
 }
