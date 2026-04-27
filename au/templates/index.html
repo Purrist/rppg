@@ -16,16 +16,14 @@ body{background:#0d1117;color:#c9d1d9;font-family:'Segoe UI','Microsoft YaHei',s
 .snap-item{width:70px;height:52px;border-radius:4px;overflow:hidden;position:relative;flex-shrink:0;border:2px solid transparent}
 .snap-item img{width:100%;height:100%;object-fit:cover}
 .snap-item .lbl{position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.7);font-size:9px;text-align:center;padding:1px 0;color:#fff}
-.snap-item.happy{border-color:#4ecca3}
-.snap-item.sad{border-color:#e74c3c}
-.snap-item.calm{border-color:#8b949e}
+.snap-item.happy{border-color:#4ecca3}.snap-item.sad{border-color:#e74c3c}.snap-item.calm{border-color:#8b949e}.snap-item.speaking{border-color:#00c8ff}
 .right{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:12px}
 .card{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:12px}
 h3{font-size:12px;color:#8b949e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
 /* Emotion display */
 .emo-big{text-align:center;font-size:26px;font-weight:700;padding:4px 0}
 .emo-big.calm{color:#8b949e}.emo-big.happy{color:#4ecca3}.emo-big.sad{color:#e74c3c}
-.emo-big.uncalibrated{color:#d29922}.emo-big.out_of_range{color:#e3722b}.emo-big.no_face{color:#e74c3c}
+.emo-big.uncalibrated{color:#d29922}.emo-big.out_of_range{color:#e3722b}.emo-big.no_face{color:#f85149}.emo-big.speaking{color:#00c8ff}
 .emo-info{display:flex;justify-content:space-between;font-size:12px;color:#8b949e}
 /* Score bars */
 .bar-row{display:flex;align-items:center;gap:6px;margin:3px 0;font-size:12px}
@@ -147,8 +145,9 @@ const AU_LABEL = {AU12:'嘴角上拉',AU6:'颧骨提升',AU25:'嘴唇分开',AU7
 const POSES = ['front','up','down','side'];
 const EMOS = ['calm','happy','sad'];
 const POSE_CN = {front:'平视',up:'抬头',down:'低头',side:'侧脸'};
-const EMO_CN = {calm:'平静',happy:'高兴',sad:'沮丧'};
-const EMO_EMOJI = {calm:'😐',happy:'😊',sad:'😢'};
+const EMO_EMOJI={calm:'😐',happy:'😊',sad:'😢',speaking:'🗣',no_face:'❌',uncalibrated:'⏳',out_of_range:'⚠'};
+const EMO_CN={calm:'平静',happy:'高兴',sad:'沮丧',speaking:'说话中',no_face:'无人脸',uncalibrated:'未校准',out_of_range:'超出角度'};
+const CALIB_GUIDE={calm:'面无表情，自然放松',happy:'嘴角上扬，露出笑容',sad:'皱眉，嘴角微微下拉'};
 
 // ── Init AU grid ──
 const auGrid = document.getElementById('au-grid');
@@ -159,35 +158,32 @@ AU_SHOW.forEach(k => {
 });
 
 // ── Init calibration table ──
-function renderCalibTable(calibrated, calibPose, calibEmo, calibCnt) {
-  let h = '<tr><th></th>';
-  EMOS.forEach(e => h += `<th>${EMO_EMOJI[e]}${EMO_CN[e]}</th>`);
-  h += '</tr>';
-  POSES.forEach(p => {
-    h += `<tr><td class="pose-label">${POSE_CN[p]}</td>`;
-    EMOS.forEach(e => {
-      const done = calibrated[p] && calibrated[p].includes(e);
-      const active = calibPose===p && calibEmo===e;
-      let cls = 'calib-cell';
-      if (active) cls += ' active';
-      else if (done) cls += ' done';
-      const txt = active ? calibCnt+'/'+30 : (done ? '✓' : '—');
-      // 删除按钮（只在已校准时显示）
-      const delBtn = done && !active
-        ? `<button onclick="event.stopPropagation();deleteCalib('${p}','${e}')"
-             style="margin-left:3px;background:none;border:none;color:#f85149;cursor:pointer;font-size:13px;padding:0 2px;line-height:1"
-             title="删除此基线">×</button>`
-        : '';
-      h += `<td><button class="${cls}" onclick="startCalib('${p}','${e}')">${txt}</button>${delBtn}</td>`;
+function renderCalibTable(calibrated,calibPose,calibEmo,calibCnt){
+  let h='<tr><th></th>';
+  EMOS.forEach(e=>h+=`<th>${EMO_EMOJI[e]}${EMO_CN[e]}</th>`);
+  h+='</tr>';
+  POSES.forEach(p=>{
+    h+=`<tr><td class="pose-label">${POSE_CN[p]}</td>`;
+    EMOS.forEach(e=>{
+      const done=calibrated[p]&&calibrated[p].includes(e);
+      const active=calibPose===p&&calibEmo===e;
+      let cls='calib-cell';
+      if(active)cls+=' active';else if(done)cls+=' done';
+      const txt=active?calibCnt+'/30':(done?'✓':'—');
+      const delBtn=done&&!active
+        ?`<button onclick="event.stopPropagation();deleteCalib('${p}','${e}')"
+           style="margin-left:2px;background:none;border:none;color:#f85149;cursor:pointer;font-size:12px;padding:0 1px" title="删除">×</button>`
+        :'';
+      h+=`<td><button class="${cls}" onclick="startCalib('${p}','${e}')"
+         title="${POSE_CN[p]} +${CALIB_GUIDE[e]}">${txt}</button>${delBtn}</td>`;
     });
-    h += '</tr>';
+    h+='</tr>';
   });
-  h += `<tr><td colspan="4" style="padding-top:8px;text-align:center">
+  h+=`<tr><td colspan="4" style="padding-top:8px;text-align:center">
     <button onclick="deleteAllCalib()"
-      style="background:#21262d;border:1px solid #30363d;color:#f85149;padding:5px 16px;border-radius:4px;cursor:pointer;font-size:12px">
-      🗑 全部重置
-    </button></td></tr>`;
-  document.getElementById('calib-table').innerHTML = h;
+      style="background:#21262d;border:1px solid #30363d;color:#f85149;padding:4px 14px;border-radius:4px;cursor:pointer;font-size:12px">
+      全部重置</button></td></tr>`;
+  document.getElementById('calib-table').innerHTML=h;
 }
 renderCalibTable({}, null, null, 0);
 
@@ -275,7 +271,7 @@ function drawChart() {
   const vis = chartData.filter(d => d.t >= vs - 1 && d.t <= viewEnd + 1);
   if (vis.length < 2) return;
 
-  const colors = {calm:'#8b949e', happy:'#4ecca3', sad:'#e74c3c'};
+  const colors = {calm:'#8b949e', happy:'#4ecca3', sad:'#e74c3c', speaking:'#00c8ff'};
   for (const emo of EMOS) {
     ctx.strokeStyle = colors[emo]; ctx.lineWidth = 1.5; ctx.beginPath();
     let started = false;
@@ -297,35 +293,39 @@ function drawChart() {
 }
 
 // ── Calibration ──
-function startCalib(pose, emotion) {
-  fetch('/api/calibrate/start', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({pose, emotion})}).then(r=>r.json()).then(d => {
-    if (!d.ok) {
-      document.getElementById('calib-status').textContent = '❌ 无法启动校准';
-      document.getElementById('calib-status').className = 'calib-status err';
+function startCalib(pose,emotion){
+  fetch('/api/calibrate/start',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({pose,emotion})}).then(r=>r.json()).then(d=>{
+    if(d.ok){
+      document.getElementById('calib-status').textContent=
+        `${POSE_CN[pose]} +${CALIB_GUIDE[emotion]}（等待30帧...）`;
+      document.getElementById('calib-status').className='calib-status ok';
+    }else{
+      document.getElementById('calib-status').textContent='❌ 无法启动';
+      document.getElementById('calib-status').className='calib-status err';
     }
   });
 }
 
-function deleteCalib(pose, emotion) {
-  if (!confirm(`确认删除 ${POSE_CN[pose]} /${EMO_CN[emotion]} 的校准数据？`)) return;
-  fetch('/api/calibrate/delete', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({pose, emotion})}).then(r=>r.json()).then(d => {
-    if (d.ok) {
-      document.getElementById('calib-status').textContent = `已删除 ${POSE_CN[pose]}/${EMO_CN[emotion]}`;
-      document.getElementById('calib-status').className = 'calib-status err';
-      setTimeout(() => { document.getElementById('calib-status').textContent = ''; }, 2000);
+function deleteCalib(pose,emotion){
+  if(!confirm(`确认删除 ${POSE_CN[pose]} /${EMO_CN[emotion]} 的校准数据？`))return;
+  fetch('/api/calibrate/delete',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({pose,emotion})}).then(r=>r.json()).then(d=>{
+    if(d.ok){
+      document.getElementById('calib-status').textContent=`已删除 ${POSE_CN[pose]}/${EMO_CN[emotion]}`;
+      document.getElementById('calib-status').className='calib-status err';
+      setTimeout(()=>{document.getElementById('calib-status').textContent='';},2000);
     }
   });
 }
 
-function deleteAllCalib() {
-  if (!confirm('确认删除所有校准数据？此操作不可撤销！')) return;
-  fetch('/api/calibrate/delete_all', {method:'POST'}).then(r=>r.json()).then(d => {
-    if (d.ok) {
-      document.getElementById('calib-status').textContent = '已清空全部校准数据';
-      document.getElementById('calib-status').className = 'calib-status err';
-      setTimeout(() => { document.getElementById('calib-status').textContent = ''; }, 2000);
+function deleteAllCalib(){
+  if(!confirm('确认删除所有校准数据？此操作不可撤销！'))return;
+  fetch('/api/calibrate/delete_all',{method:'POST'}).then(r=>r.json()).then(d=>{
+    if(d.ok){
+      document.getElementById('calib-status').textContent='已清空全部校准数据';
+      document.getElementById('calib-status').className='calib-status err';
+      setTimeout(()=>{document.getElementById('calib-status').textContent='';},2000);
     }
   });
 }
@@ -390,6 +390,12 @@ function poll() {
       document.getElementById('sl-pitch').value = d.config.pitch_limit;
       document.getElementById('sv-pitch').textContent = d.config.pitch_limit + '°';
     }
+  }).catch(()=>{
+    errCount++;
+    if(errCount===3){
+      document.getElementById('emo-text').textContent='⚠ 连接中断';
+      document.getElementById('emo-text').className='emo-big no_face';
+    }
   });
 }
 
@@ -406,14 +412,17 @@ function pollSnapshots() {
     const list = document.getElementById('snap-list');
     list.innerHTML = '';
     (d||[]).forEach(s => {
-      const div = document.createElement('div');
-      div.className = 'snap-item ' + s.e;
-      div.innerHTML = `<img src="data:image/jpeg;base64,${s.img}"><div class="lbl">${s.t.toFixed(1)}s</div>`;
-      list.appendChild(div);
+      if(s.e!=='no_face'&&s.e!=='uncalibrated'&&s.e!=='out_of_range'&&s.e!=='speaking'){
+        const div = document.createElement('div');
+        div.className = 'snap-item ' + s.e;
+        div.innerHTML = `<img src="data:image/jpeg;base64,${s.img}"><div class="lbl">${s.t.toFixed(1)}s</div>`;
+        list.appendChild(div);
+      }
     });
   });
 }
 
+let errCount=0;
 setInterval(poll, 150);
 setInterval(pollTimeline, 1000);
 setInterval(pollSnapshots, 1000);

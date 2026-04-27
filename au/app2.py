@@ -1,18 +1,31 @@
+"""
+app2.py - Debug version with extensive breakpoints to trace hang issues
+"""
 import os, time, threading, json, base64
 import numpy as np
 from collections import deque
 import sys
 
+print("[DEBUG] ==== 模块加载开始 ====")
+
 os.environ["FLASK_SKIP_DOTENV"] = "1"
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+print("[DEBUG] import cv2...")
 import cv2
+print("[DEBUG] import torch...")
 import torch
+print("[DEBUG] import mediapipe...")
 import mediapipe as mp
+print("[DEBUG] import flask...")
 from flask import Flask, render_template, Response, jsonify, request
+print("[DEBUG] import sixdrepnet...")
 from sixdrepnet import SixDRepNet
+print("[DEBUG] import MEFARG...")
 from au_net.MEFL import MEFARG
+
+print("[DEBUG] ==== 所有 import 完成 ====")
 
 # ── Constants ──────────────────────────────────────────────
 CALIB_N = 30
@@ -43,9 +56,11 @@ AU_SAD = ['AU15', 'AU4', 'AU1', 'AU17']
 # ── FaceDetector ──────────────────────────────────────
 class FaceDetector:
     def __init__(self):
+        print("[DEBUG] FaceDetector.__init__ 开始...")
         self.fm = mp.solutions.face_mesh.FaceMesh(
             static_image_mode=False, max_num_faces=5, refine_landmarks=True,
             min_detection_confidence=0.5, min_tracking_confidence=0.5)
+        print("[DEBUG] FaceDetector.__init__ 完成")
     def process(self, frame):
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         r = self.fm.process(rgb)
@@ -60,71 +75,43 @@ class FaceDetector:
 # ── SpeechDetector ────────────────────────────────────
 class SpeechDetector:
     def __init__(self):
-        self.history = deque(maxlen=30)
-        self.width_history = deque(maxlen=30)
+        print("[DEBUG] SpeechDetector.__init__ 开始...")
+        self.history = deque(maxlen=20)
         self.speaking = False
         self._spk_cnt = 0
         self._quiet_cnt = 0
+        print("[DEBUG] SpeechDetector.__init__ 完成")
 
     def update(self, lm):
         eye_dist = max(np.linalg.norm(lm[33][:2] - lm[263][:2]), 1.0)
         lip_open = abs(lm[14][1] - lm[13][1]) / eye_dist
-        lip_width = abs(lm[61][0] - lm[291][0]) / eye_dist
-
         self.history.append(lip_open)
-        self.width_history.append(lip_width)
-
-        if len(self.history) < 12:
+        if len(self.history) < 6:
             return False
-
         arr = np.array(self.history)
-        arr_w = np.array(self.width_history)
         diffs = np.abs(np.diff(arr))
-
-        # 1. 嘴唇开合速度（提高阈值）
-        speed = np.mean(diffs[-10:])
-        # 2. 嘴唇开合幅度
-        amplitude = np.max(arr[-15:]) - np.min(arr[-15:])
-        # 3. 嘴唇宽度变化（说话时嘴宽度也会变化）
-        width_var = np.var(arr_w[-10:])
-
-        # 4. 检测周期性变化（说话时会有规律的开合）
-        if len(arr) >= 20:
-            recent = arr[-20:]
-            peaks = 0
-            troughs = 0
-            for i in range(2, len(recent)-2):
-                if recent[i] > recent[i-1] and recent[i] > recent[i+1] and recent[i] - recent[i-2] > 0.005:
-                    peaks += 1
-                if recent[i] < recent[i-1] and recent[i] < recent[i+1] and recent[i-2] - recent[i] > 0.005:
-                    troughs += 1
-            has_periodic = (peaks >= 2 and troughs >= 1) or (troughs >= 2 and peaks >= 1)
-        else:
-            has_periodic = False
-
-        # 5. 检查是否真的在说话（排除大笑等情况）
-        # 说话时：有速度 + 有幅度 + 有周期性 + 宽度也在变化
-        raw = (speed > 0.012 and amplitude > 0.04 and has_periodic and width_var > 0.00005)
-
+        speed = np.mean(diffs[-8:])
+        amplitude = np.max(arr[-12:]) - np.min(arr[-12:])
+        raw = (speed > 0.008) or (amplitude > 0.06)
         if raw:
             self._spk_cnt += 1; self._quiet_cnt = 0
         else:
             self._quiet_cnt += 1; self._spk_cnt = 0
-
-        # 更严格的判定条件
-        if self._spk_cnt >= 5:
+        if self._spk_cnt >= 3:
             self.speaking = True
-        elif self._quiet_cnt >= 8:
+        elif self._quiet_cnt >= 6:
             self.speaking = False
         return self.speaking
 
 # ── FaceSelector ─────────────────────────────────────
 class FaceSelector:
     def __init__(self):
+        print("[DEBUG] FaceSelector.__init__ 开始...")
         self.tracks = {}
         self._next_id = 0
         self.primary_id = None
         self._lost_cnt = 0
+        print("[DEBUG] FaceSelector.__init__ 完成")
 
     def select(self, lm_list, shape):
         if not lm_list:
@@ -194,7 +181,10 @@ class FaceSelector:
 # ── PoseEstimator ─────────────────────────────────────
 class PoseEstimator:
     def __init__(self):
+        print("[DEBUG] PoseEstimator.__init__ 开始...")
+        print("[DEBUG] 加载 SixDRepNet...")
         self.model = SixDRepNet()
+        print("[DEBUG] PoseEstimator.__init__ 完成")
 
     def estimate(self, frame, lm):
         if lm is None: return 0.,0.,0.
@@ -208,16 +198,30 @@ class PoseEstimator:
         crop = frame[y0:y1, x0:x1]
         if crop.size==0 or crop.shape[0]<20: return 0.,0.,0.
         crop = cv2.resize(crop,(480,480), interpolation=cv2.INTER_LANCZOS4)
+        print("[DEBUG] PoseEstimator.predict 调用...")
         p,y,r = self.model.predict(crop)
+        print("[DEBUG] PoseEstimator.predict 完成")
         return float(np.asarray(p).item()),float(np.asarray(y).item()),float(np.asarray(r).item())
 
 # ── AUExtractor ───────────────────────────────────────
 class AUExtractor:
     def __init__(self, arc='resnet50', ckpt='checkpoints/OpenGprahAU-ResNet50_second_stage.pth'):
+        print("[DEBUG] AUExtractor.__init__ 开始...")
         self.sz = 224
-        self.dev = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.net = MEFARG(num_main_classes=27, num_sub_classes=14, backbone=arc)
+        # 强制使用 CPU 避免 CUDA 问题
+        self.dev = torch.device('cpu')
+        print(f"[DEBUG] AUExtractor 强制使用 device: {self.dev}")
+        print("[DEBUG] 创建 MEFARG 网络...")
+        try:
+            self.net = MEFARG(num_main_classes=27, num_sub_classes=14, backbone=arc)
+            print("[DEBUG] MEFARG 网络创建成功!")
+        except Exception as e:
+            print(f"[DEBUG] MEFARG 创建失败: {e}")
+            import traceback; traceback.print_exc()
+            raise
+        print(f"[DEBUG] MEFARG 网络创建完成，检查 checkpoint: {ckpt}")
         if os.path.exists(ckpt):
+            print(f"[DEBUG] 开始加载权重: {ckpt}")
             d = torch.load(ckpt, map_location=self.dev)
             sd = {k.replace("module.",""): v for k,v in d["state_dict"].items()}
             self.net.load_state_dict(sd)
@@ -225,6 +229,7 @@ class AUExtractor:
         else:
             print(f"[AU] 权重缺失: {ckpt}")
         self.net.to(self.dev).eval()
+        print("[DEBUG] AUExtractor.__init__ 完成")
 
     def _align(self, frame, lm):
         src = np.array([lm[i][:2] for i in MP5], dtype=np.float32)
@@ -256,6 +261,7 @@ class AUExtractor:
 # ── EmotionMapper (4x3 baselines + fixed state machine) ──
 class EmotionMapper:
     def __init__(self, history=30, persist_path=None):
+        print("[DEBUG] EmotionMapper.__init__ 开始...")
         self.baselines = {p: {e: None for e in EMOTIONS} for p in POSES}
         self.buffers = {}
         self.calibrating = None
@@ -270,7 +276,9 @@ class EmotionMapper:
         self.last_emotion = 'calm'
         self.switch_cnt = 0
         self.persist_path = persist_path or os.path.join(os.path.dirname(__file__),'data','baselines.json')
+        print(f"[DEBUG] EmotionMapper 加载基线: {self.persist_path}")
         self._load()
+        print("[DEBUG] EmotionMapper.__init__ 完成")
 
     def _load(self):
         if not os.path.exists(self.persist_path): return
@@ -454,15 +462,24 @@ class EmotionMapper:
 # ── InferenceEngine ──────────────────────────────────
 class Engine:
     def __init__(self):
+        print("[DEBUG] Engine.__init__ 开始...")
+        print("[DEBUG] 打开摄像头...")
         self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
         print(f"[Engine] 摄像头 opened={self.cap.isOpened()}")
+        print("[DEBUG] 设置摄像头分辨率...")
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        print("[DEBUG] 创建 FaceDetector...")
         self.det = FaceDetector()
+        print("[DEBUG] 创建 FaceSelector...")
         self.face_sel = FaceSelector()
+        print("[DEBUG] 创建 SpeechDetector...")
         self.speech_det = SpeechDetector()
+        print("[DEBUG] 创建 PoseEstimator...")
         self.pose_est = PoseEstimator()
+        print("[DEBUG] 创建 AUExtractor...")
         self.au_ext = AUExtractor()
+        print("[DEBUG] 创建 EmotionMapper...")
         persist = os.path.join(os.path.dirname(__file__),'data','baselines.json')
         self.mapper = EmotionMapper(history=30, persist_path=persist)
         self.annotated = None
@@ -478,8 +495,10 @@ class Engine:
             pitch=0.,yaw=0.,roll=0.,
             calibrating=False,calib_pose=None,calib_emotion=None,calib_count=0,
             scores={'calm':0,'happy':0,'sad':0},au={})
+        print("[DEBUG] Engine.__init__ 完成!")
 
     def loop(self):
+        print("[DEBUG] Engine.loop 开始...")
         try:
             if not self.cap.isOpened():
                 print("[Engine] 摄像头打不开"); return
@@ -568,6 +587,7 @@ class Engine:
         except Exception as e:
             import traceback; traceback.print_exc()
         self.running = False
+        print("[DEBUG] Engine.loop 结束")
 
     def get_frame(self):
         with self.lock:
@@ -603,9 +623,13 @@ class Engine:
         self.running = False; self.cap.release(); self.det.release()
 
 # ── Flask ────────────────────────────────────────────
+print("[DEBUG] 创建 Flask app...")
 app = Flask(__name__)
+print("[DEBUG] 创建 Engine 实例...")
 engine = Engine()
+print("[DEBUG] 启动推理线程...")
 threading.Thread(target=engine.loop, daemon=True).start()
+print("[DEBUG] Flask 路由定义...")
 
 @app.route("/")
 def index():
@@ -659,8 +683,12 @@ def calib_delete_all():
     engine.mapper.delete_all_baselines()
     return jsonify({"ok": True})
 
+print("[DEBUG] 所有路由定义完成，准备启动 Flask...")
+
 if __name__ == "__main__":
+    print("[DEBUG] 进入 app.run()...")
     try:
         app.run(host="0.0.0.0", port=5000, debug=False, threaded=True, use_reloader=False)
     finally:
         engine.shutdown()
+    print("[DEBUG] app.run() 退出")
