@@ -125,12 +125,11 @@ class EmotionMapper:
         self.buffers = {p: [] for p in self.POSES}
         self.calibrating = None
         self.hist = deque(maxlen=history)
-        # 每种姿态的激活阈值（z-score 单位）
+        # 情绪阈值（z-score 单位，越小越灵敏）
         self.config = {
-            'front': {'h_thresh': 1.5, 's_thresh': 1.5},
-            'up':    {'h_thresh': 1.5, 's_thresh': 1.5},
-            'down':  {'h_thresh': 1.2, 's_thresh': 1.2},
-            'side':  {'h_thresh': 1.2, 's_thresh': 1.2},
+            'h_thresh': 1.5,   # 高兴激活阈值
+            's_thresh': 1.5,   # 沮丧激活阈值
+            'pitch_limit': 30, # pitch 超过此值不检测情绪
         }
         self.last_emotion = 'calm'
         self.switch_cnt = 0
@@ -213,6 +212,11 @@ class EmotionMapper:
             return 'unknown', 'no_face', 0., {'calm':1,'happy':0,'sad':0}
 
         pose = self.get_pose(pitch, yaw)
+
+        # pitch 超限 → 不检测情绪
+        if abs(pitch) > self.config.get('pitch_limit', 30):
+            return pose, 'out_of_range', 0., {'calm':0,'happy':0,'sad':0}
+
         bl = self.baselines[pose]
 
         # 未校准
@@ -220,7 +224,6 @@ class EmotionMapper:
             return pose, 'uncalibrated', 0., {'calm':1,'happy':0,'sad':0}
 
         mu, sigma = bl['mu'], bl['sigma']
-        thr = self.config[pose]
 
         # z-score：正值 = 比基线高，负值 = 比基线低
         def z(name):
@@ -242,10 +245,10 @@ class EmotionMapper:
 
         # ── 平静 = 默认态，只有强激活才能切换走 ──
         c_act = 1.0
-        if h_act > thr['h_thresh']:
-            c_act = max(0.0, 1.0 - (h_act - thr['h_thresh']) * 0.4)
-        elif s_act > thr['s_thresh']:
-            c_act = max(0.0, 1.0 - (s_act - thr['s_thresh']) * 0.4)
+        if h_act > self.config['h_thresh']:
+            c_act = max(0.0, 1.0 - (h_act - self.config['h_thresh']) * 0.4)
+        elif s_act > self.config['s_thresh']:
+            c_act = max(0.0, 1.0 - (s_act - self.config['s_thresh']) * 0.4)
 
         # 归一化
         total = h_act + s_act + c_act + 1e-6
@@ -254,15 +257,15 @@ class EmotionMapper:
         # ── 状态机（5 帧迟滞 ≈ 0.5 秒）──
         raw = max(scores, key=scores.get)
         if self.last_emotion == 'calm':
-            if raw == 'happy' and h_act < thr['h_thresh']:
+            if raw == 'happy' and h_act < self.config['h_thresh']:
                 raw = 'calm'
-            elif raw == 'sad' and s_act < thr['s_thresh']:
+            elif raw == 'sad' and s_act < self.config['s_thresh']:
                 raw = 'calm'
         else:
             if raw == 'calm':
-                if self.last_emotion == 'happy' and h_act > thr['h_thresh'] * 0.6:
+                if self.last_emotion == 'happy' and h_act > self.config['h_thresh'] * 0.6:
                     raw = 'happy'
-                elif self.last_emotion == 'sad' and s_act > thr['s_thresh'] * 0.6:
+                elif self.last_emotion == 'sad' and s_act > self.config['s_thresh'] * 0.6:
                     raw = 'sad'
 
         if raw != self.last_emotion:
@@ -408,8 +411,7 @@ class Engine:
         return ok
 
     def update_config(self, cfg):
-        for p,c in cfg.items():
-            if p in self.mapper.config: self.mapper.config[p].update(c)
+        self.mapper.config.update(cfg)
 
     def shutdown(self):
         self.running = False; self.cap.release(); self.det.release()
