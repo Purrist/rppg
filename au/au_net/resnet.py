@@ -18,7 +18,7 @@ __all__ = ['ResNet', 'resnet18', 'resnet34', 'resnet50', 'resnet101', 'resnet152
 #     'resnet152': 'https://download.pytorch.org/models/resnet152-b121ed2d.pth',
 # }
 
-models_dir = os.path.join(os.path.dirname(__file__), os.pardir, os.pardir, 'pretrain_models')
+models_dir = os.path.join(os.path.dirname(__file__), os.pardir, 'pretrain_models')
 model_name = {
     'resnet18': 'resnet18-5c106cde.pth',
     'resnet34': 'resnet34-333f7ec4.pth',

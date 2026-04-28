@@ -318,15 +318,6 @@ def index():
 
 
 if __name__ == "__main__":
-    print("=" * 50)
-    print("  工程级方案:")
-    print("  ✅ 双眼水平对齐")
-    print("  ✅ 标准化64x64裁剪")
-    print("  ✅ 10帧滑动窗口平滑")
-    print("  ✅ Frame Queue + 3帧推理一次")
-    print("  模型: FER+")
-    print("  相机:", LOCAL_CAMERA)
-    print("=" * 50)
     try:
         init()
         print("[RUN] http://127.0.0.1:5000")

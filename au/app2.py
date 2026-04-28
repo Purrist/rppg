@@ -1,31 +1,25 @@
 """
-app2.py - Debug version with extensive breakpoints to trace hang issues
+app2.py - 完整保留app.py，同时添加FER+模型作为辅助决策
+融合机制：
+- front脸：FER+权重70%，AU权重30%
+- up/down/side脸：AU权重70%，FER+权重30%
+- 保留完整的校准功能
 """
 import os, time, threading, json, base64
 import numpy as np
 from collections import deque
 import sys
 
-print("[DEBUG] ==== 模块加载开始 ====")
-
 os.environ["FLASK_SKIP_DOTENV"] = "1"
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-print("[DEBUG] import cv2...")
 import cv2
-print("[DEBUG] import torch...")
 import torch
-print("[DEBUG] import mediapipe...")
 import mediapipe as mp
-print("[DEBUG] import flask...")
 from flask import Flask, render_template, Response, jsonify, request
-print("[DEBUG] import sixdrepnet...")
 from sixdrepnet import SixDRepNet
-print("[DEBUG] import MEFARG...")
 from au_net.MEFL import MEFARG
-
-print("[DEBUG] ==== 所有 import 完成 ====")
 
 # ── Constants ──────────────────────────────────────────────
 CALIB_N = 30
@@ -53,14 +47,100 @@ EMOTIONS = ['calm', 'happy', 'sad']
 AU_HAPPY = ['AU12', 'AU6', 'AU25']
 AU_SAD = ['AU15', 'AU4', 'AU1', 'AU17']
 
+# FER+ 标签映射
+FER_LABELS = ['neutral', 'happiness', 'surprise', 'sadness', 'anger', 'disgust', 'fear', 'contempt']
+EMOTION_MAP = {
+    'neutral': 'calm',
+    'happiness': 'happy',
+    'sadness': 'sad',
+    'anger': 'sad',
+    'surprise': 'calm',
+    'disgust': 'sad',
+    'fear': 'sad',
+    'contempt': 'sad'
+}
+MODEL_PATH = r"C:\Users\purriste\Desktop\PYProject\rppg\backend\core\models\emotion-ferplus-8.onnx"
+
+# ── FER+ 辅助模块 ─────────────────────────────────────────
+def softmax(x):
+    e = np.exp(x - np.max(x))
+    return e / (e.sum() + 1e-10)
+
+class FaceAlignerFER:
+    def __init__(self):
+        pass
+    def align(self, frame, lm):
+        h, w = frame.shape[:2]
+        left_eye = np.array([lm[33][0], lm[33][1]])
+        right_eye = np.array([lm[263][0], lm[263][1]])
+        dy = right_eye[1] - left_eye[1]
+        dx = right_eye[0] - left_eye[0]
+        angle = np.degrees(np.arctan2(dy, dx))
+        eye_center = ((left_eye[0] + right_eye[0]) / 2, (left_eye[1] + right_eye[1]) / 2)
+        xs, ys = lm[:, 0], lm[:, 1]
+        bx1, by1 = min(xs), min(ys)
+        bx2, by2 = max(xs), max(ys)
+        bw, bh = bx2 - bx1, by2 - by1
+        rot_mat = cv2.getRotationMatrix2D(eye_center, angle, 1.0)
+        rotated = cv2.warpAffine(frame, rot_mat, (w, h), borderValue=(0, 0, 0))
+        pad = int(max(bw, bh) * 0.3)
+        cx1 = max(0, int(bx1 - pad))
+        cy1 = max(0, int(by1 - pad))
+        cx2 = min(w, int(bx2 + pad))
+        cy2 = min(h, int(by2 + pad))
+        crop = rotated[cy1:cy2, cx1:cx2]
+        if crop.size == 0:
+            return None
+        aligned = cv2.resize(crop, (64, 64))
+        return aligned
+
+class EmotionDetectorFER:
+    def __init__(self, model_path):
+        self.net = cv2.dnn.readNetFromONNX(model_path)
+        self.net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
+        self.net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
+        print(f"[FER+] 权重已加载: {model_path}")
+    def predict(self, aligned_bgr):
+        if aligned_bgr is None:
+            return {e: 0.0 for e in EMOTIONS}
+        try:
+            gray = cv2.cvtColor(aligned_bgr, cv2.COLOR_BGR2GRAY)
+            blob = gray.astype(np.float32).reshape(1, 1, 64, 64)
+            self.net.setInput(blob)
+            scores = self.net.forward()[0]
+            probs = softmax(scores)
+            # 映射到3个标签
+            mapped = {e: 0.0 for e in EMOTIONS}
+            for fer_label, prob in zip(FER_LABELS, probs):
+                mapped[EMOTION_MAP[fer_label]] += prob
+            total = sum(mapped.values()) + 1e-6
+            for k in mapped:
+                mapped[k] /= total
+            return mapped
+        except Exception as e:
+            print(f"[FER+] 推理失败: {e}")
+            return {e: 0.0 for e in EMOTIONS}
+
+class EmotionSmootherFER:
+    def __init__(self, window_size=10):
+        self.window = deque(maxlen=window_size)
+    def update(self, scores):
+        self.window.append(scores)
+        if not self.window:
+            return {e: 0.333 for e in EMOTIONS}
+        # 平滑分数
+        smooth = {e: float(np.mean([s[e] for s in self.window])) for e in EMOTIONS}
+        total = sum(smooth.values()) + 1e-6
+        for k in smooth:
+            smooth[k] /= total
+        return smooth
+
 # ── FaceDetector ──────────────────────────────────────
 class FaceDetector:
     def __init__(self):
-        print("[DEBUG] FaceDetector.__init__ 开始...")
         self.fm = mp.solutions.face_mesh.FaceMesh(
             static_image_mode=False, max_num_faces=5, refine_landmarks=True,
             min_detection_confidence=0.5, min_tracking_confidence=0.5)
-        print("[DEBUG] FaceDetector.__init__ 完成")
     def process(self, frame):
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         r = self.fm.process(rgb)
@@ -75,43 +155,61 @@ class FaceDetector:
 # ── SpeechDetector ────────────────────────────────────
 class SpeechDetector:
     def __init__(self):
-        print("[DEBUG] SpeechDetector.__init__ 开始...")
-        self.history = deque(maxlen=20)
+        self.history = deque(maxlen=30)
         self.speaking = False
         self._spk_cnt = 0
         self._quiet_cnt = 0
-        print("[DEBUG] SpeechDetector.__init__ 完成")
 
     def update(self, lm):
         eye_dist = max(np.linalg.norm(lm[33][:2] - lm[263][:2]), 1.0)
         lip_open = abs(lm[14][1] - lm[13][1]) / eye_dist
         self.history.append(lip_open)
-        if len(self.history) < 6:
+        if len(self.history) < 16:
             return False
+
         arr = np.array(self.history)
-        diffs = np.abs(np.diff(arr))
-        speed = np.mean(diffs[-8:])
-        amplitude = np.max(arr[-12:]) - np.min(arr[-12:])
-        raw = (speed > 0.008) or (amplitude > 0.06)
+        recent = arr[-24:]
+
+        # 5帧滑动平均消除抖动
+        kernel = np.ones(5) / 5
+        smoothed = np.convolve(recent, kernel, mode='valid')
+
+        # 平滑后振幅
+        sm_range = np.max(smoothed) - np.min(smoothed)
+
+        if sm_range < 0.02:
+            raw = False
+        else:
+            # 平滑信号围绕均值的过零次数
+            sm_mean = np.mean(smoothed)
+            centered = smoothed - sm_mean
+            crossings = 0
+            for i in range(1, len(centered)):
+                if centered[i] * centered[i-1] < 0:
+                    crossings += 1
+            # 能量：偏离均值的平均幅度
+            energy = np.mean(np.abs(centered))
+            # 说话需要：有振幅 + 有方向翻转 + 有能量
+            raw = crossings >= 2 and energy > 0.01
+
         if raw:
             self._spk_cnt += 1; self._quiet_cnt = 0
         else:
             self._quiet_cnt += 1; self._spk_cnt = 0
+
         if self._spk_cnt >= 3:
             self.speaking = True
-        elif self._quiet_cnt >= 6:
+        elif self._quiet_cnt >= 8:
             self.speaking = False
         return self.speaking
 
 # ── FaceSelector ─────────────────────────────────────
 class FaceSelector:
     def __init__(self):
-        print("[DEBUG] FaceSelector.__init__ 开始...")
         self.tracks = {}
         self._next_id = 0
         self.primary_id = None
         self._lost_cnt = 0
-        print("[DEBUG] FaceSelector.__init__ 完成")
 
     def select(self, lm_list, shape):
         if not lm_list:
@@ -152,7 +250,8 @@ class FaceSelector:
             if j not in used:
                 new_tracks[self._next_id] = {
                     'bbox': f['bbox'], 'frames': 1,
-                    'area': f['area'], 'score': f['score'], 'lm': f['lm']}
+                    'area': f['area'], 'score': f['score'],
+                    'lm': f['lm']}
                 self._next_id += 1
 
         self.tracks = new_tracks
@@ -181,10 +280,7 @@ class FaceSelector:
 # ── PoseEstimator ─────────────────────────────────────
 class PoseEstimator:
     def __init__(self):
-        print("[DEBUG] PoseEstimator.__init__ 开始...")
-        print("[DEBUG] 加载 SixDRepNet...")
         self.model = SixDRepNet()
-        print("[DEBUG] PoseEstimator.__init__ 完成")
 
     def estimate(self, frame, lm):
         if lm is None: return 0.,0.,0.
@@ -198,30 +294,16 @@ class PoseEstimator:
         crop = frame[y0:y1, x0:x1]
         if crop.size==0 or crop.shape[0]<20: return 0.,0.,0.
         crop = cv2.resize(crop,(480,480), interpolation=cv2.INTER_LANCZOS4)
-        print("[DEBUG] PoseEstimator.predict 调用...")
         p,y,r = self.model.predict(crop)
-        print("[DEBUG] PoseEstimator.predict 完成")
         return float(np.asarray(p).item()),float(np.asarray(y).item()),float(np.asarray(r).item())
 
 # ── AUExtractor ───────────────────────────────────────
 class AUExtractor:
     def __init__(self, arc='resnet50', ckpt='checkpoints/OpenGprahAU-ResNet50_second_stage.pth'):
-        print("[DEBUG] AUExtractor.__init__ 开始...")
         self.sz = 224
-        # 强制使用 CPU 避免 CUDA 问题
-        self.dev = torch.device('cpu')
-        print(f"[DEBUG] AUExtractor 强制使用 device: {self.dev}")
-        print("[DEBUG] 创建 MEFARG 网络...")
-        try:
-            self.net = MEFARG(num_main_classes=27, num_sub_classes=14, backbone=arc)
-            print("[DEBUG] MEFARG 网络创建成功!")
-        except Exception as e:
-            print(f"[DEBUG] MEFARG 创建失败: {e}")
-            import traceback; traceback.print_exc()
-            raise
-        print(f"[DEBUG] MEFARG 网络创建完成，检查 checkpoint: {ckpt}")
+        self.dev = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.net = MEFARG(num_main_classes=27, num_sub_classes=14, backbone=arc)
         if os.path.exists(ckpt):
-            print(f"[DEBUG] 开始加载权重: {ckpt}")
             d = torch.load(ckpt, map_location=self.dev)
             sd = {k.replace("module.",""): v for k,v in d["state_dict"].items()}
             self.net.load_state_dict(sd)
@@ -229,7 +311,6 @@ class AUExtractor:
         else:
             print(f"[AU] 权重缺失: {ckpt}")
         self.net.to(self.dev).eval()
-        print("[DEBUG] AUExtractor.__init__ 完成")
 
     def _align(self, frame, lm):
         src = np.array([lm[i][:2] for i in MP5], dtype=np.float32)
@@ -258,27 +339,24 @@ class AUExtractor:
         for i,n in enumerate(AU_SUB): r[n] = float(sp_[i])
         return r
 
-# ── EmotionMapper (4x3 baselines + fixed state machine) ──
+# ── EmotionMapper (融合FER+和AU) ─────────────────────
 class EmotionMapper:
     def __init__(self, history=30, persist_path=None):
-        print("[DEBUG] EmotionMapper.__init__ 开始...")
         self.baselines = {p: {e: None for e in EMOTIONS} for p in POSES}
         self.buffers = {}
         self.calibrating = None
         self.hist = deque(maxlen=history)
         self.config = {
-            'front': {'h_thresh': 1.2, 's_thresh': 1.2},
-            'up':    {'h_thresh': 1.2, 's_thresh': 1.2},
-            'down':  {'h_thresh': 1.0, 's_thresh': 1.0},
-            'side':  {'h_thresh': 1.0, 's_thresh': 1.0},
+            'front': {'h_thresh': 2.0, 's_thresh': 2.0, 'fer_weight': 0.7},
+            'up': {'h_thresh': 2.0, 's_thresh': 2.0, 'fer_weight': 0.3},
+            'down': {'h_thresh': 1.5, 's_thresh': 1.5, 'fer_weight': 0.3},
+            'side': {'h_thresh': 1.5, 's_thresh': 1.5, 'fer_weight': 0.3},
             'pitch_limit': 30,
         }
         self.last_emotion = 'calm'
         self.switch_cnt = 0
         self.persist_path = persist_path or os.path.join(os.path.dirname(__file__),'data','baselines.json')
-        print(f"[DEBUG] EmotionMapper 加载基线: {self.persist_path}")
         self._load()
-        print("[DEBUG] EmotionMapper.__init__ 完成")
 
     def _load(self):
         if not os.path.exists(self.persist_path): return
@@ -289,12 +367,12 @@ class EmotionMapper:
                 if p not in d: continue
                 if 'calm' in d[p]:
                     for e in EMOTIONS:
-                        if e in d[p] and d[p][e]:
+                        if e in d[p] and d[p][e] and 'mu' in d[p][e] and 'sigma' in d[p][e]:
                             self.baselines[p][e] = {
                                 'mu': {k:float(v) for k,v in d[p][e]['mu'].items()},
                                 'sigma': {k:max(float(v),0.1) for k,v in d[p][e]['sigma'].items()},
                             }
-                else:
+                elif 'mu' in d[p] and 'sigma' in d[p]:
                     self.baselines[p]['calm'] = {
                         'mu': {k:float(v) for k,v in d[p]['mu'].items()},
                         'sigma': {k:max(float(v),0.1) for k,v in d[p]['sigma'].items()},
@@ -381,19 +459,11 @@ class EmotionMapper:
         if pitch < -20: return 'down'
         return 'front'
 
-    def predict(self, au, pitch, yaw, speaking=False):
-        if au is None:
-            return 'unknown', 'no_face', 0., {'calm':1,'happy':0,'sad':0}
+    def _predict_au_only(self, au, pitch, yaw):
         pose = self.get_pose(pitch, yaw)
-        if abs(pitch) > self.config.get('pitch_limit', 30):
-            return pose, 'out_of_range', 0., {'calm':0,'happy':0,'sad':0}
-        if speaking:
-            self.last_emotion = 'calm'
-            self.switch_cnt = 0
-            return pose, 'speaking', 0., {'calm':0.6,'happy':0,'sad':0}
         calm_bl = self.baselines[pose]['calm']
         if calm_bl is None:
-            return pose, 'uncalibrated', 0., {'calm':1,'happy':0,'sad':0}
+            return {e: 0.333 for e in EMOTIONS}
 
         mu, sig = calm_bl['mu'], calm_bl['sigma']
         thr = self.config[pose]
@@ -406,10 +476,16 @@ class EmotionMapper:
         if z12 > 0.5:
             h_act = max(0,z12)*.55 + max(0,z6)*.30 + max(0,z25)*.15
 
-        z15,z4,z1,z17 = z('AU15'),z('AU4'),z('AU1'),z('AU17')
+        z15,z4,z17 = z('AU15'),z('AU4'),z('AU17')
         s_act = 0.
-        if z15 > 0.5:
-            s_act = max(0,z15)*.50 + max(0,z4)*.20 + max(0,z1)*.15 + max(0,z17)*.15
+        if z15 > 1.0:
+            s_act = max(0,z15)*.55 + max(0,z4)*.30 + max(0,z17)*.15
+
+        if h_act > 0 and s_act > 0:
+            if h_act >= s_act:
+                s_act = 0
+            else:
+                h_act = 0
 
         happy_bl = self.baselines[pose]['happy']
         if happy_bl and h_act > 0:
@@ -425,61 +501,90 @@ class EmotionMapper:
 
         c_act = 1.0
         if h_act > thr['h_thresh']:
-            c_act = max(0., 1.-(h_act-thr['h_thresh'])*.4)
+            c_act = max(0., 1.-(h_act-thr['h_thresh'])*1.2)
         elif s_act > thr['s_thresh']:
-            c_act = max(0., 1.-(s_act-thr['s_thresh'])*.4)
+            c_act = max(0., 1.-(s_act-thr['s_thresh'])*1.2)
 
         total = h_act + s_act + c_act + 1e-6
         scores = {'happy': h_act/total, 'sad': s_act/total, 'calm': c_act/total}
+        return scores
+
+    def predict(self, au, pitch, yaw, fer_scores, speaking=False):
+        if au is None:
+            return 'unknown', 'no_face', 0., {'calm':1,'happy':0,'sad':0}
+        pose = self.get_pose(pitch, yaw)
+        if abs(pitch) > self.config.get('pitch_limit', 30):
+            return pose, 'out_of_range', 0., {'calm':0,'happy':0,'sad':0}
+        if speaking:
+            return pose, 'speaking', 0., {e: (0.5 if e == self.last_emotion else 0.05) for e in EMOTIONS}
+        calm_bl = self.baselines[pose]['calm']
+
+        # 获取AU分数
+        if calm_bl is None:
+            au_scores = {e: 0.333 for e in EMOTIONS}
+        else:
+            au_scores = self._predict_au_only(au, pitch, yaw)
+
+        # 融合策略
+        fer_weight = self.config[pose].get('fer_weight', 0.5)
+        au_weight = 1.0 - fer_weight
+
+        fused_scores = {}
+        for e in EMOTIONS:
+            fused_scores[e] = au_scores[e] * au_weight + fer_scores[e] * fer_weight
+
+        total = sum(fused_scores.values()) + 1e-6
+        for e in EMOTIONS:
+            fused_scores[e] /= total
+
+        # 基于融合分数做情绪决策
+        thr = self.config[pose]
+        h_act = fused_scores['happy']
+        s_act = fused_scores['sad']
+        c_act = fused_scores['calm']
 
         if self.last_emotion == 'calm':
-            if h_act >= thr['h_thresh'] and s_act < thr['s_thresh']*.8:
+            if h_act >= c_act * 0.8 and s_act < h_act * 0.3:
                 raw = 'happy'
-            elif s_act >= thr['s_thresh'] and h_act < thr['h_thresh']*.8:
+            elif s_act >= c_act * 0.8 and h_act < s_act * 0.3:
                 raw = 'sad'
             else:
                 raw = 'calm'
         elif self.last_emotion == 'happy':
-            raw = 'calm' if h_act < thr['h_thresh']*.4 else 'happy'
+            raw = 'calm' if h_act < 0.35 else 'happy'
         elif self.last_emotion == 'sad':
-            raw = 'calm' if s_act < thr['s_thresh']*.4 else 'sad'
+            raw = 'calm' if s_act < 0.35 else 'sad'
         else:
             raw = 'calm'
 
         if raw != self.last_emotion:
             self.switch_cnt += 1
-            if self.switch_cnt < 8:
+            if self.switch_cnt < 4:
                 best = self.last_emotion
             else:
                 best = raw; self.last_emotion = raw; self.switch_cnt = 0
         else:
             self.switch_cnt = 0; best = raw
 
-        self.hist.append(scores)
+        self.hist.append(fused_scores)
         smooth = {e: float(np.mean([x[e] for x in self.hist])) for e in EMOTIONS}
         return pose, best, smooth[best], smooth
 
 # ── InferenceEngine ──────────────────────────────────
 class Engine:
     def __init__(self):
-        print("[DEBUG] Engine.__init__ 开始...")
-        print("[DEBUG] 打开摄像头...")
         self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
         print(f"[Engine] 摄像头 opened={self.cap.isOpened()}")
-        print("[DEBUG] 设置摄像头分辨率...")
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        print("[DEBUG] 创建 FaceDetector...")
         self.det = FaceDetector()
-        print("[DEBUG] 创建 FaceSelector...")
         self.face_sel = FaceSelector()
-        print("[DEBUG] 创建 SpeechDetector...")
         self.speech_det = SpeechDetector()
-        print("[DEBUG] 创建 PoseEstimator...")
         self.pose_est = PoseEstimator()
-        print("[DEBUG] 创建 AUExtractor...")
         self.au_ext = AUExtractor()
-        print("[DEBUG] 创建 EmotionMapper...")
+        self.fer_align = FaceAlignerFER()
+        self.fer_det = EmotionDetectorFER(MODEL_PATH)
+        self.fer_smoother = EmotionSmootherFER(window_size=10)
         persist = os.path.join(os.path.dirname(__file__),'data','baselines.json')
         self.mapper = EmotionMapper(history=30, persist_path=persist)
         self.annotated = None
@@ -490,15 +595,17 @@ class Engine:
         self.prev_emotion = None
         self.t0 = time.time()
         self._fc = 0
+        self._cached_au = None
+        self._cached_pose = (0., 0., 0.)
+        self._cached_fer = None
+        self._lm_cache = None
         self.status = dict(
             pose='-',emotion='uncalibrated',confidence=0.,
             pitch=0.,yaw=0.,roll=0.,
             calibrating=False,calib_pose=None,calib_emotion=None,calib_count=0,
             scores={'calm':0,'happy':0,'sad':0},au={})
-        print("[DEBUG] Engine.__init__ 完成!")
 
     def loop(self):
-        print("[DEBUG] Engine.loop 开始...")
         try:
             if not self.cap.isOpened():
                 print("[Engine] 摄像头打不开"); return
@@ -510,19 +617,33 @@ class Engine:
                     if not ret: time.sleep(.01); continue
 
                     ann = frame.copy()
-                    lm_list = self.det.process(frame)
-                    lm = self.face_sel.select(lm_list, frame.shape)
-
+                    self._fc += 1
+                    # 人脸检测每2帧一次，中间复用
+                    if self._fc % 2 == 1 or self._lm_cache is None:
+                        lm_list = self.det.process(frame)
+                        lm = self.face_sel.select(lm_list, frame.shape)
+                        self._lm_cache = (lm_list, lm)
+                    else:
+                        lm_list, lm = self._lm_cache
                     if len(lm_list) > 1:
-                        cv2.putText(ann, f"FACES:{len(lm_list)}",
-                                    (ann.shape[1]-100, 25),
-                                    cv2.FONT_HERSHEY_SIMPLEX, .5, (100,100,100), 1)
-
+                        cv2.putText(ann, f"FACES:{len(lm_list)}", (ann.shape[1]-100, 25), cv2.FONT_HERSHEY_SIMPLEX, .5, (100,100,100), 1)
                     if lm is not None:
                         speaking = self.speech_det.update(lm)
-                        pitch, yaw, roll = self.pose_est.estimate(frame, lm)
-                        au = self.au_ext.predict(frame, lm)
-                        self._fc += 1
+                        # AU+Pose+FER 每4帧一次
+                        if self._fc % 4 == 1 or self._cached_au is None:
+                            pitch, yaw, roll = self.pose_est.estimate(frame, lm)
+                            au = self.au_ext.predict(frame, lm)
+                            # FER推理
+                            fer_aligned = self.fer_align.align(frame, lm)
+                            fer_scores = self.fer_det.predict(fer_aligned)
+                            fer_scores = self.fer_smoother.update(fer_scores)
+                            self._cached_pose = (pitch, yaw, roll)
+                            self._cached_au = au
+                            self._cached_fer = fer_scores
+                        else:
+                            pitch, yaw, roll = self._cached_pose
+                            au = self._cached_au
+                            fer_scores = self._cached_fer
 
                         if self.mapper.calibrating and au:
                             cp, ce = self.mapper.calibrating
@@ -537,13 +658,12 @@ class Engine:
                                 self.mapper.finish_calib(cp, ce)
                                 with self.lock: self.status['calibrating'] = False
 
-                        pose, emotion, conf, scores = self.mapper.predict(au, pitch, yaw, speaking=speaking)
+                        pose, emotion, conf, scores = self.mapper.predict(au, pitch, yaw, fer_scores, speaking=speaking)
 
-                        if self._fc % 3 == 0:
-                            self.timeline.append({
-                                't': round(time.time()-self.t0, 2),
-                                'e': emotion,
-                                's': {k: round(v,3) for k,v in scores.items()}})
+                        self.timeline.append({
+                            't': round(time.time()-self.t0, 2),
+                            'e': emotion,
+                            's': {k: round(v,3) for k,v in scores.items()}})
 
                         if emotion != self.prev_emotion and emotion not in ('no_face','uncalibrated','out_of_range','speaking'):
                             _, buf = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
@@ -587,7 +707,6 @@ class Engine:
         except Exception as e:
             import traceback; traceback.print_exc()
         self.running = False
-        print("[DEBUG] Engine.loop 结束")
 
     def get_frame(self):
         with self.lock:
@@ -623,13 +742,9 @@ class Engine:
         self.running = False; self.cap.release(); self.det.release()
 
 # ── Flask ────────────────────────────────────────────
-print("[DEBUG] 创建 Flask app...")
 app = Flask(__name__)
-print("[DEBUG] 创建 Engine 实例...")
 engine = Engine()
-print("[DEBUG] 启动推理线程...")
 threading.Thread(target=engine.loop, daemon=True).start()
-print("[DEBUG] Flask 路由定义...")
 
 @app.route("/")
 def index():
@@ -683,12 +798,8 @@ def calib_delete_all():
     engine.mapper.delete_all_baselines()
     return jsonify({"ok": True})
 
-print("[DEBUG] 所有路由定义完成，准备启动 Flask...")
-
 if __name__ == "__main__":
-    print("[DEBUG] 进入 app.run()...")
     try:
         app.run(host="0.0.0.0", port=5000, debug=False, threaded=True, use_reloader=False)
     finally:
         engine.shutdown()
-    print("[DEBUG] app.run() 退出")

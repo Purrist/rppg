@@ -60,7 +60,7 @@ class FaceDetector:
 # ── SpeechDetector ────────────────────────────────────
 class SpeechDetector:
     def __init__(self):
-        self.history = deque(maxlen=36)
+        self.history = deque(maxlen=30)
         self.speaking = False
         self._spk_cnt = 0
         self._quiet_cnt = 0
@@ -69,32 +69,33 @@ class SpeechDetector:
         eye_dist = max(np.linalg.norm(lm[33][:2] - lm[263][:2]), 1.0)
         lip_open = abs(lm[14][1] - lm[13][1]) / eye_dist
         self.history.append(lip_open)
-        if len(self.history) < 24:
+        if len(self.history) < 16:
             return False
 
         arr = np.array(self.history)
         recent = arr[-24:]
 
-        # 1. 5帧滑动平均消除逐帧抖动
+        # 5帧滑动平均消除抖动
         kernel = np.ones(5) / 5
         smoothed = np.convolve(recent, kernel, mode='valid')
 
-        # 2. 平滑后振幅：抖动~0.01，说话~0.04+
+        # 平滑后振幅
         sm_range = np.max(smoothed) - np.min(smoothed)
-        if sm_range < 0.035:
+
+        if sm_range < 0.02:
             raw = False
         else:
-            # 3. 平滑信号围绕均值的过零次数（需幅度>0.005才算有效交叉）
+            # 平滑信号围绕均值的过零次数
             sm_mean = np.mean(smoothed)
             centered = smoothed - sm_mean
             crossings = 0
             for i in range(1, len(centered)):
-                if (centered[i] * centered[i-1] < 0
-                        and abs(centered[i]) > 0.005
-                        and abs(centered[i-1]) > 0.005):
+                if centered[i] * centered[i-1] < 0:
                     crossings += 1
-            # 说话：20帧平滑窗口内至少3次有效过零
-            raw = crossings >= 3
+            # 能量：偏离均值的平均幅度
+            energy = np.mean(np.abs(centered))
+            # 说话需要：有振幅 + 有方向翻转 + 有能量
+            raw = crossings >= 2 and energy > 0.01
 
         if raw:
             self._spk_cnt += 1; self._quiet_cnt = 0
@@ -103,7 +104,7 @@ class SpeechDetector:
 
         if self._spk_cnt >= 3:
             self.speaking = True
-        elif self._quiet_cnt >= 10:
+        elif self._quiet_cnt >= 8:
             self.speaking = False
         return self.speaking
 
@@ -250,10 +251,10 @@ class EmotionMapper:
         self.calibrating = None
         self.hist = deque(maxlen=history)
         self.config = {
-            'front': {'h_thresh': 1.2, 's_thresh': 1.2},
-            'up':    {'h_thresh': 1.2, 's_thresh': 1.2},
-            'down':  {'h_thresh': 1.0, 's_thresh': 1.0},
-            'side':  {'h_thresh': 1.0, 's_thresh': 1.0},
+            'front': {'h_thresh': 2.0, 's_thresh': 2.0},
+            'up': {'h_thresh': 2.0, 's_thresh': 2.0},
+            'down': {'h_thresh': 1.5, 's_thresh': 1.5},
+            'side': {'h_thresh': 1.5, 's_thresh': 1.5},
             'pitch_limit': 30,
         }
         self.last_emotion = 'calm'
@@ -270,12 +271,12 @@ class EmotionMapper:
                 if p not in d: continue
                 if 'calm' in d[p]:
                     for e in EMOTIONS:
-                        if e in d[p] and d[p][e]:
+                        if e in d[p] and d[p][e] and 'mu' in d[p][e] and 'sigma' in d[p][e]:
                             self.baselines[p][e] = {
                                 'mu': {k:float(v) for k,v in d[p][e]['mu'].items()},
                                 'sigma': {k:max(float(v),0.1) for k,v in d[p][e]['sigma'].items()},
                             }
-                else:
+                elif 'mu' in d[p] and 'sigma' in d[p]:
                     self.baselines[p]['calm'] = {
                         'mu': {k:float(v) for k,v in d[p]['mu'].items()},
                         'sigma': {k:max(float(v),0.1) for k,v in d[p]['sigma'].items()},
@@ -385,10 +386,17 @@ class EmotionMapper:
         if z12 > 0.5:
             h_act = max(0,z12)*.55 + max(0,z6)*.30 + max(0,z25)*.15
 
-        z15,z4,z1,z17 = z('AU15'),z('AU4'),z('AU1'),z('AU17')
+        z15,z4,z17 = z('AU15'),z('AU4'),z('AU17')
         s_act = 0.
-        if z15 > 0.5:
-            s_act = max(0,z15)*.50 + max(0,z4)*.20 + max(0,z1)*.15 + max(0,z17)*.15
+        if z15 > 1.0:
+            s_act = max(0,z15)*.55 + max(0,z4)*.30 + max(0,z17)*.15
+
+        # AU12(嘴角上拉) 和 AU15(嘴角下拉) 是拮抗肌，不可能同时激活
+        if h_act > 0 and s_act > 0:
+            if h_act >= s_act:
+                s_act = 0
+            else:
+                h_act = 0
 
         happy_bl = self.baselines[pose]['happy']
         if happy_bl and h_act > 0:
@@ -404,42 +412,32 @@ class EmotionMapper:
 
         c_act = 1.0
         if h_act > thr['h_thresh']:
-            c_act = max(0., 1.-(h_act-thr['h_thresh'])*.4)
+            c_act = max(0., 1.-(h_act-thr['h_thresh'])*1.2)
         elif s_act > thr['s_thresh']:
-            c_act = max(0., 1.-(s_act-thr['s_thresh'])*.4)
+            c_act = max(0., 1.-(s_act-thr['s_thresh'])*1.2)
 
         total = h_act + s_act + c_act + 1e-6
         scores = {'happy': h_act/total, 'sad': s_act/total, 'calm': c_act/total}
 
         if self.last_emotion == 'calm':
-            if h_act >= thr['h_thresh'] * 2.5 and s_act < thr['s_thresh'] * 0.5:
+            if h_act >= thr['h_thresh'] and s_act < thr['s_thresh']*.6:
                 raw = 'happy'
-            elif s_act >= thr['s_thresh'] * 2.5 and h_act < thr['h_thresh'] * 0.5:
-                raw = 'sad'
-            elif h_act >= thr['h_thresh'] and s_act < thr['s_thresh']*.8:
-                raw = 'happy'
-            elif s_act >= thr['s_thresh'] and h_act < thr['h_thresh']*.8:
+            elif s_act >= thr['s_thresh'] and h_act < thr['h_thresh']*.6:
                 raw = 'sad'
             else:
                 raw = 'calm'
         elif self.last_emotion == 'happy':
-            raw = 'calm' if h_act < thr['h_thresh']*.4 else 'happy'
+            raw = 'calm' if h_act < thr['h_thresh']*.35 else 'happy'
         elif self.last_emotion == 'sad':
-            raw = 'calm' if s_act < thr['s_thresh']*.4 else 'sad'
+            raw = 'calm' if s_act < thr['s_thresh']*.35 else 'sad'
         else:
             raw = 'calm'
         if raw != self.last_emotion:
-            # 强信号立即切换（2.5倍阈值），普通信号4帧防抖
-            urgent = (raw == 'happy' and h_act >= thr['h_thresh'] * 2.5) or \
-                     (raw == 'sad' and s_act >= thr['s_thresh'] * 2.5)
-            if urgent:
-                best = raw; self.last_emotion = raw; self.switch_cnt = 0
+            self.switch_cnt += 1
+            if self.switch_cnt < 4:
+                best = self.last_emotion
             else:
-                self.switch_cnt += 1
-                if self.switch_cnt < 4:
-                    best = self.last_emotion
-                else:
-                    best = raw; self.last_emotion = raw; self.switch_cnt = 0
+                best = raw; self.last_emotion = raw; self.switch_cnt = 0
         else:
             self.switch_cnt = 0; best = raw
 
@@ -471,6 +469,7 @@ class Engine:
         self._fc = 0
         self._cached_au = None
         self._cached_pose = (0., 0., 0.)
+        self._lm_cache = None
         self.status = dict(
             pose='-',emotion='uncalibrated',confidence=0.,
             pitch=0.,yaw=0.,roll=0.,
@@ -489,18 +488,20 @@ class Engine:
                     if not ret: time.sleep(.01); continue
 
                     ann = frame.copy()
-                    lm_list = self.det.process(frame)
-                    lm = self.face_sel.select(lm_list, frame.shape)
-
+                    self._fc += 1
+                    # 人脸检测每2帧一次，中间复用
+                    if self._fc % 2 == 1 or self._lm_cache is None:
+                        lm_list = self.det.process(frame)
+                        lm = self.face_sel.select(lm_list, frame.shape)
+                        self._lm_cache = (lm_list, lm)
+                    else:
+                        lm_list, lm = self._lm_cache
                     if len(lm_list) > 1:
-                        cv2.putText(ann, f"FACES:{len(lm_list)}",
-                                    (ann.shape[1]-100, 25),
-                                    cv2.FONT_HERSHEY_SIMPLEX, .5, (100,100,100), 1)
-
+                        cv2.putText(ann, f"FACES:{len(lm_list)}", (ann.shape[1]-100, 25), cv2.FONT_HERSHEY_SIMPLEX, .5, (100,100,100), 1)
                     if lm is not None:
                         speaking = self.speech_det.update(lm)
-                        self._fc += 1
-                        if self._fc % 3 == 0 or self._cached_au is None:
+                        # AU+Pose 每4帧一次
+                        if self._fc % 4 == 1 or self._cached_au is None:
                             pitch, yaw, roll = self.pose_est.estimate(frame, lm)
                             au = self.au_ext.predict(frame, lm)
                             self._cached_pose = (pitch, yaw, roll)

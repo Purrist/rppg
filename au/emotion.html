@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>双通道情绪融合系统</title>
+    <style>
+        :root { --bg: #1e1e24; --card: #2b2b36; --border: #3e3e4a; --text: #e0e0e0; --muted: #888; --accent: #4f8cff; --green: #4caf50; --red: #f44336; --orange: #ff9800; }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', system-ui, sans-serif; }
+        body { background: var(--bg); color: var(--text); display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+        .header { padding: 10px 20px; background: #252530; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+        .header h1 { font-size: 1.2rem; font-weight: 600; }
+        .main-container { display: flex; flex: 1; overflow: hidden; }
+        .video-col { flex: 0 0 55%; padding: 10px; display: flex; flex-direction: column; gap: 10px; border-right: 1px solid var(--border); }
+        .video-wrapper { flex: 1; background: #000; border-radius: 8px; overflow: hidden; position: relative; display: flex; align-items: center; justify-content: center; }
+        .video-wrapper img { max-width: 100%; max-height: 100%; object-fit: contain; }
+        .data-col { flex: 1; padding: 10px; display: grid; grid-template-rows: 1fr 1fr; gap: 10px; overflow-y: auto; }
+        .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 15px; display: flex; flex-direction: column; gap: 10px; }
+        .card-title { font-size: 0.9rem; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid var(--border); padding-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+        .card-fusion { border: 2px solid var(--accent); }
+        .card-fusion .card-title { color: var(--accent); font-size: 1.1rem; font-weight: bold; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); }
+        .status-dot.active { background: var(--green); }
+        .emotion-display { font-size: 1.8rem; font-weight: 900; }
+        .conf-display { font-size: 1rem; color: var(--muted); }
+        .tag { font-size: 0.75rem; padding: 2px 8px; border-radius: 4px; background: #333; }
+        .tag.agree { color: var(--green); } .tag.disagree { color: var(--orange); background: #3d3020; } .tag.au_only { color: var(--muted); }
+        .prob-bar-container { height: 6px; background: #333; border-radius: 3px; overflow: hidden; position: relative; }
+        .prob-bar { height: 100%; transition: width 0.2s ease; }
+        .prob-row { display: flex; align-items: center; gap: 10px; font-size: 0.8rem; }
+        .prob-label { width: 40px; color: var(--muted); } .prob-val { width: 40px; text-align: right; }
+        .calm-c { background: #888; } .happy-c { background: var(--green); } .sad-c { background: var(--accent); }
+        .weight-control { margin-top: auto; border-top: 1px solid var(--border); padding-top: 10px; }
+        .weight-slider { width: 100%; cursor: pointer; accent-color: var(--accent); }
+        .weight-labels { display: flex; justify-content: space-between; font-size: 0.8rem; color: var(--muted); }
+        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; font-size: 0.85rem; }
+        .info-item { background: #333; padding: 4px 8px; border-radius: 4px; }
+        .info-item span { color: var(--muted); font-size: 0.75rem; }
+        
+        .bottom-panel { height: 200px; background: #252530; border-top: 1px solid var(--border); display: flex; }
+        .timeline-container { flex: 1; padding: 10px; overflow-x: auto; display: flex; align-items: center; }
+        .timeline-track { height: 30px; background: #333; border-radius: 4px; display: flex; min-width: 100%; }
+        .tl-seg { height: 100%; width: 4px; border-right: 1px solid #252530; }
+        .calib-panel { width: 320px; border-left: 1px solid var(--border); padding: 10px; overflow-y: auto; }
+        .calib-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin-top: 8px; }
+        .calib-btn { padding: 8px; border: 1px solid var(--border); background: transparent; color: var(--text); border-radius: 4px; cursor: pointer; font-size: 0.8rem; text-align: center; transition: all 0.2s; }
+        .calib-btn:hover { border-color: var(--accent); }
+        .calib-btn.done { background: rgba(79, 140, 255, 0.2); border-color: var(--accent); color: var(--accent); }
+        .calib-btn.active { background: var(--orange); color: #000; border-color: var(--orange); animation: pulse 1s infinite; }
+        @keyframes pulse { 50% { opacity: 0.7; } }
+        .calib-row-label { font-size: 0.8rem; color: var(--muted); margin-bottom: 5px; font-weight: bold; }
+        .thresholds { margin-top: 10px; display: flex; flex-direction: column; gap: 5px; font-size: 0.8rem; }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <h1>双通道情绪融合系统</h1>
+    <div style="font-size: 0.8rem; color: var(--muted);">AU (Z-Score) + FER+ (Deep Learning)</div>
+</div>
+
+<div class="main-container">
+    <div class="video-col">
+        <div class="video-wrapper">
+            <img src="/video_feed" alt="Video Feed">
+        </div>
+        <div class="card" style="flex: 0 0 auto;">
+            <div class="card-title">AU 通道详情 <span id="calib-status" style="font-size:0.7rem; color:var(--orange);"></span></div>
+            <div class="info-grid">
+                <div class="info-item"><span>姿态</span><div id="au-pose">-</div></div>
+                <div class="info-item"><span>Pitch / Yaw</span><div id="au-angles">0° / 0°</div></div>
+            </div>
+            <div style="font-size:0.8rem; color:var(--muted); margin-top:5px;">关键 Action Units (Top 5)</div>
+            <div id="au-bars" style="display:flex; flex-direction:column; gap:4px;"></div>
+        </div>
+    </div>
+
+    <div class="data-col">
+        <!-- AU 卡片 -->
+        <div class="card" id="au-card">
+            <div class="card-title">AU 通道</div>
+            <div style="display:flex; align-items:baseline; gap:15px;">
+                <div class="emotion-display" id="au-emotion" style="color:var(--muted)">--</div>
+                <div class="conf-display" id="au-conf">0.00%</div>
+            </div>
+            <div class="prob-row"><div class="prob-label">平静</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar calm-c" id="au-bar-calm" style="width:0%"></div></div><div class="prob-val" id="au-val-calm">0%</div></div>
+            <div class="prob-row"><div class="prob-label">高兴</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar happy-c" id="au-bar-happy" style="width:0%"></div></div><div class="prob-val" id="au-val-happy">0%</div></div>
+            <div class="prob-row"><div class="prob-label">沮丧</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar sad-c" id="au-bar-sad" style="width:0%"></div></div><div class="prob-val" id="au-val-sad">0%</div></div>
+        </div>
+
+        <!-- FER+ 卡片 -->
+        <div class="card" id="fer-card">
+            <div class="card-title">FER+ 通道 <div class="status-dot" id="fer-face-dot"></div></div>
+            <div style="display:flex; align-items:baseline; gap:15px;">
+                <div class="emotion-display" id="fer-emotion" style="color:var(--muted)">--</div>
+                <div class="conf-display" id="fer-conf">0.00%</div>
+            </div>
+            <div class="prob-row"><div class="prob-label">平静</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar calm-c" id="fer-bar-calm" style="width:0%"></div></div><div class="prob-val" id="fer-val-calm">0%</div></div>
+            <div class="prob-row"><div class="prob-label">高兴</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar happy-c" id="fer-bar-happy" style="width:0%"></div></div><div class="prob-val" id="fer-val-happy">0%</div></div>
+            <div class="prob-row"><div class="prob-label">沮丧</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar sad-c" id="fer-bar-sad" style="width:0%"></div></div><div class="prob-val" id="fer-val-sad">0%</div></div>
+        </div>
+
+        <!-- 融合卡片 -->
+        <div class="card card-fusion" id="fusion-card">
+            <div class="card-title">融合结果 <span class="tag" id="fusion-tag">-</span></div>
+            <div style="display:flex; align-items:baseline; gap:15px;">
+                <div class="emotion-display" id="fusion-emotion" style="color:var(--muted)">--</div>
+                <div class="conf-display" id="fusion-conf">0.00%</div>
+            </div>
+            <div class="prob-row"><div class="prob-label">平静</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar calm-c" id="fus-bar-calm" style="width:0%"></div></div><div class="prob-val" id="fus-val-calm">0%</div></div>
+            <div class="prob-row"><div class="prob-label">高兴</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar happy-c" id="fus-bar-happy" style="width:0%"></div></div><div class="prob-val" id="fus-val-happy">0%</div></div>
+            <div class="prob-row"><div class="prob-label">沮丧</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar sad-c" id="fus-bar-sad" style="width:0%"></div></div><div class="prob-val" id="fus-val-sad">0%</div></div>
+            
+            <div class="weight-control">
+                <div style="font-size:0.8rem; color:var(--muted); margin-bottom:5px;">融合权重调节</div>
+                <input type="range" min="0" max="100" value="60" class="weight-slider" id="weight-slider" title="调节AU与FER+融合权重">
+                <div class="weight-labels">
+                    <span>AU <strong id="w-au-lbl">60</strong>%</span>
+                    <span>FER+ <strong id="w-fer-lbl">40</strong>%</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="bottom-panel">
+    <div class="timeline-container">
+        <div style="width:100%; margin-bottom:5px; font-size:0.8rem; color:var(--muted); display:flex; justify-content:space-between;">
+            <span>情绪时间线 (融合结果)</span><span>LIVE</span>
+        </div>
+        <div class="timeline-track" id="timeline-track"></div>
+    </div>
+    <div class="calib-panel">
+        <div style="font-size:0.9rem; font-weight:bold; margin-bottom:5px;">校准矩阵</div>
+        <div id="calib-matrix-container"></div>
+        <div class="thresholds">
+            <div>正面阈值 H:<span id="t-fh">2.0</span> S:<span id="t-fs">2.0</span></div>
+            <div>抬头阈值 H:<span id="t-uh">2.0</span> S:<span id="t-us">2.0</span></div>
+            <div>低头阈值 H:<span id="t-dh">1.5</span> S:<span id="t-ds">1.5</span></div>
+            <div>侧脸阈值 H:<span id="t-sh">1.5</span> S:<span id="t-ss">1.5</span></div>
+            <div style="margin-top:5px;">
+                <button onclick="fetch('/api/calibrate/delete_all', {method:'POST'}).then(()=>location.reload())" style="background:var(--red); color:#fff; border:none; padding:4px 8px; border-radius:4px; cursor:pointer; width:100%;">清空所有校准</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const EMOTIONS = ['calm', 'happy', 'sad'];
+    const COLORS = { calm: '#888', happy: '#4caf50', sad: '#4f8cff', no_face: '#f44', uncalibrated: '#ffeb3b', out_of_range: '#ff9800', speaking: '#00bcd4' };
+    const LABELS_CN = { calm: '平静', happy: '高兴', sad: '沮丧', no_face: '无人脸', uncalibrated: '未校准', out_of_range: '超出角度', speaking: '说话中' };
+    const POSES = ['front', 'up', 'down', 'side'];
+    const POSES_CN = { front: '正面', up: '抬头', down: '低头', side: '侧脸' };
+    const AU_TOP = ['AU12','AU6','AU25','AU7','AU5','AU15','AU4','AU17'];
+    const AU_CN = {AU12:'嘴角上拉',AU6:'颧骨提升',AU25:'嘴唇分开',AU7:'眼睑收紧',AU5:'上睑抬起',AU15:'嘴角下拉',AU4:'皱眉',AU17:'下巴上提'};
+
+    let timelineData = [];
+
+    function updateBar(prefix, scores) {
+        EMOTIONS.forEach(e => {
+            document.getElementById(`${prefix}-bar-${e}`).style.width = `${scores[e]*100}%`;
+            document.getElementById(`${prefix}-val-${e}`).innerText = `${(scores[e]*100).toFixed(0)}%`;
+        });
+    }
+
+    function updateUI(au, fer, fus) {
+        // AU
+        const auEm = au.emotion;
+        document.getElementById('au-emotion').innerText = LABELS_CN[auEm] || auEm;
+        document.getElementById('au-emotion').style.color = COLORS[auEm] || '#fff';
+        document.getElementById('au-conf').innerText = `${(au.confidence*100).toFixed(1)}%`;
+        updateBar('au', au.scores);
+        document.getElementById('au-pose').innerText = POSES_CN[au.pose] || au.pose;
+        document.getElementById('au-angles').innerText = `${au.pitch}° / ${au.yaw}°`;
+        
+        // AU Bars
+        let auHtml = '';
+        if(au.au && Object.keys(au.au).length > 0) {
+            AU_TOP.forEach(auName => {
+                const val = au.au[auName] || 0;
+                auHtml += `<div style="display:flex; align-items:center; gap:5px; font-size:0.75rem;">
+                    <span style="width:30px; color:var(--muted)">${auName}</span>
+                    <div style="flex:1; height:4px; background:#333; border-radius:2px; overflow:hidden;"><div style="height:100%; width:${val}%; background:var(--accent);"></div></div>
+                    <span style="width:25px; text-align:right;">${val.toFixed(0)}</span>
+                </div>`;
+            });
+        }
+        document.getElementById('au-bars').innerHTML = auHtml;
+
+        // Calib Status
+        const cs = document.getElementById('calib-status');
+        if(au.calibrating) cs.innerText = `校准中: ${au.calib_pose}/${au.calib_emotion} (${au.calib_count}/30)`;
+        else cs.innerText = '';
+
+        // FER+
+        document.getElementById('fer-face-dot').className = `status-dot ${fer.has_face ? 'active' : ''}`;
+        document.getElementById('fer-card').style.opacity = fer.has_face ? '1' : '0.4';
+        document.getElementById('fer-emotion').innerText = fer.has_face ? (LABELS_CN[fer.label]||fer.label) : '--';
+        document.getElementById('fer-emotion').style.color = fer.has_face ? (COLORS[fer.label]||'#fff') : 'var(--muted)';
+        document.getElementById('fer-conf').innerText = `${(fer.conf*100).toFixed(1)}%`;
+        updateBar('fer', fer.probs_3);
+
+        // Fusion
+        const fEm = fus.emotion;
+        document.getElementById('fusion-emotion').innerText = LABELS_CN[fEm] || fEm;
+        document.getElementById('fusion-emotion').style.color = COLORS[fEm] || '#fff';
+        document.getElementById('fusion-conf').innerText = `${(fus.confidence*100).toFixed(1)}%`;
+        updateBar('fus', fus.scores);
+        
+        const tagEl = document.getElementById('fusion-tag');
+        tagEl.className = `tag ${fus.tag}`;
+        tagEl.innerText = fus.tag === 'agree' ? '✓ 一致' : fus.tag === 'disagree' ? '⚠ 分歧' : fus.tag === 'au_only' ? 'AU 单通道' : LABELS_CN[fus.tag] || fus.tag;
+        
+        document.getElementById('fusion-card').style.background = fus.tag === 'disagree' ? '#332b20' : 'var(--card)';
+        document.getElementById('au-card').style.borderColor = fus.tag === 'disagree' ? 'var(--orange)' : 'var(--border)';
+
+        // Timeline
+        timelineData.push(fus);
+        if(timelineData.length > 600) timelineData.shift();
+        const track = document.getElementById('timeline-track');
+        track.innerHTML = timelineData.map(d => `<div class="tl-seg" style="background:${COLORS[d.emotion] || '#333'}"></div>`).join('');
+        track.scrollLeft = track.scrollWidth;
+
+        // Calib Matrix UI
+        const cal = au.calibrated || {};
+        const calActive = au.calibrating ? `${au.calib_pose}_${au.calib_emotion}` : null;
+        let matrixHtml = '';
+        POSES.forEach(p => {
+            matrixHtml += `<div class="calib-row-label">${POSES_CN[p]}</div><div class="calib-grid">`;
+            EMOTIONS.forEach(e => {
+                const key = `${p}_${e}`;
+                const isDone = cal[p] && cal[p].includes(e);
+                const isActive = key === calActive;
+                matrixHtml += `<button class="calib-btn ${isDone?'done':''} ${isActive?'active':''}" onclick="startCalib('${p}','${e}')">${LABELS_CN[e]}</button>`;
+            });
+            matrixHtml += `</div>`;
+        });
+        document.getElementById('calib-matrix-container').innerHTML = matrixHtml;
+
+        // Thresholds UI
+        const cfg = au.config || {};
+        document.getElementById('t-fh').innerText = cfg.front?.h_thresh;
+        document.getElementById('t-fs').innerText = cfg.front?.s_thresh;
+        document.getElementById('t-uh').innerText = cfg.up?.h_thresh;
+        document.getElementById('t-us').innerText = cfg.up?.s_thresh;
+        document.getElementById('t-dh').innerText = cfg.down?.h_thresh;
+        document.getElementById('t-ds').innerText = cfg.down?.s_thresh;
+        document.getElementById('t-sh').innerText = cfg.side?.h_thresh;
+        document.getElementById('t-ss').innerText = cfg.side?.s_thresh;
+
+        // Weight Slider Sync
+        const w = cfg.fusion_au_weight || 0.6;
+        document.getElementById('weight-slider').value = w * 100;
+        document.getElementById('w-au-lbl').innerText = (w*100).toFixed(0);
+        document.getElementById('w-fer-lbl').innerText = ((1-w)*100).toFixed(0);
+    }
+
+    async function startCalib(pose, emotion) {
+        await fetch('/api/calibrate/start', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({pose, emotion})
+        });
+    }
+
+    // Weight Slider Event
+    document.getElementById('weight-slider').addEventListener('change', async function() {
+        const val = this.value / 100;
+        document.getElementById('w-au-lbl').innerText = (val*100).toFixed(0);
+        document.getElementById('w-fer-lbl').innerText = ((1-val)*100).toFixed(0);
+        await fetch('/api/config', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({fusion_au_weight: val})
+        });
+    });
+
+    // Main Loop
+    async function loop() {
+        try {
+            const [au, fer, fus] = await Promise.all([
+                fetch('/api/status').then(r => r.json()),
+                fetch('/api/fer').then(r => r.json()),
+                fetch('/api/fusion').then(r => r.json())
+            ]);
+            updateUI(au, fer, fus);
+        } catch(e) { console.error(e); }
+    }
+    setInterval(loop, 200);
+    loop();
+
+</script>
+</body>
+</html>
