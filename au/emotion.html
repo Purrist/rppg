@@ -98,9 +98,9 @@
         .snapshot-emotion { text-align: center; font-size: 9px; margin-top: 2px; color: var(--muted); }
         .snapshot-time { text-align: center; font-size: 8px; color: #6e7681; margin-top: 1px; }
         /* 情绪颜色边框 */
-        .snapshot-calm img { border-color: #8b949e; }
-        .snapshot-happy img { border-color: #238636; }
-        .snapshot-sad img { border-color: #58a6ff; }
+        .snapshot-neutral img { border-color: #8b949e; }
+        .snapshot-positive img { border-color: #238636; }
+        .snapshot-negative img { border-color: #58a6ff; }
         
         /* Button */
         .btn-danger { background: var(--red); color: #fff; border: none; padding: 6px 10px; border-radius:4px; cursor: pointer; width: 100%; font-size: 0.75rem; font-weight:600; transition: opacity .2s; margin-top:4px; }
@@ -147,9 +147,9 @@
         .prob-row { display:flex; align-items:center; gap:6px; font-size:11px; }
         .prob-label { width:36px; color:var(--muted); }
         .prob-val { width:34px; text-align:right; color:var(--muted); }
-        .calm { background:#8b949e; }
-        .happy { background:#238636; }
-        .sad { background:#58a6ff; }
+        .neutral { background:#8b949e; }
+        .positive { background:#238636; }
+        .negative { background:#58a6ff; }
         
         /* Timeline area */
         .timeline-wrapper { flex:1; display:flex; flex-direction:column; gap:8px; min-width:0; min-height:0; overflow:hidden; }
@@ -236,9 +236,9 @@
                         <div class="emotion-display" id="au-emotion" style="color:var(--muted);">--</div>
                         <div class="conf-display" id="au-conf">0.00</div>
                     </div>
-                    <div class="prob-row"><div class="prob-label">平静</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar calm" id="bar-au-calm" style="width:0%"></div></div><div class="prob-val" id="val-au-calm">0%</div></div>
-                    <div class="prob-row"><div class="prob-label">高兴</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar happy" id="bar-au-happy" style="width:0%"></div></div><div class="prob-val" id="val-au-happy">0%</div></div>
-                    <div class="prob-row"><div class="prob-label">沮丧</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar sad" id="bar-au-sad" style="width:0%"></div></div><div class="prob-val" id="val-au-sad">0%</div></div>
+                    <div class="prob-row"><div class="prob-label">中性</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar neutral" id="bar-au-neutral" style="width:0%"></div></div><div class="prob-val" id="val-au-neutral">0%</div></div>
+                    <div class="prob-row"><div class="prob-label">积极</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar positive" id="bar-au-positive" style="width:0%"></div></div><div class="prob-val" id="val-au-positive">0%</div></div>
+                    <div class="prob-row"><div class="prob-label">消极</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar negative" id="bar-au-negative" style="width:0%"></div></div><div class="prob-val" id="val-au-negative">0%</div></div>
                 </div>
             </div>
             
@@ -250,9 +250,9 @@
                         <div class="emotion-display" id="fer-emotion" style="color:var(--muted);">--</div>
                         <div class="conf-display" id="fer-conf">0.00</div>
                     </div>
-                    <div class="prob-row"><div class="prob-label">平静</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar calm" id="bar-fer-calm" style="width:0%"></div></div><div class="prob-val" id="val-fer-calm">0%</div></div>
-                    <div class="prob-row"><div class="prob-label">高兴</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar happy" id="bar-fer-happy" style="width:0%"></div></div><div class="prob-val" id="val-fer-happy">0%</div></div>
-                    <div class="prob-row"><div class="prob-label">沮丧</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar sad" id="bar-fer-sad" style="width:0%"></div></div><div class="prob-val" id="val-fer-sad">0%</div></div>
+                    <div class="prob-row"><div class="prob-label">中性</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar neutral" id="bar-fer-neutral" style="width:0%"></div></div><div class="prob-val" id="val-fer-neutral">0%</div></div>
+                    <div class="prob-row"><div class="prob-label">积极</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar positive" id="bar-fer-positive" style="width:0%"></div></div><div class="prob-val" id="val-fer-positive">0%</div></div>
+                    <div class="prob-row"><div class="prob-label">消极</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar negative" id="bar-fer-negative" style="width:0%"></div></div><div class="prob-val" id="val-fer-negative">0%</div></div>
                 </div>
             </div>
             
@@ -264,9 +264,9 @@
                         <div class="emotion-display" id="fusion-emotion" style="color:var(--muted);">--</div>
                         <div class="conf-display" id="fusion-conf">0.00</div>
                     </div>
-                    <div class="prob-row"><div class="prob-label">平静</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar calm" id="bar-fusion-calm" style="width:0%"></div></div><div class="prob-val" id="val-fusion-calm">0%</div></div>
-                    <div class="prob-row"><div class="prob-label">高兴</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar happy" id="bar-fusion-happy" style="width:0%"></div></div><div class="prob-val" id="val-fusion-happy">0%</div></div>
-                    <div class="prob-row"><div class="prob-label">沮丧</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar sad" id="bar-fusion-sad" style="width:0%"></div></div><div class="prob-val" id="val-fusion-sad">0%</div></div>
+                    <div class="prob-row"><div class="prob-label">中性</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar neutral" id="bar-fusion-neutral" style="width:0%"></div></div><div class="prob-val" id="val-fusion-neutral">0%</div></div>
+                    <div class="prob-row"><div class="prob-label">积极</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar positive" id="bar-fusion-positive" style="width:0%"></div></div><div class="prob-val" id="val-fusion-positive">0%</div></div>
+                    <div class="prob-row"><div class="prob-label">消极</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar negative" id="bar-fusion-negative" style="width:0%"></div></div><div class="prob-val" id="val-fusion-negative">0%</div></div>
                 </div>
             </div>
         </div>
@@ -300,9 +300,9 @@
 </div>
 
 <script>
-const EMOTIONS = ['calm', 'happy', 'sad'];
-const COLORS = { calm:'#8b949e', happy:'#238636', sad:'#58a6ff', no_face:'#f85149', uncalibrated:'#d29922', out_of_range:'#e3722b', speaking:'#00c8ff' };
-const EMO_CN = { calm:'平静', happy:'高兴', sad:'沮丧', no_face:'无人脸', uncalibrated:'未校准', out_of_range:'超出角度', speaking:'说话中' };
+const EMOTIONS = ['neutral', 'positive', 'negative'];
+const COLORS = { neutral:'#8b949e', positive:'#238636', negative:'#58a6ff', no_face:'#f85149', uncalibrated:'#d29922', out_of_range:'#e3722b', speaking:'#00c8ff' };
+const EMO_CN = { neutral:'中性', positive:'积极', negative:'消极', no_face:'无人脸', uncalibrated:'未校准', out_of_range:'超出角度', speaking:'说话中' };
 const POSES = ['front','up','down','side'];
 const POSE_CN = { front:'平视', up:'抬头', down:'低头', side:'侧脸' };
 
@@ -593,8 +593,8 @@ function initAllSliders() {
         const hThreshId = `thresh-h-${p}`;
         const sThreshId = `thresh-s-${p}`;
         threshHtml += `<div class="thresh-group"><div class="tg-title">${POSE_CN[p]}</div>`;
-        threshHtml += `<div class="slider-row"><label for="${hThreshId}">高兴</label><input type="range" min="0.3" max="5" step="0.1" value="2" data-type="thresh" data-pose="${p}" data-key="h_thresh" id="${hThreshId}" title="${POSE_CN[p]}高兴阈值" aria-label="${POSE_CN[p]}高兴阈值"><span class="sv">2.0</span></div>`;
-        threshHtml += `<div class="slider-row"><label for="${sThreshId}">沮丧</label><input type="range" min="0.3" max="5" step="0.1" value="2" data-type="thresh" data-pose="${p}" data-key="s_thresh" id="${sThreshId}" title="${POSE_CN[p]}沮丧阈值" aria-label="${POSE_CN[p]}沮丧阈值"><span class="sv">2.0</span></div>`;
+        threshHtml += `<div class="slider-row"><label for="${hThreshId}">积极</label><input type="range" min="0.3" max="5" step="0.1" value="2" data-type="thresh" data-pose="${p}" data-key="h_thresh" id="${hThreshId}" title="${POSE_CN[p]}积极阈值" aria-label="${POSE_CN[p]}积极阈值"><span class="sv">2.0</span></div>`;
+        threshHtml += `<div class="slider-row"><label for="${sThreshId}">消极</label><input type="range" min="0.3" max="5" step="0.1" value="2" data-type="thresh" data-pose="${p}" data-key="s_thresh" id="${sThreshId}" title="${POSE_CN[p]}消极阈值" aria-label="${POSE_CN[p]}消极阈值"><span class="sv">2.0</span></div>`;
         threshHtml += '</div>';
     });
     document.getElementById('thresh-area').innerHTML = threshHtml;

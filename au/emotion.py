@@ -29,15 +29,16 @@ _STD = np.array([0.229,0.224,0.225], dtype=np.float32)
 MP5 = [33, 263, 1, 61, 291]
 KP_IDX = [1,33,133,159,145,263,362,386,374,61,291,13,14,152,105,334,55,285]
 POSES = ['front', 'up', 'down', 'side']
-EMOTIONS = ['calm', 'happy', 'sad']
+EMOTIONS = ['neutral', 'positive', 'negative']
 AU_HAPPY = ['AU12', 'AU6', 'AU25']
 AU_SAD = ['AU15', 'AU4', 'AU1', 'AU17']
 
 FER_MODEL_PATH = os.path.join(os.path.dirname(SCRIPT_DIR), "backend", "core", "models", "emotion-ferplus-8.onnx")
 FER_LABELS_8 = ["neutral", "happiness", "surprise", "sadness", "anger", "disgust", "fear", "contempt"]
+# FER+ 8类到3类的语义映射（用于概率池化）
 FER_MAP_8_TO_3 = {
-    "neutral": "calm", "happiness": "happy", "surprise": "calm",
-    "sadness": "sad", "anger": "sad", "disgust": "sad", "fear": "sad", "contempt": "calm"
+    "neutral": "neutral", "happiness": "positive", "surprise": "neutral",
+    "sadness": "negative", "anger": "negative", "disgust": "negative", "fear": "negative", "contempt": "neutral"
 }
 
 def softmax(x):
@@ -218,7 +219,7 @@ class EmotionMapper:
             'down': {'h_thresh': 1.5, 's_thresh': 1.5}, 'side': {'h_thresh': 1.5, 's_thresh': 1.5},
             'pitch_limit': 45, 'fusion_weights': {'front': 0.4, 'up': 0.4, 'down': 0.4, 'side': 0.4}
         }
-        self.last_emotion = 'calm'; self.switch_cnt = 0
+        self.last_emotion = 'neutral'; self.switch_cnt = 0
         self.persist_path = persist_path or os.path.join(os.path.dirname(__file__),'data','baselines.json')
         self._load()
     def _load(self):
@@ -283,13 +284,13 @@ class EmotionMapper:
         if pitch < -20: return 'down'
         return 'front'
     def predict(self, au, pitch, yaw, speaking=False):
-        if au is None: return 'unknown', 'no_face', 0., {'calm':1,'happy':0,'sad':0}
+        if au is None: return 'unknown', 'no_face', 0., {'neutral':1,'positive':0,'negative':0}
         pose = self.get_pose(pitch, yaw)
-        if abs(pitch) > self.config.get('pitch_limit', 30): return pose, 'out_of_range', 0., {'calm':0,'happy':0,'sad':0}
+        if abs(pitch) > self.config.get('pitch_limit', 30): return pose, 'out_of_range', 0., {'neutral':0,'positive':0,'negative':0}
         if speaking: return pose, 'speaking', 0., {e: (0.5 if e == self.last_emotion else 0.05) for e in EMOTIONS}
-        calm_bl = self.baselines[pose]['calm']
-        if calm_bl is None: return pose, 'uncalibrated', 0., {'calm':1,'happy':0,'sad':0}
-        mu, sig = calm_bl['mu'], calm_bl['sigma']; thr = self.config[pose]
+        neutral_bl = self.baselines[pose]['neutral']
+        if neutral_bl is None: return pose, 'uncalibrated', 0., {'neutral':1,'positive':0,'negative':0}
+        mu, sig = neutral_bl['mu'], neutral_bl['sigma']; thr = self.config[pose]
         def z(n): return (au.get(n,0.) - mu[n]) / sig[n] if n in mu else 0.
         z12,z6,z25 = z('AU12'),z('AU6'),z('AU25')
         h_act = 0.
@@ -300,28 +301,28 @@ class EmotionMapper:
         if h_act > 0 and s_act > 0:
             if h_act >= s_act: s_act = 0
             else: h_act = 0
-        happy_bl = self.baselines[pose]['happy']
-        if happy_bl and h_act > 0:
-            hm, hs = happy_bl['mu'], happy_bl['sigma']
+        positive_bl = self.baselines[pose]['positive']
+        if positive_bl and h_act > 0:
+            hm, hs = positive_bl['mu'], positive_bl['sigma']
             dist = np.mean([abs(au.get(a,0)-hm.get(a,0))/hs.get(a,1) for a in AU_HAPPY if a in hm])
             if dist > 2.5: h_act *= max(0, 1.-(dist-2.5)*.4)
-        sad_bl = self.baselines[pose]['sad']
-        if sad_bl and s_act > 0:
-            sm, ss = sad_bl['mu'], sad_bl['sigma']
+        negative_bl = self.baselines[pose]['negative']
+        if negative_bl and s_act > 0:
+            sm, ss = negative_bl['mu'], negative_bl['sigma']
             dist = np.mean([abs(au.get(a,0)-sm.get(a,0))/ss.get(a,1) for a in AU_SAD if a in sm])
             if dist > 2.5: s_act *= max(0, 1.-(dist-2.5)*.4)
         c_act = 1.0
         if h_act > thr['h_thresh']: c_act = max(0., 1.-(h_act-thr['h_thresh'])*1.2)
         elif s_act > thr['s_thresh']: c_act = max(0., 1.-(s_act-thr['s_thresh'])*1.2)
         total = h_act + s_act + c_act + 1e-6
-        scores = {'happy': h_act/total, 'sad': s_act/total, 'calm': c_act/total}
-        if self.last_emotion == 'calm':
-            if h_act >= thr['h_thresh'] and s_act < thr['s_thresh']*.6: raw = 'happy'
-            elif s_act >= thr['s_thresh'] and h_act < thr['h_thresh']*.6: raw = 'sad'
-            else: raw = 'calm'
-        elif self.last_emotion == 'happy': raw = 'calm' if h_act < thr['h_thresh']*.35 else 'happy'
-        elif self.last_emotion == 'sad': raw = 'calm' if s_act < thr['s_thresh']*.35 else 'sad'
-        else: raw = 'calm'
+        scores = {'positive': h_act/total, 'negative': s_act/total, 'neutral': c_act/total}
+        if self.last_emotion == 'neutral':
+            if h_act >= thr['h_thresh'] and s_act < thr['s_thresh']*.6: raw = 'positive'
+            elif s_act >= thr['s_thresh'] and h_act < thr['h_thresh']*.6: raw = 'negative'
+            else: raw = 'neutral'
+        elif self.last_emotion == 'positive': raw = 'neutral' if h_act < thr['h_thresh']*.35 else 'positive'
+        elif self.last_emotion == 'negative': raw = 'neutral' if s_act < thr['s_thresh']*.35 else 'negative'
+        else: raw = 'neutral'
         if raw != self.last_emotion:
             self.switch_cnt += 1
             if self.switch_cnt < 4: best = self.last_emotion
@@ -348,13 +349,23 @@ class FERDetector:
             gray = cv2.cvtColor(aligned_64, cv2.COLOR_BGR2GRAY)
             blob = gray.astype(np.float32).reshape(1, 1, 64, 64)
             self.net.setInput(blob); scores = self.net.forward()[0]; probs = softmax(scores)
-            idx = int(np.argmax(probs)); label_8 = FER_LABELS_8[idx]
-            probs_3 = {}
-            for k, v in FER_MAP_8_TO_3.items():
-                i = FER_LABELS_8.index(k); probs_3[v] = probs_3.get(v, 0.0) + probs[i]
-            label_3 = FER_MAP_8_TO_3[label_8]
-            return label_3, float(probs_3[label_3]), probs
-        except Exception as e: return "calm", 0.0, np.zeros(8)
+            
+            # 概率池化：直接把8类概率按语义合并成3类
+            probs_3 = {
+                'positive': probs[1],                                             # happiness
+                'negative': probs[3] + probs[4] + probs[5] + probs[6],           # sadness + anger + disgust + fear
+                'neutral':  probs[0] + probs[2] + probs[7]                       # neutral + surprise + contempt
+            }
+            
+            # 归一化
+            total = sum(probs_3.values()) + 1e-8
+            probs_3 = {k: v/total for k, v in probs_3.items()}
+            
+            label_3 = max(probs_3, key=probs_3.get)
+            conf_3 = probs_3[label_3]
+            
+            return label_3, float(conf_3), probs
+        except Exception as e: return "neutral", 0.0, np.zeros(8)
 
 class FERAligner:
     def __init__(self):
@@ -406,10 +417,10 @@ class EmotionEngine:
         self.pose_est = PoseEstimator()
         self.au_ext = AUExtractor()
         persist = os.path.join(os.path.dirname(__file__),'data','baselines.json')
-        self.mapper = EmotionMapper(history=30, persist_path=persist)
+        self.mapper = EmotionMapper(history=50, persist_path=persist)
         
-        # FER+ 组件
-        self.fer_det = FERDetector(); self.fer_align = FERAligner(); self.fer_smoother = FERSmoother(window=10)
+        # FER+ 组件（窗口增大到20以适应更低的推理频率）
+        self.fer_det = FERDetector(); self.fer_align = FERAligner(); self.fer_smoother = FERSmoother(window=20)
         
         # Intentionally lock-free: CPython reference assignment is atomic.
         # Both threads may process slightly different frames (≤1 frame drift).
@@ -432,8 +443,6 @@ class EmotionEngine:
     def grab_loop(self):
         if not self.cap.isOpened(): return
         self.running = True
-        frame_count = 0
-        last_lm_hash = None  # 缓存landmarks哈希，避免重复绘制
         
         while self.running:
             try:
@@ -442,64 +451,29 @@ class EmotionEngine:
                     time.sleep(0.01)
                     continue
                 
-                frame_count += 1
+                # 直接保存原始帧，不做任何绘制
                 self.raw_frame = frame
                 
-                # 获取landmarks（加锁保护）
-                with self.lock:
-                    lm = self.last_landmarks
+                # 视频流直接传输原始画面（无任何绘制）
+                r, buf = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                if r:
+                    with self.lock:
+                        self.annotated = buf.tobytes()
                 
-                # 只有当landmarks变化时才重新绘制标注
-                lm_changed = False
-                if lm is not None:
-                    current_hash = hash(lm.tobytes())
-                    if current_hash != last_lm_hash:
-                        lm_changed = True
-                        last_lm_hash = current_hash
+                # 快照逻辑：情绪变化立即捕捉，否则0.5s捕捉一次（快照带标注）
+                now = time.time()
+                should_snap = False
                 
-                # 如果landmarks没变化，使用上一帧的标注（如果存在）
-                if lm_changed or self.annotated is None:
-                    ann = frame.copy()
-                    
-                    if lm is not None:
-                        # 画人脸框
-                        xs, ys = lm[:, 0], lm[:, 1]
-                        x1, x2 = int(xs.min()), int(xs.max())
-                        y1, y2 = int(ys.min()), int(ys.max())
-                        # 稍微放大一点框
-                        pad = int(0.1 * (x2 - x1))
-                        x1, x2 = max(0, x1 - pad), min(frame.shape[1], x2 + pad)
-                        y1, y2 = max(0, y1 - pad), min(frame.shape[0], y2 + pad)
-                        
-                        cv2.rectangle(ann, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                        
-                        # 画关键特征点
-                        for i in KP_IDX:
-                            px, py = int(lm[i, 0]), int(lm[i, 1])
-                            cv2.circle(ann, (px, py), 2, (0, 255, 0), -1)
-                else:
-                    # landmarks没变化，跳过绘制
-                    continue
-                
+                # 读取au_result和prev_emotion
                 try:
                     with self.lock:
                         au_em = self.au_result.get('emotion', 'no_face')
                         fer_lb = self.fer_result.get('label', '-')
+                        current_prev_emotion = self.prev_emotion
                 except:
                     au_em = 'no_face'
                     fer_lb = '-'
-                
-                clr = {'happy':(0,255,0),'sad':(0,0,255),'calm':(128,128,128),'no_face':(0,0,255),'uncalibrated':(0,255,255),'out_of_range':(0,165,255),'speaking':(0,200,255)}
-                c = clr.get(au_em, (128,128,128))
-                cv2.putText(ann, f"AU:{au_em} FER+:{fer_lb}", (10, ann.shape[0]-20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200,200,200), 1)
-                
-                # 快照逻辑：情绪变化立即捕捉，否则0.5s捕捉一次
-                now = time.time()
-                should_snap = False
-                
-                # 读取prev_emotion时加锁保护
-                with self.lock:
-                    current_prev_emotion = self.prev_emotion
+                    current_prev_emotion = None
                 
                 # 情绪变化立即捕捉（排除无效情绪）
                 if au_em != current_prev_emotion and au_em not in ('no_face', 'uncalibrated', 'out_of_range', 'speaking'):
@@ -509,44 +483,49 @@ class EmotionEngine:
                     should_snap = True
                 
                 if should_snap:
-                    snap_buf = cv2.imencode('.jpg', ann, [cv2.IMWRITE_JPEG_QUALITY, 70])[1].tobytes()
-                    # Base64编码移到锁外，减少锁持有时间
-                    img_base64 = base64.b64encode(snap_buf).decode()
+                    # 快照直接用原图，不做任何绘制
+                    # 只保存原始bytes，Base64编码留到API请求时做（惰性计算）
+                    snap_buf = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])[1].tobytes()
                     elapsed = round(now - self.t0, 1)
-                    
-                    # 格式化时间为 "时:分:秒" 格式
                     local_time = time.localtime(now)
                     time_str = time.strftime("%H:%M:%S", local_time)
                     
+                    # 使用融合结果而不是AU结果
+                    fusion_em = self.get_fusion().get('emotion', au_em)
+                    
                     with self.lock:
                         self.snapshots.append({
-                            'img': img_base64,
-                            'emotion': au_em,
+                            'img_raw': snap_buf,  # 保存原始bytes，不立即编码
+                            'emotion': fusion_em,
                             'time': elapsed,
                             'time_str': time_str,
                             'timestamp': now
                         })
-                        self.prev_emotion = au_em
+                        self.prev_emotion = fusion_em
                     
                     self.last_snap_time = now
                 
-                r, buf = cv2.imencode('.jpg', ann, [cv2.IMWRITE_JPEG_QUALITY, 80])
-                if r:
-                    with self.lock:
-                        self.annotated = buf.tobytes()
                 time.sleep(0.01)
             except Exception as e:
                 print(f"[Grab Loop Error]: {e}")
                 time.sleep(0.1)
 
     def au_loop(self):
+        lm_cache = None  # 缓存landmarks用于高频说话检测
         while self.running:
             frame = self.raw_frame
             if frame is not None:
                 self._fc_au += 1
-                if self._fc_au % 4 == 1:
+                
+                # 高频说话检测（每2帧一次，轻量操作）
+                if self._fc_au % 2 == 0 and lm_cache is not None:
+                    self.speech_det.update(lm_cache)
+                
+                # 低频重推理（每10帧一次，降低CPU占用）
+                if self._fc_au % 10 == 1:
                     lm_list = self.det.process(frame)
                     lm = self.face_sel.select(lm_list, frame.shape) if lm_list else None
+                    lm_cache = lm  # 更新缓存
                     self.last_landmarks = lm  # 保存最新的landmarks
                     res = dict(self.au_result)
                     if lm is not None:
@@ -560,7 +539,7 @@ class EmotionEngine:
                         pose, emotion, conf, scores = self.mapper.predict(au, pitch, yaw, speaking=speaking)
                         res.update(pose=pose, emotion=emotion, confidence=round(conf,3), pitch=round(pitch,1), yaw=round(yaw,1), roll=round(roll,1), scores={k:round(v,3) for k,v in scores.items()}, au={k:round(v,1) for k,v in au.items()} if au else {}, speaking=speaking)
                     else:
-                        res.update(emotion='no_face', au={}, scores={'calm':0,'happy':0,'sad':0}, speaking=False)
+                        res.update(emotion='no_face', au={}, scores={'neutral':0,'positive':0,'negative':0}, speaking=False)
                     self.au_result = res
             time.sleep(0.01)
 
@@ -569,7 +548,8 @@ class EmotionEngine:
             frame = self.raw_frame
             if frame is not None:
                 self._fc_fer += 1
-                if self._fc_fer % 4 == 3:
+                # 低频推理（每15帧一次，降低CPU占用）
+                if self._fc_fer % 15 == 3:
                     aligned = self.fer_align.align(frame)
                     if aligned is not None:
                         label, conf, probs_8 = self.fer_det.predict(aligned)
@@ -579,7 +559,7 @@ class EmotionEngine:
                         s_label, s_conf, s_probs = self.fer_smoother.update(label, probs_3)
                         self.fer_result = {'label':s_label, 'conf':round(s_conf,3), 'probs_3':{k:round(v,3) for k,v in s_probs.items()}, 'has_face':True}
                     else:
-                        self.fer_result = {'label':'calm','conf':0.0,'probs_3':{'calm':0,'happy':0,'sad':0},'has_face':False}
+                        self.fer_result = {'label':'neutral','conf':0.0,'probs_3':{'neutral':0,'positive':0,'negative':0},'has_face':False}
             time.sleep(0.01)
 
     def get_fusion(self):
@@ -709,7 +689,15 @@ def calib_delete_all():
 @app.route("/api/snapshots")
 def api_snapshots():
     with engine.lock:
-        return jsonify(list(engine.snapshots))
+        # 惰性编码：只在API请求时才进行Base64编码
+        result = []
+        for snap in engine.snapshots:
+            item = dict(snap)
+            if 'img_raw' in item:
+                item['img'] = base64.b64encode(item['img_raw']).decode()
+                del item['img_raw']
+            result.append(item)
+        return jsonify(result)
 
 @app.route("/api/all")
 def api_all():
