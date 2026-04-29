@@ -88,12 +88,19 @@
         
         /* Snapshots panel */
         .snapshots-panel { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 12px; flex: 0 0 auto; }
-        .snapshots-container { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
-        .snapshot-item { flex: 0 0 auto; width: 70px; cursor: pointer; }
-        .snapshot-item img { width: 70px; height: 70px; object-fit: cover; border-radius: 4px; border: 2px solid transparent; transition: border-color 0.2s; }
-        .snapshot-item:hover img { border-color: var(--accent); }
-        .snapshot-emotion { text-align: center; font-size: 10px; margin-top: 2px; color: var(--muted); }
-        .snapshot-time { text-align: center; font-size: 9px; color: #6e7681; margin-top: 1px; }
+        .snapshots-container { display: flex; gap: 5px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+        .snapshots-container::-webkit-scrollbar { height: 6px; }
+        .snapshots-container::-webkit-scrollbar-track { background: transparent; }
+        .snapshots-container::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        .snapshot-item { flex: 0 0 auto; width: 52px; cursor: pointer; }
+        .snapshot-item img { width: 52px; height: 52px; object-fit: cover; border-radius: 4px; border: 3px solid #30363d; transition: transform 0.15s; }
+        .snapshot-item:hover img { transform: scale(1.05); }
+        .snapshot-emotion { text-align: center; font-size: 9px; margin-top: 2px; color: var(--muted); }
+        .snapshot-time { text-align: center; font-size: 8px; color: #6e7681; margin-top: 1px; }
+        /* 情绪颜色边框 */
+        .snapshot-calm img { border-color: #8b949e; }
+        .snapshot-happy img { border-color: #238636; }
+        .snapshot-sad img { border-color: #58a6ff; }
         
         /* Button */
         .btn-danger { background: var(--red); color: #fff; border: none; padding: 6px 10px; border-radius:4px; cursor: pointer; width: 100%; font-size: 0.75rem; font-weight:600; transition: opacity .2s; margin-top:4px; }
@@ -346,31 +353,89 @@ function resetChart() {
     document.getElementById('fusion-chart-live').classList.add('hidden');
 }
 
-// Snapshots
+// Snapshots - 使用增量更新优化性能
+let snapshotItems = [];  // 缓存已创建的DOM元素
+
 async function updateSnapshots() {
     try {
         const res = await fetch('/api/snapshots');
         const snaps = await res.json();
         
-        if (snaps.length === lastSnapshotCount) return;
-        lastSnapshotCount = snaps.length;
-        
         const container = document.getElementById('snapshots-container');
+        
         if (snaps.length === 0) {
-            container.innerHTML = '<div style="color:var(--muted); font-size:11px; padding:10px; text-align:center;">暂无快照</div>';
+            if (container.children.length > 0) {
+                container.innerHTML = '<div style="color:var(--muted); font-size:11px; padding:10px; text-align:center;">暂无快照</div>';
+            }
+            lastSnapshotCount = 0;
+            snapshotItems = [];
             return;
         }
         
-        container.innerHTML = snaps.map(s => `
-            <div class="snapshot-item" onclick="openLightbox('${s.img}', '${s.emotion}', ${s.time})">
-                <img src="data:image/jpeg;base64,${s.img}" alt="${s.emotion}">
-                <div class="snapshot-emotion">${EMO_CN[s.emotion] || s.emotion}</div>
-                <div class="snapshot-time">${s.time}s</div>
-            </div>
-        `).join('');
+        // 只在数量变化或最后一个快照时间变化时更新
+        const needUpdate = snaps.length !== lastSnapshotCount || 
+                          (snapshotItems.length > 0 && snaps[snaps.length-1]?.timestamp !== snapshotItems[snapshotItems.length-1]?.timestamp);
+        
+        if (!needUpdate) return;
+        
+        lastSnapshotCount = snaps.length;
+        
+        // 增量更新：只添加新的快照
+        const newSnaps = snaps.slice(snapshotItems.length);
+        
+        if (newSnaps.length > 0 && snapshotItems.length > 0) {
+            // 有新快照，追加到容器
+            newSnaps.forEach(s => {
+                const item = createSnapshotItem(s);
+                container.appendChild(item);
+                snapshotItems.push({ ...s, element: item });
+            });
+        } else {
+            // 完全重建（首次加载或清空后）
+            container.innerHTML = '';
+            snapshotItems = snaps.map(s => {
+                const item = createSnapshotItem(s);
+                container.appendChild(item);
+                return { ...s, element: item };
+            });
+        }
+        
+        // 限制最多显示20个快照（虽然后端已有限制，但前端再保护一下）
+        while (snapshotItems.length > 20) {
+            const removed = snapshotItems.shift();
+            if (removed.element && removed.element.parentNode) {
+                removed.element.parentNode.removeChild(removed.element);
+            }
+        }
     } catch (e) {
         console.error('Snapshot update error:', e);
     }
+}
+
+function createSnapshotItem(s) {
+    const div = document.createElement('div');
+    // 添加情绪颜色类名
+    div.className = `snapshot-item snapshot-${s.emotion}`;
+    div.onclick = () => openLightbox(s.img, s.emotion, s.time_str);
+    
+    const img = document.createElement('img');
+    img.src = `data:image/jpeg;base64,${s.img}`;
+    img.alt = s.emotion;
+    
+    const emotionDiv = document.createElement('div');
+    emotionDiv.className = 'snapshot-emotion';
+    emotionDiv.textContent = EMO_CN[s.emotion] || s.emotion;
+    
+    const timeDiv = document.createElement('div');
+    timeDiv.className = 'snapshot-time';
+    // 使用格式化的时间字符串（如 "15:58:03"）
+    timeDiv.textContent = s.time_str || `${s.time}s`;
+    
+    div.appendChild(img);
+    div.appendChild(emotionDiv);
+    div.appendChild(timeDiv);
+    
+    return div;
 }
 
 function openLightbox(imgBase64, emotion, time) {
@@ -697,11 +762,11 @@ function deleteAllCalib() {
 // Main loop
 async function loop() {
     try {
-        const [au, fer, fusion] = await Promise.all([
-            fetch('/api/status').then(r=>r.json()),
-            fetch('/api/fer').then(r=>r.json()),
-            fetch('/api/fusion').then(r=>r.json())
-        ]);
+        // 合并API请求，减少网络开销
+        const data = await fetch('/api/all').then(r=>r.json());
+        const au = data.au;
+        const fer = data.fer;
+        const fusion = data.fusion;
 
         // AU
         const auEmEl=document.getElementById('au-emotion');
@@ -795,7 +860,7 @@ async function loop() {
         console.error('API Error',e);
     }
 }
-setInterval(loop,250);
+setInterval(loop, 400);  // 降低轮询频率到2.5fps，减少CPU和网络开销
 loop();
 </script>
 </body>

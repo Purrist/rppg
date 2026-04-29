@@ -69,11 +69,15 @@ class SpeechDetector:
         eye_dist = max(np.linalg.norm(lm[33][:2] - lm[263][:2]), 1.0)
         lip_open = abs(lm[14][1] - lm[13][1]) / eye_dist
         lip_width = abs(lm[61][0] - lm[291][0]) / eye_dist
+        
+        # 唇速在开头就算，每帧都更新 _last_lip_open
+        lip_velocity = abs(lip_open - self._last_lip_open)
+        self._last_lip_open = lip_open
+        
         self.lip_open_history.append(lip_open)
         self.lip_width_history.append(lip_width)
         
         if len(self.lip_open_history) < 20:
-            self._last_lip_open = lip_open
             return False
         
         open_arr = np.array(self.lip_open_history)
@@ -104,9 +108,6 @@ class SpeechDetector:
             
             raw = (crossings >= 3 and open_energy > 0.018) or \
                   (crossings >= 2 and open_energy > 0.025 and width_energy > 0.008)
-        
-        lip_velocity = abs(lip_open - self._last_lip_open)
-        self._last_lip_open = lip_open
         
         if raw and lip_velocity > 0.005:
             self._spk_cnt += 1
@@ -423,8 +424,8 @@ class EmotionEngine:
         self.au_result = {'emotion':'no_face','confidence':0.,'scores':{'calm':0,'happy':0,'sad':0},'pose':'-','pitch':0,'yaw':0,'roll':0,'au':{},'speaking':False,'calibrating':False,'calib_pose':None,'calib_emotion':None,'calib_count':0}
         self.fer_result = {'label':'calm','conf':0.0,'probs_3':{'calm':0,'happy':0,'sad':0},'has_face':False}
         
-        # 画面快照缓存（最近5次）
-        self.snapshots = deque(maxlen=5)
+        # 画面快照缓存（最近20次）
+        self.snapshots = deque(maxlen=20)
         self.prev_emotion = None
         self.last_snap_time = 0  # 上次快照时间
 
@@ -432,6 +433,8 @@ class EmotionEngine:
         if not self.cap.isOpened(): return
         self.running = True
         frame_count = 0
+        last_lm_hash = None  # 缓存landmarks哈希，避免重复绘制
+        
         while self.running:
             try:
                 ret, frame = self.cap.read()
@@ -441,26 +444,42 @@ class EmotionEngine:
                 
                 frame_count += 1
                 self.raw_frame = frame
-                ann = frame.copy()
                 
-                # 渲染人脸框和landmarks
-                lm = self.last_landmarks
+                # 获取landmarks（加锁保护）
+                with self.lock:
+                    lm = self.last_landmarks
+                
+                # 只有当landmarks变化时才重新绘制标注
+                lm_changed = False
                 if lm is not None:
-                    # 画人脸框
-                    xs, ys = lm[:, 0], lm[:, 1]
-                    x1, x2 = int(xs.min()), int(xs.max())
-                    y1, y2 = int(ys.min()), int(ys.max())
-                    # 稍微放大一点框
-                    pad = int(0.1 * (x2 - x1))
-                    x1, x2 = max(0, x1 - pad), min(frame.shape[1], x2 + pad)
-                    y1, y2 = max(0, y1 - pad), min(frame.shape[0], y2 + pad)
+                    current_hash = hash(lm.tobytes())
+                    if current_hash != last_lm_hash:
+                        lm_changed = True
+                        last_lm_hash = current_hash
+                
+                # 如果landmarks没变化，使用上一帧的标注（如果存在）
+                if lm_changed or self.annotated is None:
+                    ann = frame.copy()
                     
-                    cv2.rectangle(ann, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                    
-                    # 画关键特征点
-                    for i in KP_IDX:
-                        px, py = int(lm[i, 0]), int(lm[i, 1])
-                        cv2.circle(ann, (px, py), 2, (0, 255, 0), -1)
+                    if lm is not None:
+                        # 画人脸框
+                        xs, ys = lm[:, 0], lm[:, 1]
+                        x1, x2 = int(xs.min()), int(xs.max())
+                        y1, y2 = int(ys.min()), int(ys.max())
+                        # 稍微放大一点框
+                        pad = int(0.1 * (x2 - x1))
+                        x1, x2 = max(0, x1 - pad), min(frame.shape[1], x2 + pad)
+                        y1, y2 = max(0, y1 - pad), min(frame.shape[0], y2 + pad)
+                        
+                        cv2.rectangle(ann, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                        
+                        # 画关键特征点
+                        for i in KP_IDX:
+                            px, py = int(lm[i, 0]), int(lm[i, 1])
+                            cv2.circle(ann, (px, py), 2, (0, 255, 0), -1)
+                else:
+                    # landmarks没变化，跳过绘制
+                    continue
                 
                 try:
                     with self.lock:
@@ -478,8 +497,12 @@ class EmotionEngine:
                 now = time.time()
                 should_snap = False
                 
+                # 读取prev_emotion时加锁保护
+                with self.lock:
+                    current_prev_emotion = self.prev_emotion
+                
                 # 情绪变化立即捕捉（排除无效情绪）
-                if au_em != self.prev_emotion and au_em not in ('no_face', 'uncalibrated', 'out_of_range', 'speaking'):
+                if au_em != current_prev_emotion and au_em not in ('no_face', 'uncalibrated', 'out_of_range', 'speaking'):
                     should_snap = True
                 # 情绪不变时，每0.5秒捕捉一次
                 elif now - self.last_snap_time >= 0.5 and au_em not in ('no_face', 'uncalibrated', 'out_of_range'):
@@ -487,15 +510,24 @@ class EmotionEngine:
                 
                 if should_snap:
                     snap_buf = cv2.imencode('.jpg', ann, [cv2.IMWRITE_JPEG_QUALITY, 70])[1].tobytes()
+                    # Base64编码移到锁外，减少锁持有时间
+                    img_base64 = base64.b64encode(snap_buf).decode()
+                    elapsed = round(now - self.t0, 1)
+                    
+                    # 格式化时间为 "时:分:秒" 格式
+                    local_time = time.localtime(now)
+                    time_str = time.strftime("%H:%M:%S", local_time)
+                    
                     with self.lock:
-                        elapsed = round(now - self.t0, 1)
                         self.snapshots.append({
-                            'img': base64.b64encode(snap_buf).decode(),
+                            'img': img_base64,
                             'emotion': au_em,
                             'time': elapsed,
+                            'time_str': time_str,
                             'timestamp': now
                         })
-                    self.prev_emotion = au_em
+                        self.prev_emotion = au_em
+                    
                     self.last_snap_time = now
                 
                 r, buf = cv2.imencode('.jpg', ann, [cv2.IMWRITE_JPEG_QUALITY, 80])
@@ -508,7 +540,6 @@ class EmotionEngine:
                 time.sleep(0.1)
 
     def au_loop(self):
-        lm_cache = None
         while self.running:
             frame = self.raw_frame
             if frame is not None:
@@ -516,7 +547,6 @@ class EmotionEngine:
                 if self._fc_au % 4 == 1:
                     lm_list = self.det.process(frame)
                     lm = self.face_sel.select(lm_list, frame.shape) if lm_list else None
-                    lm_cache = (lm_list, lm)
                     self.last_landmarks = lm  # 保存最新的landmarks
                     res = dict(self.au_result)
                     if lm is not None:
@@ -627,15 +657,13 @@ def gen():
                 if frame_timeout < 30:
                     yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + last_frame + b"\r\n"
                 else:
-                    # 超时后发送空帧提示
+                    # 超时30帧后仍yield旧帧，但间隔拉大，减少CPU空转
+                    time.sleep(0.1)
                     yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + last_frame + b"\r\n"
+                    time.sleep(0.2)
             else:
                 # 等待帧准备
-                frame_timeout += 1
-                if frame_timeout > 100:
-                    frame_timeout = 0
-                time.sleep(0.01)
-                continue
+                time.sleep(0.05)
                 
         except Exception as e:
             consecutive_errors += 1
@@ -682,6 +710,17 @@ def calib_delete_all():
 def api_snapshots():
     with engine.lock:
         return jsonify(list(engine.snapshots))
+
+@app.route("/api/all")
+def api_all():
+    au = dict(engine.au_result)
+    au['config'] = engine.mapper.config
+    au['calibrated'] = engine.mapper.get_calibrated()
+    return jsonify({
+        'au': au,
+        'fer': engine.fer_result,
+        'fusion': engine.get_fusion()
+    })
 
 if __name__ == "__main__":
     try: app.run(host="0.0.0.0", port=5000, debug=False, threaded=True, use_reloader=False)
