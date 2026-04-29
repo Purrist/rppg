@@ -4,288 +4,799 @@
     <meta charset="UTF-8">
     <title>双通道情绪融合系统</title>
     <style>
-        :root { --bg: #1e1e24; --card: #2b2b36; --border: #3e3e4a; --text: #e0e0e0; --muted: #888; --accent: #4f8cff; --green: #4caf50; --red: #f44336; --orange: #ff9800; }
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', system-ui, sans-serif; }
+        :root { --bg: #0d1117; --card: #161b22; --border: #21262d; --text: #c9d1d9; --muted: #8b949e; --accent: #58a6ff; --green: #238636; --red: #f85149; --orange: #d29922; }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI','Microsoft YaHei',sans-serif; }
         body { background: var(--bg); color: var(--text); display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
-        .header { padding: 10px 20px; background: #252530; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
-        .header h1 { font-size: 1.2rem; font-weight: 600; }
-        .main-container { display: flex; flex: 1; overflow: hidden; }
-        .video-col { flex: 0 0 55%; padding: 10px; display: flex; flex-direction: column; gap: 10px; border-right: 1px solid var(--border); }
-        .video-wrapper { flex: 1; background: #000; border-radius: 8px; overflow: hidden; position: relative; display: flex; align-items: center; justify-content: center; }
-        .video-wrapper img { max-width: 100%; max-height: 100%; object-fit: contain; }
-        .data-col { flex: 1; padding: 10px; display: grid; grid-template-rows: 1fr 1fr; gap: 10px; overflow-y: auto; }
-        .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 15px; display: flex; flex-direction: column; gap: 10px; }
-        .card-title { font-size: 0.9rem; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid var(--border); padding-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
-        .card-fusion { border: 2px solid var(--accent); }
-        .card-fusion .card-title { color: var(--accent); font-size: 1.1rem; font-weight: bold; }
-        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); }
-        .status-dot.active { background: var(--green); }
-        .emotion-display { font-size: 1.8rem; font-weight: 900; }
-        .conf-display { font-size: 1rem; color: var(--muted); }
-        .tag { font-size: 0.75rem; padding: 2px 8px; border-radius: 4px; background: #333; }
-        .tag.agree { color: var(--green); } .tag.disagree { color: var(--orange); background: #3d3020; } .tag.au_only { color: var(--muted); }
-        .prob-bar-container { height: 6px; background: #333; border-radius: 3px; overflow: hidden; position: relative; }
-        .prob-bar { height: 100%; transition: width 0.2s ease; }
-        .prob-row { display: flex; align-items: center; gap: 10px; font-size: 0.8rem; }
-        .prob-label { width: 40px; color: var(--muted); } .prob-val { width: 40px; text-align: right; }
-        .calm-c { background: #888; } .happy-c { background: var(--green); } .sad-c { background: var(--accent); }
-        .weight-control { margin-top: auto; border-top: 1px solid var(--border); padding-top: 10px; }
-        .weight-slider { width: 100%; cursor: pointer; accent-color: var(--accent); }
-        .weight-labels { display: flex; justify-content: space-between; font-size: 0.8rem; color: var(--muted); }
-        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; font-size: 0.85rem; }
-        .info-item { background: #333; padding: 4px 8px; border-radius: 4px; }
-        .info-item span { color: var(--muted); font-size: 0.75rem; }
         
-        .bottom-panel { height: 200px; background: #252530; border-top: 1px solid var(--border); display: flex; }
-        .timeline-container { flex: 1; padding: 10px; overflow-x: auto; display: flex; align-items: center; }
-        .timeline-track { height: 30px; background: #333; border-radius: 4px; display: flex; min-width: 100%; }
-        .tl-seg { height: 100%; width: 4px; border-right: 1px solid #252530; }
-        .calib-panel { width: 320px; border-left: 1px solid var(--border); padding: 10px; overflow-y: auto; }
-        .calib-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin-top: 8px; }
-        .calib-btn { padding: 8px; border: 1px solid var(--border); background: transparent; color: var(--text); border-radius: 4px; cursor: pointer; font-size: 0.8rem; text-align: center; transition: all 0.2s; }
-        .calib-btn:hover { border-color: var(--accent); }
-        .calib-btn.done { background: rgba(79, 140, 255, 0.2); border-color: var(--accent); color: var(--accent); }
-        .calib-btn.active { background: var(--orange); color: #000; border-color: var(--orange); animation: pulse 1s infinite; }
-        @keyframes pulse { 50% { opacity: 0.7; } }
-        .calib-row-label { font-size: 0.8rem; color: var(--muted); margin-bottom: 5px; font-weight: bold; }
-        .thresholds { margin-top: 10px; display: flex; flex-direction: column; gap: 5px; font-size: 0.8rem; }
+        /* Header */
+        .header { padding: 12px 24px; background: #161b22; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+        .header h1 { font-size: 1.2rem; font-weight: 600; letter-spacing: 0.5px; }
+        .header-sub { font-size: 0.85rem; color: var(--muted); }
+        
+        /* Main container */
+        .main-container { display: flex; flex: 1; overflow: hidden; gap: 12px; padding: 12px; min-width: 0; }
+        
+        /* Left column */
+        .left-col { flex: 0 0 30%; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+        .video-wrapper { flex: 0 0 45%; background: #000; border-radius: 8px; overflow: hidden; position: relative; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 20px rgba(0,0,0,0.3); min-height: 0; }
+        .video-wrapper img { width: 100%; height: 100%; object-fit: contain; }
+        
+        /* Config panel */
+        .config-panel { flex: 1; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; min-width: 0; }
+        .config-section-title { font-size: 0.78rem; font-weight: 600; color: var(--text); margin-bottom: 6px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+        
+        /* Calibration matrix */
+        .calib-table { width: 100%; border-collapse: collapse; }
+        .calib-table th,.calib-table td{ text-align: center; padding: 4px; font-size: 12px; }
+        .calib-table th { color: var(--muted); font-weight: normal; }
+        .calib-table td.pose-label{ color: var(--muted); text-align: right; padding-right: 8px; }
+        .calib-cell { width: 50px; height: 30px; border:1px solid #30363d; border-radius:4px; background:#0d1117; color:#484f58; cursor:pointer; font-size:13px; transition:all .15s; }
+        .calib-cell:hover { border-color: var(--accent); }
+        .calib-cell.done{ background:#1a3a2a; color:#238636; border-color:#2ea043; }
+        .calib-cell.active{ background:#1c2d41; color:#58a6ff; border-color:#58a6ff; animation:pulse 1s infinite; }
+        @keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}
+        .calib-status { font-size: 12px; margin-top:6px; min-height: 16px; }
+        .calib-status.ok{ color:#238636; }
+        .calib-status.err{ color:#f85149; }
+        
+        /* Threshold and weight sliders */
+        .thresh-group { margin-bottom: 6px; }
+        .thresh-group .tg-title { font-size:12px; color:var(--muted); margin-bottom:2px; }
+        .slider-row { display:flex; align-items:center; gap:6px; margin:2px 0; font-size:11px; }
+        .slider-row label { width:40px; color:var(--muted); flex-shrink:0; text-align:right; }
+        .slider-row input[type=range] { flex:1; accent-color:var(--accent); height:14px; padding:4px 0; background:transparent; cursor:pointer; }
+        .slider-row .sv { width:28px; text-align:right; color:var(--accent); }
+        
+        /* Pitch limit */
+        .pitch-limit-row { display:flex; align-items:center; gap:8px; font-size:11px; margin-bottom:4px; }
+        .pitch-limit-row label { width:60px; color:var(--muted); font-weight:500; text-align:right; }
+        .pitch-limit-row input[type=range] { flex:1; accent-color:var(--accent); height:14px; padding:4px 0; background:transparent; cursor:pointer; }
+        .pitch-limit-row span { width:36px; text-align:right; color:var(--accent); font-weight:600; }
+        
+        /* Range slider styling for webkit */
+        input[type=range]::-webkit-slider-runnable-track {
+            height: 6px;
+            background: #30363d;
+            border-radius: 3px;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 18px;
+            width: 18px;
+            border-radius: 50%;
+            background: var(--accent);
+            margin-top: -6px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+            cursor: pointer;
+        }
+        
+        /* Range slider styling for firefox */
+        input[type=range]::-moz-range-track {
+            height: 6px;
+            background: #30363d;
+            border-radius: 3px;
+        }
+        input[type=range]::-moz-range-thumb {
+            height: 18px;
+            width: 18px;
+            border-radius: 50%;
+            background: var(--accent);
+            border: none;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+            cursor: pointer;
+        }
+        
+        /* Snapshots panel */
+        .snapshots-panel { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 12px; flex: 0 0 auto; }
+        .snapshots-container { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
+        .snapshot-item { flex: 0 0 auto; width: 70px; cursor: pointer; }
+        .snapshot-item img { width: 70px; height: 70px; object-fit: cover; border-radius: 4px; border: 2px solid transparent; transition: border-color 0.2s; }
+        .snapshot-item:hover img { border-color: var(--accent); }
+        .snapshot-emotion { text-align: center; font-size: 10px; margin-top: 2px; color: var(--muted); }
+        .snapshot-time { text-align: center; font-size: 9px; color: #6e7681; margin-top: 1px; }
+        
+        /* Button */
+        .btn-danger { background: var(--red); color: #fff; border: none; padding: 6px 10px; border-radius:4px; cursor: pointer; width: 100%; font-size: 0.75rem; font-weight:600; transition: opacity .2s; margin-top:4px; }
+        .btn-danger:hover { opacity: 0.85; }
+        
+        /* Lightbox for enlarged snapshot */
+        .lightbox { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000; justify-content: center; align-items: center; }
+        .lightbox.active { display: flex; }
+        .lightbox-content { max-width: 90%; max-height: 90%; border-radius: 8px; }
+        .lightbox-emotion { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.7); padding: 8px 16px; border-radius: 20px; color: #fff; font-size: 14px; }
+        
+        /* Scrollbar */
+        ::-webkit-scrollbar { width:6px; }
+        ::-webkit-scrollbar-track { background:#0d1117; border-radius:3px; }
+        ::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
+        ::-webkit-scrollbar-thumb:hover { background:#30363d; }
+        
+        /* Right column */
+        .right-col { flex: 0 0 70%; display: flex; flex-direction: column; gap: 12px; min-width:0; overflow:hidden; }
+        .cards-wrapper { display:flex; gap:12px; min-width:0; flex-shrink:0; }
+        .card-col { flex:1; min-width:0; }
+        .card { background: var(--card); border:1px solid var(--border); border-radius:8px; padding:10px; display:flex; flex-direction:column; gap:6px; min-width:0; }
+        .card-title { font-size: 0.78rem; color: var(--muted); text-transform:uppercase; letter-spacing:.5px; border-bottom:1px solid var(--border); padding-bottom:6px; display:flex; justify-content:space-between; align-items:center; }
+        .card-fusion { border:2px solid var(--accent); }
+        .card-fusion .card-title { color: var(--accent); font-weight:700; }
+        
+        /* Status dot */
+        .status-dot { width:9px; height:9px; border-radius:50%; background:var(--red); flex-shrink:0; }
+        .status-dot.active { background:var(--green); }
+        
+        /* Emotion display */
+        .emotion-display { font-size:1.5rem; font-weight:800; line-height:1.2; }
+        .conf-display { font-size:0.9rem; color:var(--muted); margin-left:6px; }
+        
+        /* Tags */
+        .tag { font-size:0.68rem; padding:3px 6px; border-radius:10px; background:#21262d; font-weight:600; }
+        .tag.agree { color:#238636; background:rgba(35,134,54,0.15); }
+        .tag.disagree { color:#d29922; background:rgba(210,153,34,0.15); }
+        .tag.au_only { color:var(--muted); }
+        
+        /* Probability bars */
+        .prob-bar-container { height:5px; background:#0d1117; border-radius:3px; overflow:hidden; }
+        .prob-bar { height:100%; transition:width .2s; }
+        .prob-row { display:flex; align-items:center; gap:6px; font-size:11px; }
+        .prob-label { width:36px; color:var(--muted); }
+        .prob-val { width:34px; text-align:right; color:var(--muted); }
+        .calm { background:#8b949e; }
+        .happy { background:#238636; }
+        .sad { background:#58a6ff; }
+        
+        /* Timeline area */
+        .timeline-wrapper { flex:1; display:flex; flex-direction:column; gap:8px; min-width:0; min-height:0; overflow:hidden; }
+        .timeline-card { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:8px; display:flex; flex-direction:column; min-width:0; flex:1; }
+        .tl-title { font-size:0.78rem; color:var(--muted); margin-bottom:4px; display:flex; justify-content:space-between; }
+        .tl-live { color:var(--green); font-weight:600; }
+        .timeline-track { flex:1; background:#0d1117; border-radius:4px; position:relative; overflow:hidden; min-width:0; }
+        .timeline-track-inner { display:flex; width:max-content; height:100%; transition:transform .1s; will-change:transform; }
+        .tl-seg { height:100%; width:3px; border-right:1px solid #21262d; flex-shrink:0; }
+        
+        /* Canvas chart for fusion */
+        .chart-wrap { position:relative; height:140px; min-height:0; }
+        .chart-wrap canvas { width:100%; height:100%; display:block; border-radius:4px; cursor:grab; }
+        .chart-wrap canvas:active { cursor:grabbing; }
+        .chart-live { position:absolute; top:6px; right:6px; font-size:11px; background:#238636; color:#fff; padding:2px 8px; border-radius:10px; cursor:pointer; }
+        .chart-live.hidden { display:none; }
+        .chart-reset { position:absolute; top:6px; right:50px; font-size:11px; background:#30363d; color:#c9d1d9; padding:2px 8px; border-radius:10px; cursor:pointer; border:1px solid #21262d; }
+        .chart-reset:hover { background:#3d444d; }
     </style>
 </head>
 <body>
 
 <div class="header">
     <h1>双通道情绪融合系统</h1>
-    <div style="font-size: 0.8rem; color: var(--muted);">AU (Z-Score) + FER+ (Deep Learning)</div>
+    <div class="header-sub">AU (Z-Score) + FER+ (Deep Learning)</div>
 </div>
 
 <div class="main-container">
-    <div class="video-col">
+    <!-- Left column -->
+    <div class="left-col">
         <div class="video-wrapper">
             <img src="/video_feed" alt="Video Feed">
         </div>
-        <div class="card" style="flex: 0 0 auto;">
-            <div class="card-title">AU 通道详情 <span id="calib-status" style="font-size:0.7rem; color:var(--orange);"></span></div>
-            <div class="info-grid">
-                <div class="info-item"><span>姿态</span><div id="au-pose">-</div></div>
-                <div class="info-item"><span>Pitch / Yaw</span><div id="au-angles">0° / 0°</div></div>
+        
+        <!-- Snapshots panel -->
+        <div class="snapshots-panel">
+            <div class="config-section-title">情绪快照</div>
+            <div class="snapshots-container" id="snapshots-container"></div>
+        </div>
+        
+        <div class="config-panel">
+            <!-- Calibration matrix -->
+            <div>
+                <div class="config-section-title">校准矩阵</div>
+                <table class="calib-table" id="calib-table"></table>
+                <div class="calib-status" id="calib-status"></div>
             </div>
-            <div style="font-size:0.8rem; color:var(--muted); margin-top:5px;">关键 Action Units (Top 5)</div>
-            <div id="au-bars" style="display:flex; flex-direction:column; gap:4px;"></div>
+            
+            <!-- Pitch limit -->
+            <div class="config-section-title">角度限制</div>
+            <div class="pitch-limit-row">
+                <label for="sl-pitch">俯仰角度</label>
+                <input type="range" min="15" max="60" step="1" value="45" id="sl-pitch" title="俯仰角度限制" aria-label="俯仰角度限制">
+                <span id="sv-pitch">45°</span>
+            </div>
+            
+            <!-- Thresholds per pose -->
+            <div class="config-section-title">各姿态情绪阈值</div>
+            <div id="thresh-area"></div>
+            
+            <!-- Fusion weights -->
+            <div class="config-section-title">融合权重 (AU)</div>
+            <div id="weight-area"></div>
+            
+            <button class="btn-danger" onclick="deleteAllCalib()">清空所有校准</button>
         </div>
     </div>
+    
+    <!-- Lightbox -->
+    <div class="lightbox" id="lightbox" onclick="closeLightbox()">
+        <img class="lightbox-content" id="lightbox-img">
+        <div class="lightbox-emotion" id="lightbox-emotion"></div>
+    </div>
 
-    <div class="data-col">
-        <!-- AU 卡片 -->
-        <div class="card" id="au-card">
-            <div class="card-title">AU 通道</div>
-            <div style="display:flex; align-items:baseline; gap:15px;">
-                <div class="emotion-display" id="au-emotion" style="color:var(--muted)">--</div>
-                <div class="conf-display" id="au-conf">0.00%</div>
+    <!-- Right column -->
+    <div class="right-col">
+        <!-- Three cards -->
+        <div class="cards-wrapper">
+            <!-- AU -->
+            <div class="card-col">
+                <div class="card" id="au-card">
+                    <div class="card-title">AU 通道 <span id="au-sub-info" style="font-size:0.68rem;color:var(--muted);font-weight:normal;">姿态: -</span></div>
+                    <div style="display:flex; align-items:baseline;">
+                        <div class="emotion-display" id="au-emotion" style="color:var(--muted);">--</div>
+                        <div class="conf-display" id="au-conf">0.00</div>
+                    </div>
+                    <div class="prob-row"><div class="prob-label">平静</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar calm" id="bar-au-calm" style="width:0%"></div></div><div class="prob-val" id="val-au-calm">0%</div></div>
+                    <div class="prob-row"><div class="prob-label">高兴</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar happy" id="bar-au-happy" style="width:0%"></div></div><div class="prob-val" id="val-au-happy">0%</div></div>
+                    <div class="prob-row"><div class="prob-label">沮丧</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar sad" id="bar-au-sad" style="width:0%"></div></div><div class="prob-val" id="val-au-sad">0%</div></div>
+                </div>
             </div>
-            <div class="prob-row"><div class="prob-label">平静</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar calm-c" id="au-bar-calm" style="width:0%"></div></div><div class="prob-val" id="au-val-calm">0%</div></div>
-            <div class="prob-row"><div class="prob-label">高兴</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar happy-c" id="au-bar-happy" style="width:0%"></div></div><div class="prob-val" id="au-val-happy">0%</div></div>
-            <div class="prob-row"><div class="prob-label">沮丧</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar sad-c" id="au-bar-sad" style="width:0%"></div></div><div class="prob-val" id="au-val-sad">0%</div></div>
-        </div>
-
-        <!-- FER+ 卡片 -->
-        <div class="card" id="fer-card">
-            <div class="card-title">FER+ 通道 <div class="status-dot" id="fer-face-dot"></div></div>
-            <div style="display:flex; align-items:baseline; gap:15px;">
-                <div class="emotion-display" id="fer-emotion" style="color:var(--muted)">--</div>
-                <div class="conf-display" id="fer-conf">0.00%</div>
-            </div>
-            <div class="prob-row"><div class="prob-label">平静</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar calm-c" id="fer-bar-calm" style="width:0%"></div></div><div class="prob-val" id="fer-val-calm">0%</div></div>
-            <div class="prob-row"><div class="prob-label">高兴</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar happy-c" id="fer-bar-happy" style="width:0%"></div></div><div class="prob-val" id="fer-val-happy">0%</div></div>
-            <div class="prob-row"><div class="prob-label">沮丧</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar sad-c" id="fer-bar-sad" style="width:0%"></div></div><div class="prob-val" id="fer-val-sad">0%</div></div>
-        </div>
-
-        <!-- 融合卡片 -->
-        <div class="card card-fusion" id="fusion-card">
-            <div class="card-title">融合结果 <span class="tag" id="fusion-tag">-</span></div>
-            <div style="display:flex; align-items:baseline; gap:15px;">
-                <div class="emotion-display" id="fusion-emotion" style="color:var(--muted)">--</div>
-                <div class="conf-display" id="fusion-conf">0.00%</div>
-            </div>
-            <div class="prob-row"><div class="prob-label">平静</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar calm-c" id="fus-bar-calm" style="width:0%"></div></div><div class="prob-val" id="fus-val-calm">0%</div></div>
-            <div class="prob-row"><div class="prob-label">高兴</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar happy-c" id="fus-bar-happy" style="width:0%"></div></div><div class="prob-val" id="fus-val-happy">0%</div></div>
-            <div class="prob-row"><div class="prob-label">沮丧</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar sad-c" id="fus-bar-sad" style="width:0%"></div></div><div class="prob-val" id="fus-val-sad">0%</div></div>
             
-            <div class="weight-control">
-                <div style="font-size:0.8rem; color:var(--muted); margin-bottom:5px;">融合权重调节</div>
-                <input type="range" min="0" max="100" value="60" class="weight-slider" id="weight-slider" title="调节AU与FER+融合权重">
-                <div class="weight-labels">
-                    <span>AU <strong id="w-au-lbl">60</strong>%</span>
-                    <span>FER+ <strong id="w-fer-lbl">40</strong>%</span>
+            <!-- FER+ -->
+            <div class="card-col">
+                <div class="card" id="fer-card">
+                    <div class="card-title">FER+ 通道 <div class="status-dot" id="fer-face-dot"></div></div>
+                    <div style="display:flex; align-items:baseline;">
+                        <div class="emotion-display" id="fer-emotion" style="color:var(--muted);">--</div>
+                        <div class="conf-display" id="fer-conf">0.00</div>
+                    </div>
+                    <div class="prob-row"><div class="prob-label">平静</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar calm" id="bar-fer-calm" style="width:0%"></div></div><div class="prob-val" id="val-fer-calm">0%</div></div>
+                    <div class="prob-row"><div class="prob-label">高兴</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar happy" id="bar-fer-happy" style="width:0%"></div></div><div class="prob-val" id="val-fer-happy">0%</div></div>
+                    <div class="prob-row"><div class="prob-label">沮丧</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar sad" id="bar-fer-sad" style="width:0%"></div></div><div class="prob-val" id="val-fer-sad">0%</div></div>
+                </div>
+            </div>
+            
+            <!-- Fusion -->
+            <div class="card-col">
+                <div class="card card-fusion" id="fusion-card">
+                    <div class="card-title">融合结果 <span class="tag" id="fusion-tag">--</span></div>
+                    <div style="display:flex; align-items:baseline;">
+                        <div class="emotion-display" id="fusion-emotion" style="color:var(--muted);">--</div>
+                        <div class="conf-display" id="fusion-conf">0.00</div>
+                    </div>
+                    <div class="prob-row"><div class="prob-label">平静</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar calm" id="bar-fusion-calm" style="width:0%"></div></div><div class="prob-val" id="val-fusion-calm">0%</div></div>
+                    <div class="prob-row"><div class="prob-label">高兴</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar happy" id="bar-fusion-happy" style="width:0%"></div></div><div class="prob-val" id="val-fusion-happy">0%</div></div>
+                    <div class="prob-row"><div class="prob-label">沮丧</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar sad" id="bar-fusion-sad" style="width:0%"></div></div><div class="prob-val" id="val-fusion-sad">0%</div></div>
                 </div>
             </div>
         </div>
-    </div>
-</div>
-
-<div class="bottom-panel">
-    <div class="timeline-container">
-        <div style="width:100%; margin-bottom:5px; font-size:0.8rem; color:var(--muted); display:flex; justify-content:space-between;">
-            <span>情绪时间线 (融合结果)</span><span>LIVE</span>
+        
+        <!-- Fusion chart (draggable/zoomable) -->
+        <div class="card" style="flex:0 0 auto;">
+            <div class="card-title">融合结果情绪时间曲线（拖动查看，滚轮缩放）</div>
+            <div class="chart-wrap">
+                <canvas id="fusion-chart"></canvas>
+                <div class="chart-live" id="fusion-chart-live" onclick="fusionChartLive()">LIVE</div>
+                <div class="chart-reset" id="fusion-chart-reset" onclick="resetChart()">复位</div>
+            </div>
         </div>
-        <div class="timeline-track" id="timeline-track"></div>
-    </div>
-    <div class="calib-panel">
-        <div style="font-size:0.9rem; font-weight:bold; margin-bottom:5px;">校准矩阵</div>
-        <div id="calib-matrix-container"></div>
-        <div class="thresholds">
-            <div>正面阈值 H:<span id="t-fh">2.0</span> S:<span id="t-fs">2.0</span></div>
-            <div>抬头阈值 H:<span id="t-uh">2.0</span> S:<span id="t-us">2.0</span></div>
-            <div>低头阈值 H:<span id="t-dh">1.5</span> S:<span id="t-ds">1.5</span></div>
-            <div>侧脸阈值 H:<span id="t-sh">1.5</span> S:<span id="t-ss">1.5</span></div>
-            <div style="margin-top:5px;">
-                <button onclick="fetch('/api/calibrate/delete_all', {method:'POST'}).then(()=>location.reload())" style="background:var(--red); color:#fff; border:none; padding:4px 8px; border-radius:4px; cursor:pointer; width:100%;">清空所有校准</button>
+        
+        <!-- Three timelines -->
+        <div class="timeline-wrapper">
+            <div class="timeline-card">
+                <div class="tl-title"><span>情绪时间线 (融合结果)</span><span class="tl-live">LIVE</span></div>
+                <div class="timeline-track" id="tl-fus"><div class="timeline-track-inner" id="tl-fus-inner"></div></div>
+            </div>
+            <div class="timeline-card">
+                <div class="tl-title"><span>情绪时间线 (AU)</span><span class="tl-live">LIVE</span></div>
+                <div class="timeline-track" id="tl-au"><div class="timeline-track-inner" id="tl-au-inner"></div></div>
+            </div>
+            <div class="timeline-card">
+                <div class="tl-title"><span>情绪时间线 (FER+)</span><span class="tl-live">LIVE</span></div>
+                <div class="timeline-track" id="tl-fer"><div class="timeline-track-inner" id="tl-fer-inner"></div></div>
             </div>
         </div>
     </div>
 </div>
 
 <script>
-    const EMOTIONS = ['calm', 'happy', 'sad'];
-    const COLORS = { calm: '#888', happy: '#4caf50', sad: '#4f8cff', no_face: '#f44', uncalibrated: '#ffeb3b', out_of_range: '#ff9800', speaking: '#00bcd4' };
-    const LABELS_CN = { calm: '平静', happy: '高兴', sad: '沮丧', no_face: '无人脸', uncalibrated: '未校准', out_of_range: '超出角度', speaking: '说话中' };
-    const POSES = ['front', 'up', 'down', 'side'];
-    const POSES_CN = { front: '正面', up: '抬头', down: '低头', side: '侧脸' };
-    const AU_TOP = ['AU12','AU6','AU25','AU7','AU5','AU15','AU4','AU17'];
-    const AU_CN = {AU12:'嘴角上拉',AU6:'颧骨提升',AU25:'嘴唇分开',AU7:'眼睑收紧',AU5:'上睑抬起',AU15:'嘴角下拉',AU4:'皱眉',AU17:'下巴上提'};
+const EMOTIONS = ['calm', 'happy', 'sad'];
+const COLORS = { calm:'#8b949e', happy:'#238636', sad:'#58a6ff', no_face:'#f85149', uncalibrated:'#d29922', out_of_range:'#e3722b', speaking:'#00c8ff' };
+const EMO_CN = { calm:'平静', happy:'高兴', sad:'沮丧', no_face:'无人脸', uncalibrated:'未校准', out_of_range:'超出角度', speaking:'说话中' };
+const POSES = ['front','up','down','side'];
+const POSE_CN = { front:'平视', up:'抬头', down:'低头', side:'侧脸' };
 
-    let timelineData = [];
+// Timeline data
+let tlFus = [], tlAu = [], tlFer = [];
+let chartData = [], t0 = Date.now() / 1000;
+let lastTimelineUpdate = 0; // 时间线上次更新时间
+let lastChartUpdate = 0; // 图表上次更新时间
 
-    function updateBar(prefix, scores) {
-        EMOTIONS.forEach(e => {
-            document.getElementById(`${prefix}-bar-${e}`).style.width = `${scores[e]*100}%`;
-            document.getElementById(`${prefix}-val-${e}`).innerText = `${(scores[e]*100).toFixed(0)}%`;
-        });
+// 全局状态 - 避免重新渲染导致的问题
+let currentConfig = {};
+let slidersInitialized = false;
+
+// Snapshots
+let lastSnapshotCount = 0;
+
+// Fusion chart
+const chartCanvas = document.getElementById('fusion-chart');
+const ctx = chartCanvas.getContext('2d');
+let viewEnd = 0, viewSpan = 30, autoScroll = true;
+let dragActive = false, dragX0 = 0, dragVE = 0;
+
+chartCanvas.addEventListener('mousedown', e => {
+    dragActive = true; autoScroll = false; dragX0 = e.clientX; dragVE = viewEnd;
+    document.getElementById('fusion-chart-live').classList.remove('hidden');
+});
+window.addEventListener('mousemove', e => {
+    if (!dragActive) return;
+    const dx = e.clientX - dragX0;
+    const tpp = viewSpan / chartCanvas.clientWidth;
+    viewEnd = dragVE - dx * tpp;
+});
+window.addEventListener('mouseup', () => dragActive = false);
+chartCanvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    const f = e.deltaY > 0 ? 1.15 : 0.87;
+    viewSpan = Math.max(5, Math.min(300, viewSpan * f));
+}, {passive:false});
+
+function fusionChartLive() {
+    autoScroll = true;
+    document.getElementById('fusion-chart-live').classList.add('hidden');
+}
+
+function resetChart() {
+    viewSpan = 30;  // 默认显示30秒
+    autoScroll = true;
+    document.getElementById('fusion-chart-live').classList.add('hidden');
+}
+
+// Snapshots
+async function updateSnapshots() {
+    try {
+        const res = await fetch('/api/snapshots');
+        const snaps = await res.json();
+        
+        if (snaps.length === lastSnapshotCount) return;
+        lastSnapshotCount = snaps.length;
+        
+        const container = document.getElementById('snapshots-container');
+        if (snaps.length === 0) {
+            container.innerHTML = '<div style="color:var(--muted); font-size:11px; padding:10px; text-align:center;">暂无快照</div>';
+            return;
+        }
+        
+        container.innerHTML = snaps.map(s => `
+            <div class="snapshot-item" onclick="openLightbox('${s.img}', '${s.emotion}', ${s.time})">
+                <img src="data:image/jpeg;base64,${s.img}" alt="${s.emotion}">
+                <div class="snapshot-emotion">${EMO_CN[s.emotion] || s.emotion}</div>
+                <div class="snapshot-time">${s.time}s</div>
+            </div>
+        `).join('');
+    } catch (e) {
+        console.error('Snapshot update error:', e);
+    }
+}
+
+function openLightbox(imgBase64, emotion, time) {
+    const lightbox = document.getElementById('lightbox');
+    const img = document.getElementById('lightbox-img');
+    const emotionEl = document.getElementById('lightbox-emotion');
+    
+    img.src = `data:image/jpeg;base64,${imgBase64}`;
+    emotionEl.textContent = `${EMO_CN[emotion] || emotion} · ${time}s`;
+    lightbox.classList.add('active');
+}
+
+function closeLightbox() {
+    document.getElementById('lightbox').classList.remove('active');
+}
+
+function drawFusionChart() {
+    const dpr = window.devicePixelRatio || 1;
+    const cw = chartCanvas.clientWidth, ch = chartCanvas.clientHeight;
+    chartCanvas.width = cw * dpr; chartCanvas.height = ch * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    ctx.fillStyle = '#0d1117'; ctx.fillRect(0,0,cw,ch);
+
+    const pad = {l:32, r:8, t:16, b:18};
+    const pw = cw - pad.l - pad.r, ph = ch - pad.t - pad.b;
+    const vs = viewEnd - viewSpan;
+
+    // Grid
+    ctx.strokeStyle = '#21262d'; ctx.lineWidth = .5;
+    for (let i=0;i<=4;i++){ const y=pad.t+ph*i/4; ctx.beginPath(); ctx.moveTo(pad.l,y); ctx.lineTo(pad.l+pw,y); ctx.stroke(); }
+
+    // Time ticks
+    const step = viewSpan>120?30:viewSpan>40?10:viewSpan>15?5:2;
+    ctx.fillStyle = '#484f58'; ctx.font = '9px monospace'; ctx.textAlign='center';
+    const t0_tick = Math.ceil(vs / step) * step;
+    for (let t=t0_tick; t<=viewEnd; t+=step) {
+        const x=pad.l+(t-vs)/viewSpan*pw;
+        if(x<pad.l||x>pad.l+pw) continue;
+        ctx.fillText(t+'s',x,ch-4);
+        ctx.beginPath(); ctx.moveTo(x,pad.t); ctx.lineTo(x,pad.t+ph); ctx.stroke();
     }
 
-    function updateUI(au, fer, fus) {
-        // AU
-        const auEm = au.emotion;
-        document.getElementById('au-emotion').innerText = LABELS_CN[auEm] || auEm;
-        document.getElementById('au-emotion').style.color = COLORS[auEm] || '#fff';
-        document.getElementById('au-conf').innerText = `${(au.confidence*100).toFixed(1)}%`;
-        updateBar('au', au.scores);
-        document.getElementById('au-pose').innerText = POSES_CN[au.pose] || au.pose;
-        document.getElementById('au-angles').innerText = `${au.pitch}° / ${au.yaw}°`;
-        
-        // AU Bars
-        let auHtml = '';
-        if(au.au && Object.keys(au.au).length > 0) {
-            AU_TOP.forEach(auName => {
-                const val = au.au[auName] || 0;
-                auHtml += `<div style="display:flex; align-items:center; gap:5px; font-size:0.75rem;">
-                    <span style="width:30px; color:var(--muted)">${auName}</span>
-                    <div style="flex:1; height:4px; background:#333; border-radius:2px; overflow:hidden;"><div style="height:100%; width:${val}%; background:var(--accent);"></div></div>
-                    <span style="width:25px; text-align:right;">${val.toFixed(0)}</span>
-                </div>`;
-            });
-        }
-        document.getElementById('au-bars').innerHTML = auHtml;
+    // Y labels
+    ctx.textAlign='right';
+    for (let i=0;i<=4;i++) ctx.fillText((i*25)+'%', pad.l-3, pad.t+ph*(1-i/4)+3);
 
-        // Calib Status
-        const cs = document.getElementById('calib-status');
-        if(au.calibrating) cs.innerText = `校准中: ${au.calib_pose}/${au.calib_emotion} (${au.calib_count}/30)`;
-        else cs.innerText = '';
+    // Data
+    const vis = chartData.filter(d=>d.t>=vs-1&&d.t<=viewEnd+1);
+    if (vis.length < 2) return;
+
+    const colors = {calm:'#8b949e', happy:'#238636', sad:'#58a6ff'};
+    for (const emo of EMOTIONS) {
+        ctx.strokeStyle = colors[emo]; ctx.lineWidth=1.5; ctx.beginPath();
+        let started=false;
+        for (const d of vis) {
+            const x=pad.l+(d.t-vs)/viewSpan*pw;
+            const y=pad.t+ph*(1-(d.s[emo]||0));
+            if (!started) { ctx.moveTo(x,y); started=true; } else ctx.lineTo(x,y);
+        }
+        ctx.stroke();
+    }
+
+    // Legend
+    ctx.font='10px sans-serif'; ctx.textAlign='left';
+    let lx=pad.l+4;
+    for (const [e,c] of Object.entries(colors)) {
+        ctx.fillStyle=c; ctx.fillRect(lx,pad.t+2,10,3);
+        ctx.fillText(EMO_CN[e], lx+13, pad.t+8); lx+=50;
+    }
+}
+
+// Render helpers
+function updateBar(prefix, scores) {
+    if (!scores) return;
+    EMOTIONS.forEach(e=>{
+        const bar = document.getElementById(`bar-${prefix}-${e}`);
+        const val = document.getElementById(`val-${prefix}-${e}`);
+        if(bar) bar.style.width = (scores[e]*100) + '%';
+        if(val) val.textContent = (scores[e]*100).toFixed(0) + '%';
+    });
+}
+
+let lastCalibState = {
+    calibrated: {},
+    calibPose: null,
+    calibEmo: null,
+    calibCnt: 0
+};
+
+function renderCalibTable(calibrated, calibPose, calibEmo, calibCnt) {
+    // 检查是否需要更新
+    const needsUpdate = 
+        JSON.stringify(calibrated) !== JSON.stringify(lastCalibState.calibrated) ||
+        calibPose !== lastCalibState.calibPose ||
+        calibEmo !== lastCalibState.calibEmo ||
+        calibCnt !== lastCalibState.calibCnt;
+    
+    if (!needsUpdate) return;
+    
+    // 更新状态
+    lastCalibState = {
+        calibrated: JSON.parse(JSON.stringify(calibrated || {})),
+        calibPose,
+        calibEmo,
+        calibCnt
+    };
+    
+    let h='<tr><th></th>';
+    EMOTIONS.forEach(e=>h+=`<th>${EMO_CN[e]}</th>`);
+    h+='</tr>';
+    POSES.forEach(p=>{
+        h+=`<tr><td class="pose-label">${POSE_CN[p]}</td>`;
+        EMOTIONS.forEach(e=>{
+            const done=calibrated[p]&&calibrated[p].includes(e);
+            const active=calibPose===p&&calibEmo===e;
+            let cls='calib-cell';
+            if(active) cls+=' active'; else if(done) cls+=' done';
+            const txt=active?calibCnt+'/30':(done?'✓':'—');
+            if(done && !active) {
+                h+=`<td><button class="${cls}" onclick="startCalib('${p}','${e}')" oncontextmenu="event.preventDefault(); deleteSingleCalib('${p}','${e}'); return false;" title="左键开始校准，右键删除">${txt}</button></td>`;
+            } else {
+                h+=`<td><button class="${cls}" onclick="startCalib('${p}','${e}')">${txt}</button></td>`;
+            }
+        });
+        h+='</tr>';
+    });
+    document.getElementById('calib-table').innerHTML=h;
+}
+renderCalibTable({}, null, null, 0);
+
+function deleteSingleCalib(pose, emotion) {
+    if(!confirm('确认删除 ' + POSE_CN[pose] + ' - ' + EMO_CN[emotion] + ' 的校准？')) return;
+    fetch('/api/calibrate/delete', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({pose:pose, emotion:emotion})
+    }).then(r => r.json())
+    .then(d => {
+        if(d.ok) {
+            document.getElementById('calib-status').textContent='已删除: ' + POSE_CN[pose] + ' - ' + EMO_CN[emotion];
+            document.getElementById('calib-status').className='calib-status err';
+            setTimeout(() => {document.getElementById('calib-status').textContent='';}, 2000);
+        }
+    });
+}
+
+// 初始化所有滑动条 - 只调用一次
+function initAllSliders() {
+    if (slidersInitialized) return;
+    
+    // 初始化阈值滑动条
+    let threshHtml = '';
+    POSES.forEach((p, idx)=>{
+        const hThreshId = `thresh-h-${p}`;
+        const sThreshId = `thresh-s-${p}`;
+        threshHtml += `<div class="thresh-group"><div class="tg-title">${POSE_CN[p]}</div>`;
+        threshHtml += `<div class="slider-row"><label for="${hThreshId}">高兴</label><input type="range" min="0.3" max="5" step="0.1" value="2" data-type="thresh" data-pose="${p}" data-key="h_thresh" id="${hThreshId}" title="${POSE_CN[p]}高兴阈值" aria-label="${POSE_CN[p]}高兴阈值"><span class="sv">2.0</span></div>`;
+        threshHtml += `<div class="slider-row"><label for="${sThreshId}">沮丧</label><input type="range" min="0.3" max="5" step="0.1" value="2" data-type="thresh" data-pose="${p}" data-key="s_thresh" id="${sThreshId}" title="${POSE_CN[p]}沮丧阈值" aria-label="${POSE_CN[p]}沮丧阈值"><span class="sv">2.0</span></div>`;
+        threshHtml += '</div>';
+    });
+    document.getElementById('thresh-area').innerHTML = threshHtml;
+    
+    // 初始化权重滑动条
+    let weightHtml = '';
+    POSES.forEach((p, idx)=>{
+        const weightId = `weight-${p}`;
+        weightHtml += `<div class="slider-row"><label for="${weightId}">${POSE_CN[p]}</label><input type="range" min="0" max="100" step="1" value="40" data-type="weight" data-pose="${p}" id="${weightId}" title="${POSE_CN[p]}融合权重" aria-label="${POSE_CN[p]}融合权重"><span class="sv">40%</span></div>`;
+    });
+    document.getElementById('weight-area').innerHTML = weightHtml;
+    
+    // 绑定所有滑动条事件
+    const allSliders = document.querySelectorAll('#thresh-area input[type=range], #weight-area input[type=range], #sl-pitch');
+    allSliders.forEach(slider => {
+        slider.addEventListener('input', handleSliderInput);
+        slider.addEventListener('change', handleSliderChange);
+    });
+    
+    slidersInitialized = true;
+}
+
+// 只更新界面显示 - 不从服务器获取更新
+function updateSliderDisplays(cfg) {
+    if (!slidersInitialized) return;
+    
+    currentConfig = Object.assign({}, cfg);
+    
+    // 更新阈值
+    POSES.forEach(p=>{
+        if(!cfg[p]) return;
+        
+        const hInput = document.querySelector(`#thresh-area input[data-type="thresh"][data-pose="${p}"][data-key="h_thresh"]`);
+        const sInput = document.querySelector(`#thresh-area input[data-type="thresh"][data-pose="${p}"][data-key="s_thresh"]`);
+        
+        if(hInput && hInput.nextElementSibling) {
+            hInput.value = cfg[p].h_thresh;
+            hInput.nextElementSibling.textContent = cfg[p].h_thresh.toFixed(1);
+        }
+        if(sInput && sInput.nextElementSibling) {
+            sInput.value = cfg[p].s_thresh;
+            sInput.nextElementSibling.textContent = cfg[p].s_thresh.toFixed(1);
+        }
+    });
+    
+    // 更新权重
+    const fw = cfg.fusion_weights || {front:0.4, up:0.4, down:0.4, side:0.4};
+    POSES.forEach(p=>{
+        const w = (fw[p]!==undefined) ? fw[p] : 0.4;
+        const input = document.querySelector(`#weight-area input[data-type="weight"][data-pose="${p}"]`);
+        if(input && input.nextElementSibling) {
+            input.value = w*100;
+            input.nextElementSibling.textContent = Math.round(w*100) + '%';
+        }
+    });
+    
+    // 更新俯仰角度
+    const pl = cfg.pitch_limit || 45;
+    const pitchInput = document.getElementById('sl-pitch');
+    const pitchValue = document.getElementById('sv-pitch');
+    if(pitchInput) pitchInput.value = pl;
+    if(pitchValue) pitchValue.textContent = pl+'°';
+}
+
+// 滑动条输入时只更新本地显示，不发送到服务器
+function handleSliderInput(e) {
+    const slider = e.target;
+    const val = slider.value;
+    
+    // 更新对应的显示文本
+    if (slider.nextElementSibling) {
+        if (slider.dataset.type === 'weight') {
+            slider.nextElementSibling.textContent = val + '%';
+        } else if (slider.dataset.type === 'thresh') {
+            slider.nextElementSibling.textContent = parseFloat(val).toFixed(1);
+        } else if (slider.id === 'sl-pitch') {
+            slider.nextElementSibling.textContent = val + '°';
+        }
+    }
+}
+
+// 滑动条释放时才发送到服务器
+function handleSliderChange(e) {
+    sendConfigToServer();
+}
+
+// 从当前滑动条收集配置并发送
+function sendConfigToServer() {
+    const cfg = {};
+    
+    // 收集阈值
+    POSES.forEach(p=>{
+        cfg[p] = {};
+        const hInput = document.querySelector(`#thresh-area input[data-type="thresh"][data-pose="${p}"][data-key="h_thresh"]`);
+        const sInput = document.querySelector(`#thresh-area input[data-type="thresh"][data-pose="${p}"][data-key="s_thresh"]`);
+        if(hInput) cfg[p].h_thresh = parseFloat(hInput.value);
+        if(sInput) cfg[p].s_thresh = parseFloat(sInput.value);
+    });
+    
+    // 收集权重
+    const fw = {};
+    POSES.forEach(p=>{
+        const input = document.querySelector(`#weight-area input[data-type="weight"][data-pose="${p}"]`);
+        if(input) fw[p] = parseFloat(input.value) / 100;
+    });
+    cfg.fusion_weights = fw;
+    
+    // 收集俯仰角度
+    const pitchInput = document.getElementById('sl-pitch');
+    if(pitchInput) cfg.pitch_limit = parseInt(pitchInput.value);
+    
+    // 发送到服务器
+    fetch('/api/config', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(cfg)
+    });
+}
+
+// 兼容旧的函数名
+function renderThresh(cfg) {
+    if (!slidersInitialized) initAllSliders();
+}
+function renderWeights(cfg) {
+    if (!slidersInitialized) {
+        initAllSliders();
+        updateSliderDisplays(cfg); // 初始化后立即应用配置
+    }
+}
+
+// Timeline rendering
+function updateTimeline(trackId, data, colors) {
+    const inner = document.getElementById(trackId);
+    const track = inner.parentElement;
+    inner.innerHTML = data.map(d=>`<div class="tl-seg" style="background:${colors[d.emotion]||'#333'};"></div>`).join('');
+    const offset = Math.max(0, inner.offsetWidth - track.clientWidth);
+    inner.style.transform = `translateX(-${offset}px)`;
+}
+
+// Calibration
+function startCalib(pose, emotion) {
+    fetch('/api/calibrate/start', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({pose, emotion})})
+        .then(r=>r.json())
+        .then(d=>{
+            if(d.ok){
+                document.getElementById('calib-status').textContent = `${POSE_CN[pose]} + ${EMO_CN[emotion]}（等待30帧...）`;
+                document.getElementById('calib-status').className='calib-status ok';
+            }
+        });
+}
+
+function deleteAllCalib() {
+    if (!confirm('确认清空所有校准数据？')) return;
+    fetch('/api/calibrate/delete_all', {method:'POST'}).then(r=>r.json()).then(d=>{
+        if(d.ok) {
+            document.getElementById('calib-status').textContent='已清空全部校准数据';
+            document.getElementById('calib-status').className='calib-status err';
+            setTimeout(()=>{ document.getElementById('calib-status').textContent=''; }, 2000);
+        }
+    });
+}
+
+
+
+// Main loop
+async function loop() {
+    try {
+        const [au, fer, fusion] = await Promise.all([
+            fetch('/api/status').then(r=>r.json()),
+            fetch('/api/fer').then(r=>r.json()),
+            fetch('/api/fusion').then(r=>r.json())
+        ]);
+
+        // AU
+        const auEmEl=document.getElementById('au-emotion');
+        if(auEmEl) {
+            auEmEl.textContent=EMO_CN[au.emotion]||au.emotion;
+            auEmEl.style.color=COLORS[au.emotion]||'var(--text)';
+        }
+        const auConfEl=document.getElementById('au-conf');
+        if(auConfEl) auConfEl.textContent=(au.confidence||0).toFixed(2);
+        const auSub=document.getElementById('au-sub-info');
+        if(auSub) auSub.textContent=`姿态: ${POSE_CN[au.pose]||au.pose} ${au.pitch?au.pitch+'°':''}/${au.yaw?au.yaw+'°':''}`;
+        updateBar('au', au.scores);
 
         // FER+
-        document.getElementById('fer-face-dot').className = `status-dot ${fer.has_face ? 'active' : ''}`;
-        document.getElementById('fer-card').style.opacity = fer.has_face ? '1' : '0.4';
-        document.getElementById('fer-emotion').innerText = fer.has_face ? (LABELS_CN[fer.label]||fer.label) : '--';
-        document.getElementById('fer-emotion').style.color = fer.has_face ? (COLORS[fer.label]||'#fff') : 'var(--muted)';
-        document.getElementById('fer-conf').innerText = `${(fer.conf*100).toFixed(1)}%`;
+        const ferDot=document.getElementById('fer-face-dot');
+        if(ferDot) ferDot.className='status-dot '+(fer.has_face?'active':'');
+        const ferCard=document.getElementById('fer-card');
+        if(ferCard) ferCard.style.opacity=fer.has_face?'1':'0.4';
+        const ferEmEl=document.getElementById('fer-emotion');
+        if(ferEmEl) {
+            ferEmEl.textContent=fer.has_face?(EMO_CN[fer.label]||fer.label):'--';
+            ferEmEl.style.color=fer.has_face?(COLORS[fer.label]||'var(--text)'):'var(--muted)';
+        }
+        const ferConfEl=document.getElementById('fer-conf');
+        if(ferConfEl) ferConfEl.textContent=(fer.conf||0).toFixed(2);
         updateBar('fer', fer.probs_3);
 
         // Fusion
-        const fEm = fus.emotion;
-        document.getElementById('fusion-emotion').innerText = LABELS_CN[fEm] || fEm;
-        document.getElementById('fusion-emotion').style.color = COLORS[fEm] || '#fff';
-        document.getElementById('fusion-conf').innerText = `${(fus.confidence*100).toFixed(1)}%`;
-        updateBar('fus', fus.scores);
+        const fusEmEl=document.getElementById('fusion-emotion');
+        if(fusEmEl) {
+            fusEmEl.textContent=EMO_CN[fusion.emotion]||fusion.emotion;
+            fusEmEl.style.color=COLORS[fusion.emotion]||'var(--text)';
+        }
+        const fusConfEl=document.getElementById('fusion-conf');
+        if(fusConfEl) fusConfEl.textContent=(fusion.confidence||0).toFixed(2);
+        const tagEl=document.getElementById('fusion-tag');
+        if(tagEl) {
+            tagEl.className='tag '+fusion.tag;
+            tagEl.textContent=fusion.tag==='agree'?'✓一致':(fusion.tag==='disagree'?'⚠分歧':'AU单通');
+        }
+        const fusCard=document.getElementById('fusion-card');
+        if(fusCard) fusCard.style.background=fusion.tag==='disagree'?'rgba(210,153,34,0.08)':'var(--card)';
+        const auCardEl=document.getElementById('au-card');
+        if(auCardEl) auCardEl.style.borderColor=fusion.tag==='disagree'?'var(--orange)':'var(--border)';
+        updateBar('fusion', fusion.scores);
+
+        // Update calibrate UI
+        renderCalibTable(au.calibrated||{}, au.calibrating?au.calib_pose:null, au.calibrating?au.calib_emotion:null, au.calibrating?au.calib_count:0);
+        if(au.calibrating) {
+            document.getElementById('calib-status').textContent=`校准中: ${POSE_CN[au.calib_pose]} + ${EMO_CN[au.calib_emotion]} (${au.calib_count}/30)`;
+            document.getElementById('calib-status').className='calib-status ok';
+        } else {
+            document.getElementById('calib-status').textContent='';
+        }
+
+        // 只在第一次初始化时同步配置，之后不再更新（避免干扰拖动）
+        if (!slidersInitialized && au.config) {
+            renderWeights(au.config); // renderWeights会初始化滑动条并应用配置
+        }
+
+        // Timelines - 每秒更新不超过10次
+        const now = Date.now();
+        tlFus.push({emotion:fusion.emotion});
+        tlAu.push({emotion:au.emotion});
+        tlFer.push({emotion:fer.label});
+        if(tlFus.length>300) tlFus.shift();
+        if(tlAu.length>300) tlAu.shift();
+        if(tlFer.length>300) tlFer.shift();
         
-        const tagEl = document.getElementById('fusion-tag');
-        tagEl.className = `tag ${fus.tag}`;
-        tagEl.innerText = fus.tag === 'agree' ? '✓ 一致' : fus.tag === 'disagree' ? '⚠ 分歧' : fus.tag === 'au_only' ? 'AU 单通道' : LABELS_CN[fus.tag] || fus.tag;
+        if(now - lastTimelineUpdate > 100) { // 100ms = 10fps
+            updateTimeline('tl-fus-inner', tlFus, COLORS);
+            updateTimeline('tl-au-inner', tlAu, COLORS);
+            updateTimeline('tl-fer-inner', tlFer, COLORS);
+            lastTimelineUpdate = now;
+        }
         
-        document.getElementById('fusion-card').style.background = fus.tag === 'disagree' ? '#332b20' : 'var(--card)';
-        document.getElementById('au-card').style.borderColor = fus.tag === 'disagree' ? 'var(--orange)' : 'var(--border)';
-
-        // Timeline
-        timelineData.push(fus);
-        if(timelineData.length > 600) timelineData.shift();
-        const track = document.getElementById('timeline-track');
-        track.innerHTML = timelineData.map(d => `<div class="tl-seg" style="background:${COLORS[d.emotion] || '#333'}"></div>`).join('');
-        track.scrollLeft = track.scrollWidth;
-
-        // Calib Matrix UI
-        const cal = au.calibrated || {};
-        const calActive = au.calibrating ? `${au.calib_pose}_${au.calib_emotion}` : null;
-        let matrixHtml = '';
-        POSES.forEach(p => {
-            matrixHtml += `<div class="calib-row-label">${POSES_CN[p]}</div><div class="calib-grid">`;
-            EMOTIONS.forEach(e => {
-                const key = `${p}_${e}`;
-                const isDone = cal[p] && cal[p].includes(e);
-                const isActive = key === calActive;
-                matrixHtml += `<button class="calib-btn ${isDone?'done':''} ${isActive?'active':''}" onclick="startCalib('${p}','${e}')">${LABELS_CN[e]}</button>`;
-            });
-            matrixHtml += `</div>`;
-        });
-        document.getElementById('calib-matrix-container').innerHTML = matrixHtml;
-
-        // Thresholds UI
-        const cfg = au.config || {};
-        document.getElementById('t-fh').innerText = cfg.front?.h_thresh;
-        document.getElementById('t-fs').innerText = cfg.front?.s_thresh;
-        document.getElementById('t-uh').innerText = cfg.up?.h_thresh;
-        document.getElementById('t-us').innerText = cfg.up?.s_thresh;
-        document.getElementById('t-dh').innerText = cfg.down?.h_thresh;
-        document.getElementById('t-ds').innerText = cfg.down?.s_thresh;
-        document.getElementById('t-sh').innerText = cfg.side?.h_thresh;
-        document.getElementById('t-ss').innerText = cfg.side?.s_thresh;
-
-        // Weight Slider Sync
-        const w = cfg.fusion_au_weight || 0.6;
-        document.getElementById('weight-slider').value = w * 100;
-        document.getElementById('w-au-lbl').innerText = (w*100).toFixed(0);
-        document.getElementById('w-fer-lbl').innerText = ((1-w)*100).toFixed(0);
+        // Chart data - 每秒更新不超过15次
+        const t = Date.now()/1000 - t0;
+        chartData.push({t, s: fusion.scores});
+        if(chartData.length>600) chartData.shift();
+        if(autoScroll) viewEnd = t;
+        
+        if(now - lastChartUpdate > 67) { // 67ms ≈15fps
+            drawFusionChart();
+            lastChartUpdate = now;
+        }
+        
+        // Snapshots update
+        updateSnapshots();
+    } catch(e) {
+        console.error('API Error',e);
     }
-
-    async function startCalib(pose, emotion) {
-        await fetch('/api/calibrate/start', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({pose, emotion})
-        });
-    }
-
-    // Weight Slider Event
-    document.getElementById('weight-slider').addEventListener('change', async function() {
-        const val = this.value / 100;
-        document.getElementById('w-au-lbl').innerText = (val*100).toFixed(0);
-        document.getElementById('w-fer-lbl').innerText = ((1-val)*100).toFixed(0);
-        await fetch('/api/config', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({fusion_au_weight: val})
-        });
-    });
-
-    // Main Loop
-    async function loop() {
-        try {
-            const [au, fer, fus] = await Promise.all([
-                fetch('/api/status').then(r => r.json()),
-                fetch('/api/fer').then(r => r.json()),
-                fetch('/api/fusion').then(r => r.json())
-            ]);
-            updateUI(au, fer, fus);
-        } catch(e) { console.error(e); }
-    }
-    setInterval(loop, 200);
-    loop();
-
+}
+setInterval(loop,250);
+loop();
 </script>
 </body>
 </html>

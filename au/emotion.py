@@ -58,26 +58,68 @@ class FaceDetector:
 
 class SpeechDetector:
     def __init__(self):
-        self.history = deque(maxlen=30); self.speaking = False; self._spk_cnt = 0; self._quiet_cnt = 0
+        self.lip_open_history = deque(maxlen=40)
+        self.lip_width_history = deque(maxlen=40)
+        self.speaking = False
+        self._spk_cnt = 0
+        self._quiet_cnt = 0
+        self._last_lip_open = 0.0
+
     def update(self, lm):
         eye_dist = max(np.linalg.norm(lm[33][:2] - lm[263][:2]), 1.0)
         lip_open = abs(lm[14][1] - lm[13][1]) / eye_dist
-        self.history.append(lip_open)
-        if len(self.history) < 16: return False
-        arr = np.array(self.history); recent = arr[-24:]
-        kernel = np.ones(5) / 5; smoothed = np.convolve(recent, kernel, mode='valid')
-        sm_range = np.max(smoothed) - np.min(smoothed)
-        if sm_range < 0.02: raw = False
+        lip_width = abs(lm[61][0] - lm[291][0]) / eye_dist
+        self.lip_open_history.append(lip_open)
+        self.lip_width_history.append(lip_width)
+        
+        if len(self.lip_open_history) < 20:
+            self._last_lip_open = lip_open
+            return False
+        
+        open_arr = np.array(self.lip_open_history)
+        width_arr = np.array(self.lip_width_history)
+        
+        recent_open = open_arr[-20:]
+        recent_width = width_arr[-20:]
+        
+        kernel = np.ones(5) / 5
+        smooth_open = np.convolve(recent_open, kernel, mode='valid')
+        smooth_width = np.convolve(recent_width, kernel, mode='valid')
+        
+        open_range = np.max(smooth_open) - np.min(smooth_open)
+        width_range = np.max(smooth_width) - np.min(smooth_width)
+        
+        if open_range < 0.035:
+            raw = False
         else:
-            sm_mean = np.mean(smoothed); centered = smoothed - sm_mean; crossings = 0
-            for i in range(1, len(centered)):
-                if centered[i] * centered[i-1] < 0: crossings += 1
-            energy = np.mean(np.abs(centered))
-            raw = crossings >= 2 and energy > 0.01
-        if raw: self._spk_cnt += 1; self._quiet_cnt = 0
-        else: self._quiet_cnt += 1; self._spk_cnt = 0
-        if self._spk_cnt >= 3: self.speaking = True
-        elif self._quiet_cnt >= 8: self.speaking = False
+            open_mean = np.mean(smooth_open)
+            open_centered = smooth_open - open_mean
+            crossings = 0
+            for i in range(1, len(open_centered)):
+                if open_centered[i] * open_centered[i-1] < 0:
+                    crossings += 1
+            
+            open_energy = np.mean(np.abs(open_centered))
+            width_energy = np.mean(np.abs(np.diff(smooth_width)))
+            
+            raw = (crossings >= 3 and open_energy > 0.018) or \
+                  (crossings >= 2 and open_energy > 0.025 and width_energy > 0.008)
+        
+        lip_velocity = abs(lip_open - self._last_lip_open)
+        self._last_lip_open = lip_open
+        
+        if raw and lip_velocity > 0.005:
+            self._spk_cnt += 1
+            self._quiet_cnt = 0
+        else:
+            self._quiet_cnt += 1
+            self._spk_cnt = 0
+        
+        if self._spk_cnt >= 5:
+            self.speaking = True
+        elif self._quiet_cnt >= 8:
+            self.speaking = False
+        
         return self.speaking
 
 class FaceSelector:
@@ -173,7 +215,7 @@ class EmotionMapper:
         self.config = {
             'front': {'h_thresh': 2.0, 's_thresh': 2.0}, 'up': {'h_thresh': 2.0, 's_thresh': 2.0},
             'down': {'h_thresh': 1.5, 's_thresh': 1.5}, 'side': {'h_thresh': 1.5, 's_thresh': 1.5},
-            'pitch_limit': 30, 'fusion_au_weight': 0.6  # 新增：融合权重配置化
+            'pitch_limit': 45, 'fusion_weights': {'front': 0.4, 'up': 0.4, 'down': 0.4, 'side': 0.4}
         }
         self.last_emotion = 'calm'; self.switch_cnt = 0
         self.persist_path = persist_path or os.path.join(os.path.dirname(__file__),'data','baselines.json')
@@ -195,6 +237,10 @@ class EmotionMapper:
                     if k in self.config:
                         if isinstance(self.config[k], dict) and isinstance(v, dict): self.config[k].update(v)
                         else: self.config[k] = v
+                # 向后兼容：从旧的fusion_au_weight迁移到新的fusion_weights
+                if 'fusion_au_weight' in d['_config'] and 'fusion_weights' not in d['_config']:
+                    old_w = d['_config']['fusion_au_weight']
+                    self.config['fusion_weights'] = {p: old_w for p in POSES}
         except Exception as ex: print(f"[Mapper] 加载失败: {ex}")
     def _save(self):
         try:
@@ -347,11 +393,17 @@ class FERSmoother:
 class EmotionEngine:
     def __init__(self):
         self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640); self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        self.cap.set(cv2.CAP_PROP_FPS, 30)
         
         # AU 组件
-        self.det = FaceDetector(); self.face_sel = FaceSelector(); self.speech_det = SpeechDetector()
-        self.pose_est = PoseEstimator(); self.au_ext = AUExtractor()
+        self.det = FaceDetector()
+        self.face_sel = FaceSelector()
+        self.speech_det = SpeechDetector()
+        self.pose_est = PoseEstimator()
+        self.au_ext = AUExtractor()
         persist = os.path.join(os.path.dirname(__file__),'data','baselines.json')
         self.mapper = EmotionMapper(history=30, persist_path=persist)
         
@@ -362,30 +414,98 @@ class EmotionEngine:
         # Both threads may process slightly different frames (≤1 frame drift).
         # Acceptable because each channel has its own smoothing window.
         self.raw_frame = None
+        self.last_landmarks = None  # 保存最新的人脸关键点
         
         self.lock = threading.Lock(); self.running = False
         self.annotated = None
-        self.t0 = time.time(); self._fc_au = 0; self._fc_fer = 2 # 错开2帧
+        self.t0 = time.time(); self._fc_au = 0; self._fc_fer = 2
         
         self.au_result = {'emotion':'no_face','confidence':0.,'scores':{'calm':0,'happy':0,'sad':0},'pose':'-','pitch':0,'yaw':0,'roll':0,'au':{},'speaking':False,'calibrating':False,'calib_pose':None,'calib_emotion':None,'calib_count':0}
         self.fer_result = {'label':'calm','conf':0.0,'probs_3':{'calm':0,'happy':0,'sad':0},'has_face':False}
+        
+        # 画面快照缓存（最近5次）
+        self.snapshots = deque(maxlen=5)
+        self.prev_emotion = None
+        self.last_snap_time = 0  # 上次快照时间
 
     def grab_loop(self):
         if not self.cap.isOpened(): return
         self.running = True
+        frame_count = 0
         while self.running:
-            ret, frame = self.cap.read()
-            if not ret: time.sleep(0.01); continue
-            self.raw_frame = frame
-            ann = frame.copy()
-            au_em = self.au_result.get('emotion', 'no_face')
-            fer_lb = self.fer_result.get('label', '-')
-            clr = {'happy':(0,255,0),'sad':(0,0,255),'calm':(128,128,128),'no_face':(0,0,255),'uncalibrated':(0,255,255),'out_of_range':(0,165,255),'speaking':(0,200,255)}
-            c = clr.get(au_em,(128,128,128))
-            cv2.putText(ann, f"AU:{au_em} FER+:{fer_lb}", (10, ann.shape[0]-20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200,200,200), 1)
-            r, buf = cv2.imencode('.jpg', ann, [cv2.IMWRITE_JPEG_QUALITY, 80])
-            if r: self.annotated = buf.tobytes()
-            time.sleep(0.01)
+            try:
+                ret, frame = self.cap.read()
+                if not ret:
+                    time.sleep(0.01)
+                    continue
+                
+                frame_count += 1
+                self.raw_frame = frame
+                ann = frame.copy()
+                
+                # 渲染人脸框和landmarks
+                lm = self.last_landmarks
+                if lm is not None:
+                    # 画人脸框
+                    xs, ys = lm[:, 0], lm[:, 1]
+                    x1, x2 = int(xs.min()), int(xs.max())
+                    y1, y2 = int(ys.min()), int(ys.max())
+                    # 稍微放大一点框
+                    pad = int(0.1 * (x2 - x1))
+                    x1, x2 = max(0, x1 - pad), min(frame.shape[1], x2 + pad)
+                    y1, y2 = max(0, y1 - pad), min(frame.shape[0], y2 + pad)
+                    
+                    cv2.rectangle(ann, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    
+                    # 画关键特征点
+                    for i in KP_IDX:
+                        px, py = int(lm[i, 0]), int(lm[i, 1])
+                        cv2.circle(ann, (px, py), 2, (0, 255, 0), -1)
+                
+                try:
+                    with self.lock:
+                        au_em = self.au_result.get('emotion', 'no_face')
+                        fer_lb = self.fer_result.get('label', '-')
+                except:
+                    au_em = 'no_face'
+                    fer_lb = '-'
+                
+                clr = {'happy':(0,255,0),'sad':(0,0,255),'calm':(128,128,128),'no_face':(0,0,255),'uncalibrated':(0,255,255),'out_of_range':(0,165,255),'speaking':(0,200,255)}
+                c = clr.get(au_em, (128,128,128))
+                cv2.putText(ann, f"AU:{au_em} FER+:{fer_lb}", (10, ann.shape[0]-20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200,200,200), 1)
+                
+                # 快照逻辑：情绪变化立即捕捉，否则0.5s捕捉一次
+                now = time.time()
+                should_snap = False
+                
+                # 情绪变化立即捕捉（排除无效情绪）
+                if au_em != self.prev_emotion and au_em not in ('no_face', 'uncalibrated', 'out_of_range', 'speaking'):
+                    should_snap = True
+                # 情绪不变时，每0.5秒捕捉一次
+                elif now - self.last_snap_time >= 0.5 and au_em not in ('no_face', 'uncalibrated', 'out_of_range'):
+                    should_snap = True
+                
+                if should_snap:
+                    snap_buf = cv2.imencode('.jpg', ann, [cv2.IMWRITE_JPEG_QUALITY, 70])[1].tobytes()
+                    with self.lock:
+                        elapsed = round(now - self.t0, 1)
+                        self.snapshots.append({
+                            'img': base64.b64encode(snap_buf).decode(),
+                            'emotion': au_em,
+                            'time': elapsed,
+                            'timestamp': now
+                        })
+                    self.prev_emotion = au_em
+                    self.last_snap_time = now
+                
+                r, buf = cv2.imencode('.jpg', ann, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                if r:
+                    with self.lock:
+                        self.annotated = buf.tobytes()
+                time.sleep(0.01)
+            except Exception as e:
+                print(f"[Grab Loop Error]: {e}")
+                time.sleep(0.1)
 
     def au_loop(self):
         lm_cache = None
@@ -397,6 +517,7 @@ class EmotionEngine:
                     lm_list = self.det.process(frame)
                     lm = self.face_sel.select(lm_list, frame.shape) if lm_list else None
                     lm_cache = (lm_list, lm)
+                    self.last_landmarks = lm  # 保存最新的landmarks
                     res = dict(self.au_result)
                     if lm is not None:
                         speaking = self.speech_det.update(lm)
@@ -418,7 +539,7 @@ class EmotionEngine:
             frame = self.raw_frame
             if frame is not None:
                 self._fc_fer += 1
-                if self._fc_fer % 4 == 3: # 错开AU的1
+                if self._fc_fer % 4 == 3:
                     aligned = self.fer_align.align(frame)
                     if aligned is not None:
                         label, conf, probs_8 = self.fer_det.predict(aligned)
@@ -434,13 +555,13 @@ class EmotionEngine:
     def get_fusion(self):
         au = self.au_result; fer = self.fer_result
         em = au.get('emotion')
-        # 门控：AU无效时直接透传
         if em in ('no_face', 'out_of_range', 'speaking', 'uncalibrated'):
             return {**au, 'tag': em, 'au_raw': em, 'fer_raw': fer.get('label', '-')}
         if not fer.get('has_face'):
             return {**au, 'tag': 'au_only', 'au_raw': em, 'fer_raw': '-'}
         
-        w_au = self.mapper.config.get('fusion_au_weight', 0.6)
+        pose = au.get('pose', 'front')
+        w_au = self.mapper.config.get('fusion_weights', {}).get(pose, 0.4)
         w_fer = 1.0 - w_au
         au_scores = au.get('scores', {'calm':0,'happy':0,'sad':0})
         fer_probs = fer.get('probs_3', {'calm':0,'happy':0,'sad':0})
@@ -486,9 +607,45 @@ threading.Thread(target=engine.fer_loop, daemon=True).start()
 def index(): return open(os.path.join(SCRIPT_DIR, "emotion.html"), encoding="utf-8").read()
 
 def gen():
+    last_frame = None
+    frame_timeout = 0
+    consecutive_errors = 0
     while True:
-        if engine.annotated: yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"+engine.annotated+b"\r\n"
-        time.sleep(0.03)
+        try:
+            current_frame = None
+            # 使用超时机制获取帧
+            with engine.lock:
+                current_frame = engine.annotated
+            
+            if current_frame:
+                last_frame = current_frame
+                frame_timeout = 0
+                consecutive_errors = 0
+                yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + current_frame + b"\r\n"
+            elif last_frame:
+                frame_timeout += 1
+                if frame_timeout < 30:
+                    yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + last_frame + b"\r\n"
+                else:
+                    # 超时后发送空帧提示
+                    yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + last_frame + b"\r\n"
+            else:
+                # 等待帧准备
+                frame_timeout += 1
+                if frame_timeout > 100:
+                    frame_timeout = 0
+                time.sleep(0.01)
+                continue
+                
+        except Exception as e:
+            consecutive_errors += 1
+            if consecutive_errors < 10:
+                print(f"[Video Feed Error {consecutive_errors}]: {e}")
+            time.sleep(0.05)
+            if last_frame:
+                yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + last_frame + b"\r\n"
+            continue
+        time.sleep(0.02)  # 约50fps，减少CPU占用
 @app.route("/video_feed")
 def video_feed(): return Response(gen(), mimetype="multipart/x-mixed-replace; boundary=frame")
 
@@ -520,6 +677,11 @@ def calib_delete():
 @app.route("/api/calibrate/delete_all", methods=["POST"])
 def calib_delete_all():
     engine.mapper.delete_all_baselines(); return jsonify({"ok": True})
+
+@app.route("/api/snapshots")
+def api_snapshots():
+    with engine.lock:
+        return jsonify(list(engine.snapshots))
 
 if __name__ == "__main__":
     try: app.run(host="0.0.0.0", port=5000, debug=False, threaded=True, use_reloader=False)
