@@ -109,6 +109,13 @@
         .btn-danger { background: var(--red); color: #fff; border: none; padding: 6px 10px; border-radius:4px; cursor: pointer; width: 100%; font-size: 0.75rem; font-weight:600; transition: opacity .2s; margin-top:4px; }
         .btn-danger:hover { opacity: 0.85; }
         
+        .toggle-switch { position: relative; display: inline-block; width: 44px; height: 24px; }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .toggle-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #555; transition: .3s; border-radius: 24px; }
+        .toggle-slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; transition: .3s; border-radius: 50%; }
+        .toggle-switch input:checked + .toggle-slider { background-color: var(--accent); }
+        .toggle-switch input:checked + .toggle-slider:before { transform: translateX(20px); }
+        
         /* Lightbox for enlarged snapshot */
         .lightbox { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000; justify-content: center; align-items: center; }
         .lightbox.active { display: flex; }
@@ -194,6 +201,18 @@
         </div>
         
         <div class="config-panel">
+            <!-- Mode Toggle -->
+            <div class="config-section-title">模式切换</div>
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+                <span style="font-size:0.75rem;color:var(--muted);">Base (Z-Score)</span>
+                <label class="toggle-switch" for="mode-toggle">
+                    <input type="checkbox" id="mode-toggle" onchange="handleModeToggle(this)" title="切换Base/Profiles模式" aria-label="切换情绪识别模式">
+                    <span class="toggle-slider"></span>
+                </label>
+                <span style="font-size:0.75rem;color:var(--muted);">Profiles</span>
+            </div>
+            <div id="mode-status" style="font-size:0.7rem;color:var(--muted);margin-bottom:10px;"></div>
+            
             <!-- Calibration matrix -->
             <div>
                 <div class="config-section-title">校准矩阵</div>
@@ -216,6 +235,10 @@
             <!-- Fusion weights -->
             <div class="config-section-title">融合权重 (AU)</div>
             <div id="weight-area"></div>
+            
+            <!-- FER+ Bias -->
+            <div class="config-section-title">FER+ 敏感度 (Bias)</div>
+            <div id="fer-bias-area"></div>
             
             <button class="btn-danger" onclick="deleteAllCalib()">清空所有校准</button>
         </div>
@@ -252,10 +275,11 @@
                     <div style="display:flex; align-items:baseline;">
                         <div class="emotion-display" id="fer-emotion" style="color:var(--muted);">--</div>
                         <div class="conf-display" id="fer-conf">0.00</div>
+                        <span id="fer-original" style="font-size:0.75rem; color:var(--muted); margin-left:8px;">| 原始: <span id="fer-original-label">--</span></span>
                     </div>
-                    <div class="prob-row"><div class="prob-label">中性</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar neutral" id="bar-fer-neutral" style="width:0%"></div></div><div class="prob-val" id="val-fer-neutral">0%</div></div>
-                    <div class="prob-row"><div class="prob-label">积极</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar positive" id="bar-fer-positive" style="width:0%"></div></div><div class="prob-val" id="val-fer-positive">0%</div></div>
-                    <div class="prob-row"><div class="prob-label">消极</div><div class="prob-bar-container" style="flex:1"><div class="prob-bar negative" id="bar-fer-negative" style="width:0%"></div></div><div class="prob-val" id="val-fer-negative">0%</div></div>
+                    <div class="prob-row"><div class="prob-label">中性</div><div class="prob-bar-container" style="flex:1;"><div class="prob-bar neutral" id="bar-fer-neutral" style="width:0%"></div></div><div class="prob-val" id="val-fer-neutral">0%</div></div>
+                    <div class="prob-row"><div class="prob-label">积极</div><div class="prob-bar-container" style="flex:1;"><div class="prob-bar positive" id="bar-fer-positive" style="width:0%"></div></div><div class="prob-val" id="val-fer-positive">0%</div></div>
+                    <div class="prob-row"><div class="prob-label">消极</div><div class="prob-bar-container" style="flex:1;"><div class="prob-bar negative" id="bar-fer-negative" style="width:0%"></div></div><div class="prob-val" id="val-fer-negative">0%</div></div>
                 </div>
             </div>
             
@@ -304,6 +328,17 @@
 
 <script>
 const EMOTIONS = ['neutral', 'positive', 'negative'];
+const FER_LABELS_8 = ['neutral', 'happiness', 'surprise', 'sadness', 'anger', 'disgust', 'fear', 'contempt'];
+const FER_LABELS_CN = {
+    neutral: '中性',
+    happiness: '开心',
+    surprise: '惊讶',
+    sadness: '悲伤',
+    anger: '愤怒',
+    disgust: '厌恶',
+    fear: '恐惧',
+    contempt: '轻蔑'
+};
 const COLORS = { neutral:'#8b949e', positive:'#238636', negative:'#58a6ff', no_face:'#f85149', uncalibrated:'#d29922', out_of_range:'#e3722b', speaking:'#00c8ff' };
 const EMO_CN = { neutral:'中性', positive:'积极', negative:'消极', no_face:'无人脸', uncalibrated:'未校准', out_of_range:'超出角度', speaking:'说话中' };
 const POSES = ['front','up','down','side'];
@@ -490,7 +525,7 @@ function drawFusionChart() {
     const vis = chartData.filter(d=>d.t>=vs-1&&d.t<=viewEnd+1);
     if (vis.length < 2) return;
 
-    const colors = {calm:'#8b949e', happy:'#238636', sad:'#58a6ff'};
+    const colors = {neutral:'#8b949e', positive:'#238636', negative:'#58a6ff'};
     for (const emo of EMOTIONS) {
         ctx.strokeStyle = colors[emo]; ctx.lineWidth=1.5; ctx.beginPath();
         let started=false;
@@ -610,8 +645,16 @@ function initAllSliders() {
     });
     document.getElementById('weight-area').innerHTML = weightHtml;
     
+    // 初始化 FER+ bias 滑动条
+    let ferBiasHtml = '';
+    FER_LABELS_8.forEach(label=>{
+        const biasId = `fer-bias-${label}`;
+        ferBiasHtml += `<div class="slider-row"><label for="${biasId}" style="min-width:50px;">${FER_LABELS_CN[label]}</label><input type="range" min="-50" max="50" step="5" value="0" data-type="fer-bias" data-label="${label}" id="${biasId}"><span class="sv">0</span></div>`;
+    });
+    document.getElementById('fer-bias-area').innerHTML = ferBiasHtml;
+    
     // 绑定所有滑动条事件
-    const allSliders = document.querySelectorAll('#thresh-area input[type=range], #weight-area input[type=range], #sl-pitch');
+    const allSliders = document.querySelectorAll('#thresh-area input[type=range], #weight-area input[type=range], #sl-pitch, #fer-bias-area input[type=range]');
     allSliders.forEach(slider => {
         slider.addEventListener('input', handleSliderInput);
         slider.addEventListener('change', handleSliderChange);
@@ -660,9 +703,63 @@ function updateSliderDisplays(cfg) {
     const pitchValue = document.getElementById('sv-pitch');
     if(pitchInput) pitchInput.value = pl;
     if(pitchValue) pitchValue.textContent = pl+'°';
+    
+    // 更新 FER+ bias
+    const ferBias = cfg.fer_bias || {};
+    FER_LABELS_8.forEach(label=>{
+        const input = document.querySelector(`#fer-bias-area input[data-type="fer-bias"][data-label="${label}"]`);
+        if(input && input.nextElementSibling) {
+            const val = (ferBias[label] !== undefined) ? ferBias[label] * 100 : 0;
+            input.value = val;
+            input.nextElementSibling.textContent = Math.round(val);
+        }
+    });
 }
 
 // 滑动条输入时只更新本地显示，不发送到服务器
+function handleModeToggle(checkbox) {
+    const newMode = checkbox.checked ? 'profiles' : 'base';
+    fetch('/api/config', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({mode: newMode})
+    }).then(r => r.json()).then(d => {
+        if (d.ok) {
+            updateModeStatus();
+        }
+    });
+}
+
+function updateModeStatus() {
+    fetch('/api/profile').then(r => r.json()).then(d => {
+        const toggle = document.getElementById('mode-toggle');
+        const status = document.getElementById('mode-status');
+        if (toggle) toggle.checked = (d.mode === 'profiles');
+        if (status) {
+            if (d.mode === 'profiles') {
+                if (d.has_profiles) {
+                    const counts = [];
+                    for (const pose in d.profiles) {
+                        for (const emo in d.profiles[pose]) {
+                            if (d.profiles[pose][emo].loaded) {
+                                counts.push(`${pose}/${emo}:${d.profiles[pose][emo].count}`);
+                            }
+                        }
+                    }
+                    status.innerHTML = `Profiles模式 已加载 (${counts.join(', ')})`;
+                    status.style.color = 'var(--accent)';
+                } else {
+                    status.innerHTML = `Profiles模式 无模板数据，切回Base模式`;
+                    status.style.color = 'var(--red)';
+                }
+            } else {
+                status.innerHTML = `Base模式 (Z-Score校准)`;
+                status.style.color = 'var(--muted)';
+            }
+        }
+    });
+}
+
 function handleSliderInput(e) {
     const slider = e.target;
     const val = slider.value;
@@ -709,6 +806,14 @@ function sendConfigToServer() {
     const pitchInput = document.getElementById('sl-pitch');
     if(pitchInput) cfg.pitch_limit = parseInt(pitchInput.value);
     
+    // 收集 FER+ bias
+    const ferBias = {};
+    FER_LABELS_8.forEach(label=>{
+        const input = document.querySelector(`#fer-bias-area input[data-type="fer-bias"][data-label="${label}"]`);
+        if(input) ferBias[label] = parseFloat(input.value) / 100;
+    });
+    cfg.fer_bias = ferBias;
+    
     // 发送到服务器
     fetch('/api/config', {
         method: 'POST',
@@ -720,6 +825,7 @@ function sendConfigToServer() {
 // 兼容旧的函数名
 function renderThresh(cfg) {
     if (!slidersInitialized) initAllSliders();
+    updateModeStatus();
 }
 function renderWeights(cfg) {
     if (!slidersInitialized) {
@@ -780,7 +886,7 @@ async function loop() {
         const auConfEl=document.getElementById('au-conf');
         if(auConfEl) auConfEl.textContent=(au.confidence||0).toFixed(2);
         const auSub=document.getElementById('au-sub-info');
-        if(auSub) auSub.textContent=`姿态: ${POSE_CN[au.pose]||au.pose} ${au.pitch?au.pitch+'°':''}/${au.yaw?au.yaw+'°':''}`;
+        if(auSub) auSub.textContent=`${au.pose?POSE_CN[au.pose]:'--'} ${au.pitch?au.pitch+'°':''} | ${au.matching_method||''}`;
         updateBar('au', au.scores);
 
         // FER+
@@ -795,6 +901,12 @@ async function loop() {
         }
         const ferConfEl=document.getElementById('fer-conf');
         if(ferConfEl) ferConfEl.textContent=(fer.conf||0).toFixed(2);
+        // 更新原始情绪标签
+        const ferOriginalLabel = document.getElementById('fer-original-label');
+        if(ferOriginalLabel) {
+            ferOriginalLabel.textContent = fer.has_face && fer.original_label ? FER_LABELS_CN[fer.original_label] : '--';
+        }
+        // 更新3类情绪概率条
         updateBar('fer', fer.probs_3);
 
         // Fusion
@@ -828,6 +940,8 @@ async function loop() {
         // 只在第一次初始化时同步配置，之后不再更新（避免干扰拖动）
         if (!slidersInitialized && au.config) {
             renderWeights(au.config); // renderWeights会初始化滑动条并应用配置
+            // 同时更新模式状态
+            updateModeStatus();
         }
 
         // Timelines - 每秒更新不超过10次
