@@ -104,6 +104,7 @@
         .snapshot-neutral img { border-color: #8b949e; }
         .snapshot-positive img { border-color: #238636; }
         .snapshot-negative img { border-color: #58a6ff; }
+        .snapshot-speaking img { border-color: #00c8ff; }
         
         /* Button */
         .btn-danger { background: var(--red); color: #fff; border: none; padding: 6px 10px; border-radius:4px; cursor: pointer; width: 100%; font-size: 0.75rem; font-weight:600; transition: opacity .2s; margin-top:4px; }
@@ -490,7 +491,7 @@ function drawFusionChart() {
     const vis = chartData.filter(d=>d.t>=vs-1&&d.t<=viewEnd+1);
     if (vis.length < 2) return;
 
-    const colors = {calm:'#8b949e', happy:'#238636', sad:'#58a6ff'};
+    const colors = {neutral:'#8b949e', positive:'#238636', negative:'#58a6ff'};
     for (const emo of EMOTIONS) {
         ctx.strokeStyle = colors[emo]; ctx.lineWidth=1.5; ctx.beginPath();
         let started=false;
