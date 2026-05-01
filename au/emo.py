@@ -17,6 +17,7 @@ from au_net.MEFL import MEFARG
 
 POSES = ['front', 'up', 'down', 'side']
 EMOTIONS = ['neutral', 'positive', 'negative']
+AU_SHOW = ['AU12','AU6','AU25','AU7','AU5','AU15','AU4','AU17','AU1','AU9']
 
 POSE_AU_SUBSET = {
     'front': ['AU1', 'AU2', 'AU4', 'AU5', 'AU6', 'AU7', 'AU9', 'AU10', 'AU12', 'AU15', 'AU17', 'AU25'],
@@ -24,6 +25,273 @@ POSE_AU_SUBSET = {
     'down': ['AU1', 'AU2', 'AU4', 'AU5', 'AU7', 'AU15'],
     'side': ['AUL1', 'AUR1', 'AUL2', 'AUR2', 'AUL6', 'AUR6', 'AU5', 'AU7', 'AU25']
 }
+
+class DynamicBaselineManager:
+    def __init__(self, window_size=150, lock_duration=150):
+        import threading
+        self.window_size = window_size
+        self.lock_duration = lock_duration  # 姿态切换锁定帧数 (约5秒)
+        self._lock = threading.Lock()  # 线程安全锁
+        
+        # AU缓冲区 - 纯滚动窗口
+        self.au_buffers = {
+            pose: {au: deque(maxlen=window_size) for au in AU_SHOW}
+            for pose in POSES
+        }
+        
+        # 当前姿态和锁定状态
+        self.current_pose = 'front'
+        self.pose_lock_frames = 0  # 剩余锁定帧数
+        self.last_pose = 'front'
+        
+        # 情绪历史队列（用于稳定性判定）
+        self.emotion_history = deque(maxlen=15)
+        
+        # 上次稳定情绪（用于避免闪烁
+        self.last_stable_emotion = 'neutral'
+        
+        # 校准状态
+        self.calibrating = False
+        self.calibration_buffer = []
+        self.calibration_target_count = 60
+        self.calibration_pose = 'front'
+        
+        # 个性化阈值参数（基于标准差）
+        self.sensitivity_k = 1.5  # 灵敏度系数
+        self.au_std = {pose: {au: 3.0 for au in AU_SHOW} for pose in POSES}
+        
+        self.pose_au_weights = {
+            'front': {'AU12': 1.0, 'AU6': 1.0, 'AU25': 0.8, 'AU7': 0.9, 'AU5': 0.9, 'AU15': 1.0, 'AU4': 0.8, 'AU17': 0.7, 'AU1': 0.5, 'AU9': 0.4},
+            'up': {'AU12': 0.3, 'AU6': 0.3, 'AU25': 0.5, 'AU7': 1.0, 'AU5': 1.0, 'AU15': 0.8, 'AU4': 1.0, 'AU17': 0.6, 'AU1': 1.0, 'AU9': 0.3},
+            'down': {'AU12': 0.2, 'AU6': 0.2, 'AU25': 0.4, 'AU7': 1.0, 'AU5': 1.0, 'AU15': 0.5, 'AU4': 1.0, 'AU17': 0.4, 'AU1': 1.0, 'AU9': 0.3},
+            'side': {'AU12': 0.1, 'AU6': 0.1, 'AU25': 0.6, 'AU7': 0.9, 'AU5': 0.9, 'AU15': 0.3, 'AU4': 0.7, 'AU17': 0.5, 'AU1': 0.6, 'AU9': 0.4}
+        }
+    
+    def set_pose(self, new_pose):
+        """检测姿态切换，设置锁定（避免边界抖动导致永久锁定）"""
+        if new_pose != self.current_pose:
+            # 避免边界抖动（从A切到B，又马上切回A）
+            if new_pose == self.last_pose and self.pose_lock_frames > 0:
+                # 取消锁定，恢复原来的姿态，不清空缓冲区
+                self.pose_lock_frames = 0
+                self.current_pose = self.last_pose
+                return
+            # 正常切换到全新的新姿态
+            self.last_pose = self.current_pose
+            self.current_pose = new_pose
+            self.pose_lock_frames = self.lock_duration
+            # 切换姿态时清空该姿态的缓冲区（冷启动）
+            for au in self.au_buffers[new_pose]:
+                self.au_buffers[new_pose][au].clear()
+    
+    def is_locked(self):
+        """检查是否处于姿态锁定状态"""
+        return self.pose_lock_frames > 0
+    
+    def get_lock_progress(self):
+        """获取锁定剩余进度 (0.0 ~ 1.0)"""
+        return 1.0 - (self.pose_lock_frames / self.lock_duration) if self.pose_lock_frames > 0 else 1.0
+    
+    def start_calibration(self, pose='front', count=60):
+        with self._lock:
+            self.calibrating = True
+            self.calibration_buffer = []
+            self.calibration_target_count = count
+            self.calibration_pose = pose
+        return True
+    
+    def feed_calibration(self, au_dict):
+        with self._lock:
+            if not self.calibrating:
+                return 0
+            if not au_dict:
+                return len(self.calibration_buffer)
+            self.calibration_buffer.append(au_dict.copy())
+            return len(self.calibration_buffer)
+    
+    def finish_calibration(self):
+        with self._lock:
+            if len(self.calibration_buffer) < 20:
+                self.calibrating = False
+                return False
+
+            # 计算平静状态下的标准差
+            for au in AU_SHOW:
+                values = [buf.get(au, 0.0) for buf in self.calibration_buffer]
+                self.au_std[self.calibration_pose][au] = float(np.std(values)) if len(values) > 1 else 3.0
+
+            # 【关键修复】把校准数据转移到 au_buffers，建立初始基线
+            for au_dict in self.calibration_buffer:
+                for au, val in au_dict.items():
+                    if au in self.au_buffers[self.calibration_pose]:
+                        self.au_buffers[self.calibration_pose][au].append(val)
+
+            self.calibrating = False
+            self.calibration_buffer = []
+            return True
+    
+    def reset(self):
+        """重置所有状态（线程安全）"""
+        with self._lock:
+            for pose in self.au_buffers:
+                for au in self.au_buffers[pose]:
+                    self.au_buffers[pose][au].clear()
+            self.current_pose = 'front'
+            self.pose_lock_frames = 0
+            self.last_pose = 'front'
+            self.emotion_history.clear()
+            self.last_stable_emotion = 'neutral'
+            self.calibrating = False
+            self.calibration_buffer = []
+            self.au_std = {pose: {au: 3.0 for au in AU_SHOW} for pose in POSES}
+    
+    def is_calibrating(self):
+        with self._lock:
+            return self.calibrating
+    
+    def get_calibration_progress(self):
+        with self._lock:
+            return len(self.calibration_buffer) / self.calibration_target_count
+    
+    def update(self, pose, au_dict, current_emotion='neutral'):
+        """更新缓冲区 - 只在中性情绪期间更新，避免基线毒化"""
+        if pose not in self.au_buffers or not au_dict:
+            return
+        
+        # 如果是锁定期间，只收集数据不更新判定基线
+        if self.pose_lock_frames > 0:
+            self.pose_lock_frames -= 1
+            # 锁定期间也收集数据，但标记为临时
+            for au, val in au_dict.items():
+                if au in self.au_buffers[pose]:
+                    self.au_buffers[pose][au].append(val)
+            return
+        
+        # 只在中性情绪期间更新基线（防止情绪帧污染基线）
+        if current_emotion == 'neutral':
+            for au, val in au_dict.items():
+                if au in self.au_buffers[pose]:
+                    self.au_buffers[pose][au].append(val)
+            
+            # 更新标准差（使用指数移动平均）
+            if len(self.au_buffers[pose]['AU12']) >= 30:
+                for au in AU_SHOW:
+                    if au in au_dict:
+                        old_std = self.au_std[pose][au]
+                        new_std = float(np.std(list(self.au_buffers[pose][au])))
+                        self.au_std[pose][au] = old_std * 0.9 + new_std * 0.1
+    
+    def get_baseline(self, pose):
+        """获取当前姿态的基线（使用滚动窗口中位数）"""
+        if pose not in self.au_buffers:
+            return {au: 0.0 for au in AU_SHOW}
+        
+        baseline = {}
+        for au, buffer in self.au_buffers[pose].items():
+            if len(buffer) < 10:
+                baseline[au] = 0.0
+            else:
+                baseline[au] = np.percentile(buffer, 25)
+        
+        return baseline
+    
+    def get_weighted_deviation(self, pose, au_dict):
+        """计算加权偏差（只乘以权重，不除以标准差）"""
+        baseline = self.get_baseline(pose)
+        weights = self.pose_au_weights.get(pose, {})
+        
+        dev = {}
+        for au, val in au_dict.items():
+            weight = weights.get(au, 1.0)
+            baseline_val = baseline.get(au, 0.0)
+            
+            # 计算偏离值（原始偏差，不标准化）
+            raw_dev = val - baseline_val
+            dev[au] = raw_dev * weight
+        
+        return dev
+    
+    def add_emotion_history(self, emotion):
+        """添加情绪到历史队列"""
+        self.emotion_history.append(emotion)
+    
+    def get_stable_emotion(self):
+        """获取稳定情绪（需要连续3帧相同才确认，否则保持上一个稳定情绪）"""
+        if len(self.emotion_history) < 3:
+            return self.last_stable_emotion, 0.5
+        
+        # 统计最近几帧
+        recent = list(self.emotion_history)[-5:]
+        counts = {e: recent.count(e) for e in EMOTIONS}
+        
+        # 找到出现最多的情绪
+        best_emo = max(counts, key=counts.get)
+        count = counts[best_emo]
+        
+        # 需要至少3帧一致，且压倒其他情绪
+        if count >= 3 and count > (len(recent) - count):
+            confidence = count / len(recent)
+            self.last_stable_emotion = best_emo
+            return best_emo, confidence
+        
+        # 无法确定新情绪，保持上一个稳定情绪
+        return self.last_stable_emotion, 0.5
+
+
+def decide_emotion_by_deviation(dev, au_std=None, pose='front'):
+    """基于个性化标准差的情绪判定"""
+    if au_std is None:
+        au_std = {au: 3.0 for au in AU_SHOW}
+    
+    # 使用姿态权重
+    weights = {
+        'front': {'AU12': 1.0, 'AU6': 1.0, 'AU25': 0.8, 'AU7': 0.5, 'AU5': 0.5, 'AU15': 1.0, 'AU4': 1.0, 'AU17': 0.5, 'AU1': 0.3, 'AU9': 0.2},
+        'down': {'AU12': 0.2, 'AU6': 0.2, 'AU25': 0.4, 'AU7': 1.0, 'AU5': 1.0, 'AU15': 0.5, 'AU4': 1.0, 'AU17': 0.4, 'AU1': 1.0, 'AU9': 0.3},
+        'up': {'AU12': 0.3, 'AU6': 0.3, 'AU25': 0.5, 'AU7': 1.0, 'AU5': 1.0, 'AU15': 0.8, 'AU4': 1.0, 'AU17': 0.6, 'AU1': 1.0, 'AU9': 0.3},
+        'side': {'AU12': 0.1, 'AU6': 0.1, 'AU25': 0.6, 'AU7': 0.9, 'AU5': 0.9, 'AU15': 0.3, 'AU4': 0.7, 'AU17': 0.5, 'AU1': 0.6, 'AU9': 0.4}
+    }.get(pose, {au: 1.0 for au in AU_SHOW})
+    
+    positive_score = 0.0
+    negative_score = 0.0
+    
+    for au in ['AU12', 'AU6', 'AU25']:
+        w = weights.get(au, 1.0)
+        std_val = au_std.get(au, 3.0)
+        dev_val = max(dev.get(au, 0.0), 0)
+        if std_val > 0.5:
+            positive_score += (dev_val / std_val) * w
+    
+    for au in ['AU4', 'AU15', 'AU1']:
+        w = weights.get(au, 1.0)
+        std_val = au_std.get(au, 3.0)
+        dev_val = max(dev.get(au, 0.0), 0)
+        if std_val > 0.5:
+            negative_score += (dev_val / std_val) * w
+    
+    scores = {
+        'neutral': 1.0,
+        'positive': positive_score,
+        'negative': negative_score
+    }
+    
+    # 使用个性化阈值：偏离超过1.5倍标准差才判定为情绪
+    pos_threshold = 1.5
+    neg_threshold = 1.5
+    
+    if positive_score > pos_threshold and positive_score > negative_score:
+        best = 'positive'
+        confidence = min(positive_score / (pos_threshold * 3), 1.0)
+    elif negative_score > neg_threshold and negative_score > positive_score:
+        best = 'negative'
+        confidence = min(negative_score / (neg_threshold * 3), 1.0)
+    else:
+        best = 'neutral'
+        max_score = max(positive_score, negative_score)
+        confidence = max(1.0 - (max_score / (pos_threshold * 2)), 0.3)
+    
+    total = sum(scores.values()) + 1e-8
+    normalized_scores = {e: scores[e] / total for e in EMOTIONS}
+    return best, confidence, normalized_scores
 
 class ProfileMatcher:
     def __init__(self, profile_path=None):
@@ -355,7 +623,9 @@ class AUExtractor:
         return enhanced.astype(np.float32)/255.0
     def _align(self, frame, lm):
         src = np.array([lm[i][:2] for i in MP5], dtype=np.float32); M = cv2.estimateAffinePartial2D(src, ALIGN_DST)[0]
-        if M is None: return None
+        if M is None: 
+            print(f"[AU Align] estimateAffinePartial2D 失败，src={src.tolist() if len(src) > 0 else 'empty'}")
+            return None
         return cv2.warpAffine(frame, M, (self.sz, self.sz), flags=cv2.INTER_LANCZOS4)
     def predict(self, frame, lm):
         if lm is None: return None
@@ -585,7 +855,7 @@ class GlobalConfig:
                 self.data = {}
         if not self.data:
             self.data = {
-                'mode': 'profiles',
+                'mode': 'dynamic',
                 'fusion_weights': {p: 0.4 for p in POSES},
                 'pitch_limit': 45,
                 'thresholds': {
@@ -632,6 +902,9 @@ class EmotionEngine:
         
         # 轮廓向量匹配器
         self.profile_matcher = ProfileMatcher()
+        
+        # 动态基线管理器
+        self.dynamic_baseline = DynamicBaselineManager()
         
         # 全局配置
         self.gcfg = GlobalConfig()
@@ -744,6 +1017,10 @@ class EmotionEngine:
 
     def au_loop(self):
         lm_cache = None
+        au_cache = None  # 缓存 au 结果
+        pitch_cache, yaw_cache, roll_cache = 0, 0, 0
+        pose_cache = 'front'
+        speaking_cache = False
         
         while self.running:
             frame = self.raw_frame
@@ -753,32 +1030,107 @@ class EmotionEngine:
                 if self._fc_au % 2 == 0 and lm_cache is not None:
                     self.speech_det.update(lm_cache)
                 
+                # 每帧都初始化 res
+                res = dict(self.au_result)
+                
+                # 每4帧中的第1帧检测新人脸
                 if self._fc_au % 4 == 1:
                     lm_list = self.det.process(frame)
                     lm = self.face_sel.select(lm_list, frame.shape) if lm_list else None
                     lm_cache = lm
                     self.last_landmarks = lm
-                    res = dict(self.au_result)
+                    
                     if lm is not None:
-                        speaking = self.speech_det.update(lm)
-                        pitch, yaw, roll = self.pose_est.estimate(frame, lm)
-                        au = self.au_ext.predict(frame, lm)
-                        
-                        if self.mapper.calibrating and au:
-                            cp, ce = self.mapper.calibrating; cnt = self.mapper.feed_calib(au)
-                            res.update(calibrating=True, calib_pose=cp, calib_emotion=ce, calib_count=cnt)
-                            if cnt >= CALIB_N: self.mapper.finish_calib(cp, ce); res['calibrating']=False
-                        
-                        has_profiles = bool(self.profile_matcher.profiles)
-                        mode = self.gcfg.get('mode', 'profiles')
-                        if mode == 'profiles' and has_profiles and au:
-                            pose, emotion, conf, scores = self.profile_matcher.predict(au, pitch, yaw, speaking=speaking)
-                            res['matching_method'] = 'profile'
-                        else:
-                            pose, emotion, conf, scores = self.mapper.predict(au, pitch, yaw, speaking=speaking)
-                            res['matching_method'] = 'zscore' if mode == 'base' else 'profile_no_data'
-                        
-                        res.update(pose=pose, emotion=emotion, confidence=round(conf,3), pitch=round(pitch,1), yaw=round(yaw,1), roll=round(roll,1), scores={k:round(v,3) for k,v in scores.items()}, au={k:round(v,1) for k,v in au.items()} if au else {}, speaking=speaking)
+                        speaking_cache = self.speech_det.update(lm)
+                        pitch_cache, yaw_cache, roll_cache = self.pose_est.estimate(frame, lm)
+                        au_cache = self.au_ext.predict(frame, lm)
+                        pose_cache = EmotionMapper.get_pose(pitch_cache, yaw_cache)
+                        self.dynamic_baseline.set_pose(pose_cache)
+                
+                # 每帧都检查并处理动态校准！！！（关键修复）
+                # 使用缓存的 lm, au, pose
+                mode = self.gcfg.get('mode', 'dynamic')
+                if mode == 'dynamic' and self.dynamic_baseline.is_calibrating():
+                    print(f"[DEBUG] 帧 {self._fc_au}: 在校准模式中, lm_cache={lm_cache is not None}, au_cache={au_cache is not None}")
+                    
+                    if au_cache is not None:
+                        cnt = self.dynamic_baseline.feed_calibration(au_cache)
+                        self._calib_fail_cnt = 0
+                        print(f"[DEBUG] 帧 {self._fc_au}: feed_calibration, cnt={cnt}")
+                    else:
+                        self._calib_fail_cnt = getattr(self, '_calib_fail_cnt', 0) + 1
+                        cnt = self.dynamic_baseline.get_calibration_progress() * self.dynamic_baseline.calibration_target_count
+                        if self._calib_fail_cnt >= 30:
+                            self.dynamic_baseline.finish_calibration()
+                            res['calibrating'] = False
+                            res['calib_error'] = '无法提取面部动作单元，请检查光照或摄像头'
+                            print(f"[DEBUG] 帧 {self._fc_au}: 校准超时失败")
+                    
+                    res['calibrating'] = True
+                    res['calib_pose'] = self.dynamic_baseline.calibration_pose
+                    res['calib_emotion'] = 'neutral'
+                    progress = self.dynamic_baseline.get_calibration_progress()
+                    res['calib_progress'] = round(progress*100,1)
+                    res['calib_count'] = int(cnt)
+                    
+                    # 【关键修复】记录校准完成状态（在 res.update 之前）
+                    calib_done = self.dynamic_baseline.calibration_target_count and cnt >= self.dynamic_baseline.calibration_target_count
+
+                    if calib_done:
+                        self.dynamic_baseline.finish_calibration()
+                        self._calib_fail_cnt = 0
+                        print(f"[DEBUG] 帧 {self._fc_au}: 校准完成！！！")
+
+                    # 在校准期间，总是更新 res
+                    emotion, conf, scores = 'neutral', 0.5, {'neutral':1.0, 'positive':0, 'negative':0}
+                    res.update(
+                        pose=pose_cache, emotion=emotion, confidence=round(conf,3),
+                        pitch=round(pitch_cache,1), yaw=round(yaw_cache,1), roll=round(roll_cache,1),
+                        scores={k:round(v,3) for k,v in scores.items()},
+                        au={k:round(v,1) for k,v in au_cache.items()} if au_cache else {},
+                        speaking=speaking_cache
+                    )
+
+                    # 【关键修复】在 res.update 之后设置校准状态
+                    res['calibrating'] = self.dynamic_baseline.is_calibrating()
+                    if calib_done:
+                        res['calib_done'] = True
+
+                    # 【关键修复】必须更新 self.au_result，否则 API 永远返回旧状态
+                    self.au_result = res
+
+                # 如果不是在校准模式，才正常每4帧处理一次完整逻辑
+                elif self._fc_au % 4 == 1:
+                    if lm_cache is not None:
+                        mode = self.gcfg.get('mode', 'dynamic')
+                        if mode == 'dynamic':
+                            # 检查是否处于姿态锁定期间
+                            if self.dynamic_baseline.is_locked():
+                                self.dynamic_baseline.update(pose_cache, au_cache, 'neutral')
+                                lock_progress = self.dynamic_baseline.get_lock_progress()
+                                res['locked'] = True
+                                res['lock_progress'] = round(lock_progress * 100, 1)
+                                res['matching_method'] = 'dynamic_locked'
+                                emotion, conf, scores = 'neutral', 0.3, {'neutral':1.0, 'positive':0, 'negative':0}
+                                res.update(pose=pose_cache, emotion=emotion, confidence=round(conf,3), pitch=round(pitch_cache,1), yaw=round(yaw_cache,1), roll=round(roll_cache,1), scores={k:round(v,3) for k,v in scores.items()}, au={k:round(v,1) for k,v in au_cache.items()} if au_cache else {}, speaking=speaking_cache)
+                            # 【关键修复】说话时停止情绪判定，输出 speaking 状态
+                            elif speaking_cache:
+                                res['matching_method'] = 'speaking'
+                                res['locked'] = False
+                                res['lock_progress'] = 100.0
+                                emotion, conf, scores = 'speaking', 0.0, {'neutral':1.0, 'positive':0, 'negative':0}
+                                res.update(pose=pose_cache, emotion=emotion, confidence=round(conf,3), pitch=round(pitch_cache,1), yaw=round(yaw_cache,1), roll=round(roll_cache,1), scores={k:round(v,3) for k,v in scores.items()}, au={k:round(v,1) for k,v in au_cache.items()} if au_cache else {}, speaking=speaking_cache)
+                            else:
+                                dev = self.dynamic_baseline.get_weighted_deviation(pose_cache, au_cache)
+                                raw_emotion, raw_conf, raw_scores = decide_emotion_by_deviation(dev, self.dynamic_baseline.au_std.get(pose_cache, {}), pose_cache)
+                                self.dynamic_baseline.add_emotion_history(raw_emotion)
+                                emotion, conf = self.dynamic_baseline.get_stable_emotion()
+                                self.dynamic_baseline.update(pose_cache, au_cache, emotion)
+                                scores = raw_scores
+                                res['matching_method'] = 'dynamic'
+                                res['locked'] = False
+                                res['lock_progress'] = 100.0
+                                res.update(pose=pose_cache, emotion=emotion, confidence=round(conf,3), pitch=round(pitch_cache,1), yaw=round(yaw_cache,1), roll=round(roll_cache,1), scores={k:round(v,3) for k,v in scores.items()}, au={k:round(v,1) for k,v in au_cache.items()} if au_cache else {}, speaking=speaking_cache)
                     else:
                         res.update(emotion='no_face', au={}, scores={'neutral':0,'positive':0,'negative':0}, speaking=False)
                     self.au_result = res
@@ -854,19 +1206,25 @@ class EmotionEngine:
         
         pose = au.get('pose', 'front')
         w_au = self.mapper.config.get('fusion_weights', {}).get(pose, 0.4)
-        w_fer = 1.0 - w_au
-        au_scores = au.get('scores', {'calm':0,'happy':0,'sad':0})
-        fer_probs = fer.get('probs_3', {'calm':0,'happy':0,'sad':0})
         
-        fused_raw = {e: au_scores[e]*w_au + fer_probs[e]*w_fer for e in EMOTIONS}
+        # 非正脸时降低FER+权重（FER+在非正脸时输出噪声）
+        if pose != 'front':
+            w_au = min(w_au + 0.3, 0.9)  # AU权重提高，最多0.9
+        w_fer = 1.0 - w_au
+        
+        au_scores = au.get('scores', {'neutral':0,'positive':0,'negative':0})
+        fer_probs = fer.get('probs_3', {'neutral':0,'positive':0,'negative':0})
+        
+        fused_raw = {e: au_scores.get(e, 0)*w_au + fer_probs.get(e, 0)*w_fer for e in EMOTIONS}
         total = sum(fused_raw.values()) + 1e-8
         fused_norm = {e: v/total for e, v in fused_raw.items()}
         
         best = max(fused_norm, key=fused_norm.get)
         conf = fused_norm[best]
         au_best = max(au_scores, key=au_scores.get)
-        fer_best = fer.get('label', 'calm')
+        fer_best = fer.get('label', 'neutral')
         
+        # 一致性判定
         tag = 'agree' if au_best == fer_best else 'disagree'
         if tag == 'agree': conf = min(conf * 1.15, 0.98)
         else: conf = conf * 0.65
@@ -976,7 +1334,7 @@ def api_profile():
     return jsonify({
         'has_profiles': has_profiles,
         'profiles': profile_info,
-        'mode': engine.gcfg.get('mode', 'profiles')
+        'mode': engine.gcfg.get('mode', 'dynamic')
     })
 
 @app.route("/api/fer")
@@ -997,9 +1355,29 @@ def api_profile_realtime():
         'available_profiles': engine.profile_matcher.get_available_profiles()
     })
 
+@app.route("/api/calibrate/dynamic/start", methods=["POST"])
+def calib_dynamic_start():
+    d = request.get_json() or {}
+    pose = d.get('pose', 'front')
+    count = d.get('count', 60)
+    engine.dynamic_baseline.start_calibration(pose, count)
+    return jsonify({"ok": True})
+
+@app.route("/api/calibrate/dynamic/status")
+def calib_dynamic_status():
+    return jsonify({
+        'calibrating': engine.dynamic_baseline.is_calibrating(),
+        'progress': engine.dynamic_baseline.get_calibration_progress()
+    })
+
+@app.route("/api/calibrate/dynamic/reset", methods=["POST"])
+def calib_dynamic_reset():
+    engine.dynamic_baseline.reset()
+    return jsonify({"ok": True})
+
 @app.route("/api/calibrate/start", methods=["POST"])
 def calib_start():
-    d = request.get_json() or {}; return jsonify({"ok": engine.start_calib(d.get("pose","front"), d.get("emotion","calm"))})
+    d = request.get_json() or {}; return jsonify({"ok": engine.start_calib(d.get("pose","front"), d.get("emotion","neutral"))})
 
 @app.route("/api/config", methods=["GET","POST"])
 def api_config():
@@ -1013,7 +1391,7 @@ def api_config():
         if p in thresholds:
             cfg[p] = thresholds[p]
     # 添加其他配置
-    cfg['mode'] = engine.gcfg.get('mode', 'profiles')
+    cfg['mode'] = engine.gcfg.get('mode', 'dynamic')
     cfg['fusion_weights'] = engine.gcfg.get('fusion_weights', {p: 0.4 for p in POSES})
     cfg['pitch_limit'] = engine.gcfg.get('pitch_limit', 45)
     cfg['thresholds'] = thresholds
@@ -1022,7 +1400,7 @@ def api_config():
 
 @app.route("/api/calibrate/delete", methods=["POST"])
 def calib_delete():
-    d = request.get_json() or {}; return jsonify({"ok": engine.mapper.delete_baseline(d.get("pose","front"), d.get("emotion","calm"))})
+    d = request.get_json() or {}; return jsonify({"ok": engine.mapper.delete_baseline(d.get("pose","front"), d.get("emotion","neutral"))})
 
 @app.route("/api/calibrate/delete_all", methods=["POST"])
 def calib_delete_all():

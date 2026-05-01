@@ -512,7 +512,7 @@ class FERDetector:
         else: print(f"[FER+] 权重缺失: {model_path}")
 
     def predict(self, aligned_64):
-        if self.net is None: return "calm", 0.0, np.zeros(8)
+        if self.net is None: return "neutral", 0.0, np.zeros(8)
         try:
             gray = cv2.cvtColor(aligned_64, cv2.COLOR_BGR2GRAY)
             blob = gray.astype(np.float32).reshape(1, 1, 64, 64)
@@ -562,7 +562,7 @@ class FERSmoother:
     def __init__(self, window=5): self.window = deque(maxlen=window)
     def update(self, label, probs_3):
         self.window.append((label, probs_3))
-        if not self.window: return "calm", 0.0, {'calm':0, 'happy':0, 'sad':0}
+        if not self.window: return "neutral", 0.0, {'neutral':1,'positive':0,'negative':0}
         counts = {}
         for l, _ in self.window: counts[l] = counts.get(l, 0) + 1
         best = max(counts, key=counts.get)
@@ -664,8 +664,8 @@ class EmotionEngine:
         self.annotated = None
         self.t0 = time.time(); self._fc_au = 0; self._fc_fer = 2
         
-        self.au_result = {'emotion':'no_face','confidence':0.,'scores':{'calm':0,'happy':0,'sad':0},'pose':'-','pitch':0,'yaw':0,'roll':0,'au':{},'speaking':False,'calibrating':False,'calib_pose':None,'calib_emotion':None,'calib_count':0}
-        self.fer_result = {'label':'calm','conf':0.0,'probs_3':{'calm':0,'happy':0,'sad':0},'has_face':False}
+        self.au_result = {'emotion':'no_face','confidence':0.,'scores':{'neutral':1,'positive':0,'negative':0},'pose':'-','pitch':0,'yaw':0,'roll':0,'au':{},'speaking':False,'calibrating':False,'calib_pose':None,'calib_emotion':None,'calib_count':0}
+        self.fer_result = {'label':'neutral','conf':0.0,'probs_3':{'neutral':1,'positive':0,'negative':0},'has_face':False,'original_label':None,'probs_8':{},'biased_probs_8':{}}
         
         # 画面快照缓存（最近20次）
         self.snapshots = deque(maxlen=20)
@@ -855,8 +855,8 @@ class EmotionEngine:
         pose = au.get('pose', 'front')
         w_au = self.mapper.config.get('fusion_weights', {}).get(pose, 0.4)
         w_fer = 1.0 - w_au
-        au_scores = au.get('scores', {'calm':0,'happy':0,'sad':0})
-        fer_probs = fer.get('probs_3', {'calm':0,'happy':0,'sad':0})
+        au_scores = au.get('scores', {'neutral':1,'positive':0,'negative':0})
+        fer_probs = fer.get('probs_3', {'neutral':1,'positive':0,'negative':0})
         
         fused_raw = {e: au_scores[e]*w_au + fer_probs[e]*w_fer for e in EMOTIONS}
         total = sum(fused_raw.values()) + 1e-8
@@ -865,7 +865,7 @@ class EmotionEngine:
         best = max(fused_norm, key=fused_norm.get)
         conf = fused_norm[best]
         au_best = max(au_scores, key=au_scores.get)
-        fer_best = fer.get('label', 'calm')
+        fer_best = fer.get('label', 'neutral')
         
         tag = 'agree' if au_best == fer_best else 'disagree'
         if tag == 'agree': conf = min(conf * 1.15, 0.98)
@@ -912,7 +912,7 @@ threading.Thread(target=engine.au_loop, daemon=True).start()
 threading.Thread(target=engine.fer_loop, daemon=True).start()
 
 @app.route("/")
-def index(): return open(os.path.join(SCRIPT_DIR, "emo.html"), encoding="utf-8").read()
+def index(): return open(os.path.join(SCRIPT_DIR, "emo1.html"), encoding="utf-8").read()
 
 def gen():
     last_frame = None
@@ -999,7 +999,7 @@ def api_profile_realtime():
 
 @app.route("/api/calibrate/start", methods=["POST"])
 def calib_start():
-    d = request.get_json() or {}; return jsonify({"ok": engine.start_calib(d.get("pose","front"), d.get("emotion","calm"))})
+    d = request.get_json() or {}; return jsonify({"ok": engine.start_calib(d.get("pose","front"), d.get("emotion","neutral"))})
 
 @app.route("/api/config", methods=["GET","POST"])
 def api_config():
@@ -1022,7 +1022,7 @@ def api_config():
 
 @app.route("/api/calibrate/delete", methods=["POST"])
 def calib_delete():
-    d = request.get_json() or {}; return jsonify({"ok": engine.mapper.delete_baseline(d.get("pose","front"), d.get("emotion","calm"))})
+    d = request.get_json() or {}; return jsonify({"ok": engine.mapper.delete_baseline(d.get("pose","front"), d.get("emotion","neutral"))})
 
 @app.route("/api/calibrate/delete_all", methods=["POST"])
 def calib_delete_all():
