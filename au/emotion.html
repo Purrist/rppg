@@ -307,8 +307,8 @@
 const EMOTIONS = ['neutral', 'positive', 'negative'];
 const COLORS = { neutral:'#8b949e', positive:'#238636', negative:'#58a6ff', no_face:'#f85149', uncalibrated:'#d29922', out_of_range:'#e3722b', speaking:'#00c8ff' };
 const EMO_CN = { neutral:'中性', positive:'积极', negative:'消极', no_face:'无人脸', uncalibrated:'未校准', out_of_range:'超出角度', speaking:'说话中' };
-const POSES = ['front','up','down','side'];
-const POSE_CN = { front:'平视', up:'抬头', down:'低头', side:'侧脸' };
+const POSES = ['front','up','down','side_left','side_right'];
+const POSE_CN = { front:'平视', up:'抬头', down:'低头', side_left:'左侧脸', side_right:'右侧脸' };
 
 // Timeline data
 let tlFus = [], tlAu = [], tlFer = [];
@@ -645,7 +645,7 @@ function updateSliderDisplays(cfg) {
     });
     
     // 更新权重
-    const fw = cfg.fusion_weights || {front:0.4, up:0.4, down:0.4, side:0.4};
+    const fw = cfg.fusion_weights || {front:0.4, up:0.4, down:0.4, side_left:0.4, side_right:0.4};
     POSES.forEach(p=>{
         const w = (fw[p]!==undefined) ? fw[p] : 0.4;
         const input = document.querySelector(`#weight-area input[data-type="weight"][data-pose="${p}"]`);

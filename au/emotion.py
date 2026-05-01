@@ -28,7 +28,7 @@ _MEAN = np.array([0.485,0.456,0.406], dtype=np.float32)
 _STD = np.array([0.229,0.224,0.225], dtype=np.float32)
 MP5 = [33, 263, 1, 61, 291]
 KP_IDX = [1,33,133,159,145,263,362,386,374,61,291,13,14,152,105,334,55,285]
-POSES = ['front', 'up', 'down', 'side']
+POSES = ['front', 'up', 'down', 'side_left', 'side_right']
 EMOTIONS = ['neutral', 'positive', 'negative']
 AU_HAPPY = ['AU12', 'AU6', 'AU25']
 AU_SAD = ['AU15', 'AU4', 'AU1', 'AU17']
@@ -124,9 +124,6 @@ class SpeechDetector:
         elif self._quiet_cnt >= 12:
             self.speaking = False
             
-        if self.speaking != old_speaking:
-            print(f"[Speech] {old_speaking} → {self.speaking}, {'side' if is_side else 'front'}, dir_changes={direction_changes}, std={open_std:.4f}, avg_delta={avg_delta:.4f}")
-            
         return self.speaking
 
 class FaceSelector:
@@ -221,8 +218,9 @@ class EmotionMapper:
         self.buffers = {}; self.calibrating = None; self.hist = deque(maxlen=history)
         self.config = {
             'front': {'h_thresh': 2.0, 's_thresh': 2.0}, 'up': {'h_thresh': 2.0, 's_thresh': 2.0},
-            'down': {'h_thresh': 1.5, 's_thresh': 1.5}, 'side': {'h_thresh': 1.5, 's_thresh': 1.5},
-            'pitch_limit': 45, 'fusion_weights': {'front': 0.4, 'up': 0.4, 'down': 0.4, 'side': 0.4}
+            'down': {'h_thresh': 1.5, 's_thresh': 1.5}, 
+            'side_left': {'h_thresh': 1.5, 's_thresh': 1.5}, 'side_right': {'h_thresh': 1.5, 's_thresh': 1.5},
+            'pitch_limit': 45, 'fusion_weights': {'front': 0.4, 'up': 0.4, 'down': 0.4, 'side_left': 0.4, 'side_right': 0.4}
         }
         self.last_emotion = 'neutral'; self.switch_cnt = 0
         self.persist_path = persist_path or os.path.join(os.path.dirname(__file__),'config.json')
@@ -264,7 +262,8 @@ class EmotionMapper:
             with open(self.persist_path, 'w', encoding='utf-8') as f: json.dump(d, f, indent=2, ensure_ascii=False)
         except Exception as ex: print(f"[Mapper] 保存失败: {ex}")
     def start_calib(self, pose, emotion):
-        if pose not in POSES or emotion not in EMOTIONS: return False
+        if pose not in POSES and pose != 'side': return False
+        # 如果是'side'，会在feed_calib时根据实际yaw确定是left还是right
         self.calibrating = (pose, emotion); self.buffers[f"{pose}_{emotion}"] = []; return True
     def finish_calib(self, pose, emotion):
         key = f"{pose}_{emotion}"; buf = self.buffers.get(key, [])
@@ -273,23 +272,27 @@ class EmotionMapper:
         mu = {k: float(np.mean([f[k] for f in buf])) for k in keys}
         sigma = {k: max(float(np.std([f[k] for f in buf])), 0.1) for k in keys}
         self.baselines[pose][emotion] = {'mu': mu, 'sigma': sigma}
-        if pose == 'side':
-            mu_m = {}; sigma_m = {}
-            for k in keys:
-                if k.startswith('AUL'): mirror_k = 'AUR' + k[3:]
-                elif k.startswith('AUR'): mirror_k = 'AUL' + k[3:]
-                else: mirror_k = k
-                mu_m[mirror_k] = mu[k]; sigma_m[mirror_k] = sigma[k]
-            self.baselines[pose][emotion]['mu_m'] = mu_m; self.baselines[pose][emotion]['sigma_m'] = sigma_m
         self.calibrating = None; self._save(); return True
     def feed_calib(self, au, yaw=0):
         if not self.calibrating: return 0
-        pose, emotion = self.calibrating; key = f"{pose}_{emotion}"
+        pose, emotion = self.calibrating
+        # 如果校准的是侧脸，记录实际使用的yaw方向，并转换为具体侧脸pose
+        if pose == 'side':
+            yaw_key = f'side_calib_yaw'
+            if yaw_key not in self.buffers: self.buffers[yaw_key] = []
+            self.buffers[yaw_key].append(yaw)
+            actual_pose = 'side_left' if yaw < 0 else 'side_right'
+            # 迁移buffer数据到新的key
+            old_key = f'side_{emotion}'
+            new_key = f'{actual_pose}_{emotion}'
+            if old_key in self.buffers:
+                self.buffers[new_key] = self.buffers[old_key]
+                del self.buffers[old_key]
+            self.calibrating = (actual_pose, emotion)
+            pose = actual_pose
+        key = f"{pose}_{emotion}"
         if key not in self.buffers: self.buffers[key] = []
         self.buffers[key].append(au)
-        if pose == 'side':
-            yaw_key = f'{key}_yaw_positive'
-            if yaw_key not in self.buffers: self.buffers[yaw_key] = yaw > 0
         return len(self.buffers[key])
     def get_calibrated(self): return {p: [e for e in EMOTIONS if self.baselines[p][e]] for p in POSES}
     def delete_baseline(self, pose, emotion):
@@ -301,7 +304,7 @@ class EmotionMapper:
         self._save(); return True
     @staticmethod
     def get_pose(pitch, yaw):
-        if abs(yaw) > 35: return 'side'
+        if abs(yaw) > 35: return 'side_left' if yaw < 0 else 'side_right'
         if pitch > 15: return 'up'
         if pitch < -20: return 'down'
         return 'front'
@@ -313,25 +316,23 @@ class EmotionMapper:
         neutral_bl = self.baselines[pose]['neutral']
         if neutral_bl is None: return pose, 'uncalibrated', 0., {'neutral':1,'positive':0,'negative':0}
         mu, sig = neutral_bl['mu'], neutral_bl['sigma']
-        if pose == 'side':
-            calib_yaw_key = f'side_neutral_yaw_positive'
-            calib_yaw_is_pos = self.buffers.get(calib_yaw_key, yaw > 0) if calib_yaw_key in self.buffers else yaw > 0
-            if calib_yaw_is_pos != (yaw > 0) and 'mu_m' in neutral_bl:
-                mu, sig = neutral_bl['mu_m'], neutral_bl['sigma_m']
         thr = self.config[pose]
         def z(n): return (au.get(n,0.) - mu[n]) / sig[n] if n in mu else 0.
         z12,z6,z25 = z('AU12'),z('AU6'),z('AU25')
         
         pitch_severity = max(0, -pitch - 20) / 25.0
-        eye_weight = 0.30 + pitch_severity * 0.25
-        mouth_weight = 0.55 - pitch_severity * 0.25
+        # 低头时：减少眼睛权重，提高嘴和眉毛权重
+        eye_weight = 0.30 - pitch_severity * 0.25
+        mouth_weight = 0.55 + pitch_severity * 0.25
+        eyebrow_weight = 0.30 + pitch_severity * 0.30
+        mouth_drop_weight = 0.55 - pitch_severity * 0.25
         
         h_act = 0.
-        if z12 > 0.5: h_act = max(0,z12)*mouth_weight + max(0,z6)*eye_weight + max(0,z25)*0.15
+        if z12 > 0.5: h_act = max(0,z12)*mouth_weight + max(0,z6)*max(0, eye_weight) + max(0,z25)*0.15
         z15,z4,z17 = z('AU15'),z('AU4'),z('AU17')
         s_act = 0.
         if z15 > 1.0 or z4 > 1.0 or z17 > 1.0: 
-            s_act = max(0,z15)*.55 + max(0,z4)*.30 + max(0,z17)*.15
+            s_act = max(0,z15)*max(0, mouth_drop_weight) + max(0,z4)*eyebrow_weight + max(0,z17)*.15
         
         if pose == 'down':
             s_thr_adj = thr['s_thresh'] * (1.0 + pitch_severity * 0.5)
@@ -346,23 +347,17 @@ class EmotionMapper:
         positive_bl = self.baselines[pose]['positive']
         if positive_bl and h_act > 0:
             hm, hs = positive_bl['mu'], positive_bl['sigma']
-            if pose == 'side':
-                calib_yaw_is_pos = self.buffers.get('side_positive_yaw_positive', yaw > 0) if 'side_positive_yaw_positive' in self.buffers else yaw > 0
-                if calib_yaw_is_pos != (yaw > 0) and 'mu_m' in positive_bl: hm, hs = positive_bl['mu_m'], positive_bl['sigma_m']
             dist = np.mean([abs(au.get(a,0)-hm.get(a,0))/hs.get(a,1) for a in AU_HAPPY if a in hm])
             if dist > 3.5: h_act *= max(0.3, 1.-(dist-3.5)*0.15)
         negative_bl = self.baselines[pose]['negative']
         if negative_bl and s_act > 0:
             sm, ss = negative_bl['mu'], negative_bl['sigma']
-            if pose == 'side':
-                calib_yaw_is_pos = self.buffers.get('side_negative_yaw_positive', yaw > 0) if 'side_negative_yaw_positive' in self.buffers else yaw > 0
-                if calib_yaw_is_pos != (yaw > 0) and 'mu_m' in negative_bl: sm, ss = negative_bl['mu_m'], negative_bl['sigma_m']
             dist = np.mean([abs(au.get(a,0)-sm.get(a,0))/ss.get(a,1) for a in AU_SAD if a in sm])
             if dist > 3.5: s_act *= max(0.3, 1.-(dist-3.5)*0.15)
         
         c_act = 1.0
         if h_act > 0.5: c_act *= np.exp(-(h_act - 0.5) * 1.5)
-        elif s_act > 0.5: c_act *= np.exp(-(s_act - 0.5) * 1.5)
+        elif s_act > 0.7: c_act *= np.exp(-(s_act - 0.7) * 1.2)  # 提高 negative 的门槛
         
         if h_act > h_thr_adj * 0.8: h_act *= 1.5
         
@@ -371,7 +366,7 @@ class EmotionMapper:
         
         if self.last_emotion == 'neutral':
             if h_act >= h_thr_adj * 0.8 and s_act < s_thr_adj * 0.6: raw = 'positive'
-            elif s_act >= s_thr_adj * 0.8 and h_act < h_thr_adj * 0.6: raw = 'negative'
+            elif s_act >= s_thr_adj * 0.9 and h_act < h_thr_adj * 0.5: raw = 'negative'  # 提高 negative 的判决门槛
             else: raw = 'neutral'
         elif self.last_emotion == 'positive': raw = 'neutral' if h_act < h_thr_adj * 0.4 else 'positive'
         elif self.last_emotion == 'negative': raw = 'neutral' if s_act < s_thr_adj * 0.4 else 'negative'
@@ -473,7 +468,7 @@ class EmotionEngine:
         self.mapper = EmotionMapper(history=50, persist_path=persist)
         
         # FER+ 组件（窗口增大到20以适应更低的推理频率）
-        self.fer_det = FERDetector(); self.fer_align = FERAligner(); self.fer_smoother = FERSmoother(window=20)
+        self.fer_det = FERDetector(); self.fer_align = FERAligner(); self.fer_smoother = FERSmoother(window=10)
         
         # Intentionally lock-free: CPython reference assignment is atomic.
         # Both threads may process slightly different frames (≤1 frame drift).
@@ -659,10 +654,16 @@ class EmotionEngine:
         
         pose = au.get('pose', 'front')
         pitch = au.get('pitch', 0)  # 注意：pitch是负数表示低头
-        w_au = self.mapper.config.get('fusion_weights', {}).get(pose, 0.4)
+        w_au = self.mapper.config.get('fusion_weights', {}).get(pose, 0.55)
         w_fer = 1.0 - w_au
         au_scores = au.get('scores', {'neutral':0,'positive':0,'negative':0})
         fer_probs = fer.get('probs_3', {'neutral':0,'positive':0,'negative':0}).copy()
+        
+        # 如果 AU 明确检测到 negative，强制提高 AU 权重
+        au_best = max(au_scores, key=au_scores.get)
+        if au_best == 'negative' and au_scores['negative'] > 0.5:
+            w_au = min(0.75, w_au + 0.15)
+            w_fer = 1.0 - w_au
         
         # 如果FER+明确检测到negative且置信度高，额外提升其权重
         if fer_probs['negative'] > 0.35 and fer.get('conf', 0) > 0.4:
@@ -672,21 +673,29 @@ class EmotionEngine:
             total_fer = fer_probs['positive'] + fer_probs['negative'] + fer_probs['neutral'] + 1e-8
             fer_probs = {k: v/total_fer for k, v in fer_probs.items()}
         
-        # 低头时的惩罚：随着低头角度增大，大幅降低FER+的权重和negative置信度
+        # 低头时的处理：随着低头角度增大，降低FER+权重，更信任AU
+        # 但不再修改FER+的negative概率（避免FER+直接把negative变成positive）
         if pitch < -10:
-            pitch_severity = min(1.0, abs(pitch + 10) / 30.0)  # 0.0 (平视) -> 1.0 (低头-40度)
-            
-            # 大幅降低FER+权重：低头时更信任AU
-            w_fer = w_fer * (1.0 - pitch_severity * 0.6)  # 最低降到原来的40%
+            pitch_severity = min(1.0, abs(pitch + 10) / 30.0)
+            # 降低FER+权重：低头时更信任AU
+            w_fer = w_fer * (1.0 - pitch_severity * 0.6)
             w_au = 1.0 - w_fer
-            
-            # 降低FER+的negative置信度
-            penalty_factor = max(0.15, 1.0 - pitch_severity * 0.75)
-            fer_probs['negative'] *= penalty_factor
-            
-            # 归一化
-            total_fer = fer_probs['positive'] + fer_probs['negative'] + fer_probs['neutral'] + 1e-8
-            fer_probs = {k: v/total_fer for k, v in fer_probs.items()}
+        
+        # 证伪机制：真正的"消极"必须伴随AU4（皱眉）的激活
+        # 如果FER+报Sadness，但AU4的Z-score < 1.0，强制判定为Neutral
+        current_au = au.get('au', {})
+        if current_au and fer.get('label') in ('sadness', 'negative') and au_scores.get('negative', 0) < 0.5:
+            neutral_bl = self.mapper.baselines.get(pose, {}).get('neutral')
+            if neutral_bl and 'AU4' in neutral_bl.get('mu', {}):
+                mu4 = neutral_bl['mu']['AU4']
+                sigma4 = max(neutral_bl['sigma'].get('AU4', 0.1), 0.1)
+                au4_val = current_au.get('AU4', 0)
+                z4 = (au4_val - mu4) / sigma4 if sigma4 > 0 else 0
+                if z4 < 1.0 and fer_probs['negative'] > fer_probs.get('positive', 0):
+                    fer_probs['negative'] *= 0.3
+                    fer_probs['neutral'] = max(fer_probs['neutral'], 0.5)
+                    total_fer = fer_probs['positive'] + fer_probs['negative'] + fer_probs['neutral'] + 1e-8
+                    fer_probs = {k: v/total_fer for k, v in fer_probs.items()}
         
         fused_raw = {e: au_scores[e]*w_au + fer_probs[e]*w_fer for e in EMOTIONS}
         total = sum(fused_raw.values()) + 1e-8
