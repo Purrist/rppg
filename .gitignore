@@ -44,4 +44,6 @@ backend/perception/au/demo_imgs/
 backend/perception/au/results/
 backend/perception/au/data/
 backend/perception/au/templates/
+backend/perception/au/emodata/
+backend/perception/au/*.pyc
 emo/OpenFace-3.0

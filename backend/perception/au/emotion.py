@@ -14,6 +14,7 @@ import mediapipe as mp
 from flask import Flask, Response, jsonify, request
 from sixdrepnet import SixDRepNet
 from au_net.MEFL import MEFARG
+from emotion_logger import EmotionLogger
 
 # ── Constants ──────────────────────────────────────────────
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -857,6 +858,7 @@ class EmotionEngine:
                         res.update(emotion='no_face', au={}, scores={'neutral':0,'positive':0,'negative':0}, speaking=False, personal_samples=personal_samples, personal_ready=personal_ready)
                     
                     self.au_result = res
+                    emotion_logger.log(self.au_result, self.fer_result, self.get_fusion())
             time.sleep(0.01)
 
     def fer_loop(self):
@@ -961,14 +963,26 @@ class EmotionEngine:
                 else: mc[k] = v
         print(f"[Config] 保存配置更新后: enable_personal_baseline={mc.get('enable_personal_baseline')}, enable_interclass_verify={mc.get('enable_interclass_verify')}")
         self.mapper._save()
-    def shutdown(self): self.running = False; self.cap.release(); self.det.release()
+    def shutdown(self): 
+        self.running = False
+        emotion_logger.close()
+        self.cap.release(); 
+        self.det.release()
 
 # ── Flask ────────────────────────────────────────────
 app = Flask(__name__)
 engine = EmotionEngine()
-threading.Thread(target=engine.grab_loop, daemon=True).start()
-threading.Thread(target=engine.au_loop, daemon=True).start()
-threading.Thread(target=engine.fer_loop, daemon=True).start()
+print(f"[EmotionEngine] 摄像头初始化完成，是否打开: {engine.cap.isOpened()}")
+if engine.cap.isOpened():
+    print("[EmotionEngine] 摄像头已成功打开，开始启动处理线程...")
+    threading.Thread(target=engine.grab_loop, daemon=True).start()
+    threading.Thread(target=engine.au_loop, daemon=True).start()
+    threading.Thread(target=engine.fer_loop, daemon=True).start()
+else:
+    print("[EmotionEngine] 警告：摄像头未打开！请检查摄像头连接。")
+
+emotion_logger = EmotionLogger(data_dir='emodata', max_file_duration=300)
+print("[EmotionLogger] 情绪记录器已启动")
 
 @app.route("/")
 def index(): return open(os.path.join(SCRIPT_DIR, "emotion.html"), encoding="utf-8").read()
