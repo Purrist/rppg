@@ -36,4 +36,12 @@ au/checkpoints/
 au/pretrain_models/
 pretrain_models/
 au/checkpoints/
+backend/perception/au/checkpoints/
+backend/perception/au/pretrain_models/
+backend/perception/au/config/
+backend/perception/au/tool/
+backend/perception/au/demo_imgs/
+backend/perception/au/results/
+backend/perception/au/data/
+backend/perception/au/templates/
 emo/OpenFace-3.0
