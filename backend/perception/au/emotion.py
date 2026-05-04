@@ -646,7 +646,7 @@ class FERSmoother:
 # ── 核心引擎 ──────────────────────────────────────────
 class EmotionEngine:
     def __init__(self):
-        self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+        self.cap = cv2.VideoCapture("http://10.158.6.244:8080/video")
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
@@ -1003,7 +1003,7 @@ if engine.cap.isOpened():
     threading.Thread(target=engine.fer_loop, daemon=True).start()
 else:
     print("[EmotionEngine] 警告：摄像头未打开！请检查摄像头连接。")
-
+print("面板分析中，请访问: http://localhost:5010/")
 emotion_logger = EmotionLogger(data_dir='emodata', max_file_duration=300)
 print("[EmotionLogger] 情绪记录器已启动")
 
@@ -1116,5 +1116,5 @@ def api_all():
     })
 
 if __name__ == "__main__":
-    try: app.run(host="0.0.0.0", port=5000, debug=False, threaded=True, use_reloader=False)
+    try: app.run(host="0.0.0.0", port=5010, debug=False, threaded=True, use_reloader=False)
     finally: engine.shutdown()

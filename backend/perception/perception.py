@@ -289,6 +289,6 @@ if __name__ == "__main__":
     threading.Thread(target=update_loop, daemon=True).start()
     print("\n================================================")
     print("Perception 服务已启动!")
-    print("访问: http://127.0.0.1:5002")
+    print("访问: http://127.0.0.1:6002")
     print("================================================")
-    app.run(host="127.0.0.1", port=5002, debug=False, use_reloader=False)
+    app.run(host="127.0.0.1", port=6002, debug=False, use_reloader=False)

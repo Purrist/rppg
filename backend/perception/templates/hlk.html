@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HLK-LD6002 测试</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+            background: #0b0f18;
+            color: #c8cee0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .data-cards {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .card {
+            background: #151c2c;
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            border: 1px solid #232e44;
+        }
+
+        .card h2 {
+            font-size: 16px;
+            margin-bottom: 8px;
+            color: #6b7a94;
+        }
+
+        .card-value {
+            font-size: 48px;
+            font-weight: bold;
+            margin: 5px 0;
+        }
+
+        .card.heart .card-value { color: #ff6b81; }
+        .card.breath .card-value { color: #70a1ff; }
+
+        .card-unit {
+            font-size: 14px;
+            color: #6b7a94;
+        }
+
+        .charts-container {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+        }
+
+        .chart-wrapper {
+            background: #151c2c;
+            border-radius: 12px;
+            padding: 16px;
+            border: 1px solid #232e44;
+            height: 300px;
+        }
+
+        .chart-title {
+            font-size: 16px;
+            margin-bottom: 12px;
+            font-weight: 600;
+        }
+
+        canvas {
+            width: 100% !important;
+            height: calc(100% - 40px) !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>HLK-LD6002 雷达数据测试</h1>
+
+        <div class="data-cards">
+            <div class="card heart">
+                <h2>心率</h2>
+                <div class="card-value" id="heart-rate">--</div>
+                <div class="card-unit">BPM</div>
+            </div>
+            <div class="card breath">
+                <h2>呼吸率</h2>
+                <div class="card-value" id="breath-rate">--</div>
+                <div class="card-unit">次/分钟</div>
+            </div>
+        </div>
+
+        <div class="charts-container">
+            <div class="chart-wrapper">
+                <div class="chart-title">心跳相位</div>
+                <canvas id="heart-phase-chart"></canvas>
+            </div>
+            <div class="chart-wrapper">
+                <div class="chart-title">呼吸相位</div>
+                <canvas id="breath-phase-chart"></canvas>
+            </div>
+            <div class="chart-wrapper">
+                <div class="chart-title">心率变化</div>
+                <canvas id="heart-rate-chart"></canvas>
+            </div>
+            <div class="chart-wrapper">
+                <div class="chart-title">呼吸率变化</div>
+                <canvas id="breath-rate-chart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const maxDataPoints = 100;
+        let heartPhaseData = [];
+        let breathPhaseData = [];
+        let heartRateData = [];
+        let breathRateData = [];
+        let labels = [];
+
+        for (let i = 0; i < maxDataPoints; i++) {
+            labels.push('');
+            heartPhaseData.push(0);
+            breathPhaseData.push(0);
+            heartRateData.push(72);
+            breathRateData.push(16);
+        }
+
+        const chartOptions = {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: { display: false },
+                y: {
+                    grid: { color: 'rgba(107, 122, 148, 0.2)' },
+                    ticks: { color: '#6b7a94' }
+                }
+            },
+            plugins: { legend: { display: false } }
+        };
+
+        const heartPhaseCtx = document.getElementById('heart-phase-chart').getContext('2d');
+        const heartPhaseChart = new Chart(heartPhaseCtx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    data: heartPhaseData,
+                    borderColor: '#ff6b81',
+                    backgroundColor: 'rgba(255, 107, 129, 0.1)',
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.4,
+                    pointRadius: 0
+                }]
+            },
+            options: chartOptions
+        });
+
+        const breathPhaseCtx = document.getElementById('breath-phase-chart').getContext('2d');
+        const breathPhaseChart = new Chart(breathPhaseCtx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    data: breathPhaseData,
+                    borderColor: '#70a1ff',
+                    backgroundColor: 'rgba(112, 161, 255, 0.1)',
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.4,
+                    pointRadius: 0
+                }]
+            },
+            options: chartOptions
+        });
+
+        const heartRateCtx = document.getElementById('heart-rate-chart').getContext('2d');
+        const heartRateChart = new Chart(heartRateCtx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    data: heartRateData,
+                    borderColor: '#ff9800',
+                    backgroundColor: 'rgba(255, 152, 0, 0.1)',
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.4,
+                    pointRadius: 0
+                }]
+            },
+            options: chartOptions
+        });
+
+        const breathRateCtx = document.getElementById('breath-rate-chart').getContext('2d');
+        const breathRateChart = new Chart(breathRateCtx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    data: breathRateData,
+                    borderColor: '#4caf50',
+                    backgroundColor: 'rgba(76, 175, 80, 0.1)',
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.4,
+                    pointRadius: 0
+                }]
+            },
+            options: chartOptions
+        });
+
+        function updateCharts(data) {
+            heartPhaseData.push(data.heart_phase || 0);
+            breathPhaseData.push(data.breath_phase || 0);
+            heartRateData.push(data.heart_rate || 72);
+            breathRateData.push(data.breath_rate || 16);
+            
+            heartPhaseData.shift();
+            breathPhaseData.shift();
+            heartRateData.shift();
+            breathRateData.shift();
+            
+            heartPhaseChart.data.datasets[0].data = heartPhaseData;
+            breathPhaseChart.data.datasets[0].data = breathPhaseData;
+            heartRateChart.data.datasets[0].data = heartRateData;
+            breathRateChart.data.datasets[0].data = breathRateData;
+            
+            heartPhaseChart.update('none');
+            breathPhaseChart.update('none');
+            heartRateChart.update('none');
+            breathRateChart.update('none');
+        }
+
+        function updateDisplay(data) {
+            const hr = data.heart_rate !== undefined && data.heart_rate !== null ? Math.round(data.heart_rate) : '--';
+            const br = data.breath_rate !== undefined && data.breath_rate !== null ? data.breath_rate.toFixed(1) : '--';
+            document.getElementById('heart-rate').textContent = hr;
+            document.getElementById('breath-rate').textContent = br;
+            updateCharts(data);
+        }
+
+        async function fetchData() {
+            try {
+                const response = await fetch('/data');
+                const data = await response.json();
+                console.log('收到数据:', data);
+                updateDisplay(data);
+            } catch (e) {
+                console.error('获取数据失败', e);
+            }
+            setTimeout(fetchData, 100);
+        }
+
+        console.log('开始获取数据...');
+        fetchData();
+    </script>
+</body>
+</html>

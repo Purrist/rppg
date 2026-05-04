@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MMW 双轨负载监测系统</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+        }
+        :root {
+            --bg: #0b0f18;
+            --card: #151c2c;
+            --border: #232e44;
+            --text: #c8cee0;
+            --muted: #6b7a94;
+            --accent: #4285F4;
+            --green: #34A853;
+            --red: #EA4335;
+            --orange: #FF9800;
+            --purple: #9C27B0;
+        }
+        body {
+            width: 100%;
+            height: 100vh;
+            background: var(--bg);
+            color: var(--text);
+            overflow: hidden;
+        }
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            height: 100vh;
+            gap: 16px;
+            padding: 16px;
+        }
+        .panel {
+            background: #111827;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            padding: 16px;
+            overflow-y: auto;
+        }
+        .panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border);
+        }
+        .panel-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--text);
+        }
+        .card {
+            background: linear-gradient(135deg, #151c2c, #1a2236);
+            border-radius: 10px;
+            padding: 16px;
+            border: 1px solid var(--border);
+            margin-bottom: 16px;
+            position: relative;
+            overflow: hidden;
+        }
+        .card::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            border-radius: 3px 0 0 3px;
+        }
+        .card.blue::before {
+            background: var(--accent);
+        }
+        .card.green::before {
+            background: var(--green);
+        }
+        .card.orange::before {
+            background: var(--orange);
+        }
+        .card.red::before {
+            background: var(--red);
+        }
+        .card.purple::before {
+            background: var(--purple);
+        }
+        .card .label {
+            font-size: 13px;
+            color: var(--muted);
+            margin-bottom: 6px;
+            letter-spacing: 0.5px;
+        }
+        .card .val {
+            font-size: 32px;
+            font-weight: 700;
+            line-height: 1.2;
+        }
+        .card .unit {
+            font-size: 14px;
+            color: #556;
+            margin-left: 6px;
+            font-weight: 400;
+        }
+        .toggle-container {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: var(--card);
+            border-radius: 8px;
+            padding: 12px 16px;
+            border: 1px solid var(--border);
+            margin-bottom: 16px;
+        }
+        .toggle-container label {
+            font-size: 14px;
+            color: var(--muted);
+        }
+        .toggle-switch {
+            position: relative;
+            width: 56px;
+            height: 28px;
+            background: var(--card);
+            border-radius: 14px;
+            cursor: pointer;
+            transition: 0.2s;
+            border: 1px solid var(--border);
+        }
+        .toggle-switch.active {
+            background: var(--green);
+            border-color: var(--green);
+        }
+        .toggle-switch::after {
+            content: '';
+            position: absolute;
+            top: 3px;
+            left: 3px;
+            width: 20px;
+            height: 20px;
+            background: #fff;
+            border-radius: 50%;
+            transition: 0.2s;
+        }
+        .toggle-switch.active::after {
+            left: 31px;
+        }
+        .mode-label {
+            font-size: 13px;
+            font-weight: 600;
+            padding: 4px 10px;
+            border-radius: 5px;
+        }
+        .mode-label.clean {
+            background: rgba(52, 168, 83, 0.15);
+            color: var(--green);
+        }
+        .mode-label.raw {
+            background: rgba(234, 67, 53, 0.15);
+            color: var(--red);
+        }
+        .chart-card {
+            position: relative;
+            height: 220px;
+            background: var(--card);
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            padding: 12px;
+            margin-bottom: 16px;
+        }
+        .chart-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+        .chart-title {
+            font-size: 13px;
+            color: var(--muted);
+            font-weight: 600;
+        }
+        .chart-hint {
+            font-size: 11px;
+            color: #4a5a74;
+        }
+        .chart-legend {
+            display: flex;
+            gap: 12px;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+            transition: 0.15s;
+        }
+        .legend-item:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+        .legend-item.hidden {
+            opacity: 0.4;
+        }
+        .legend-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 2px;
+        }
+        .chart-canvas {
+            width: 100% !important;
+            height: calc(100% - 36px) !important;
+        }
+        .load-progress {
+            width: 100%;
+            height: 12px;
+            background: #1a2236;
+            border-radius: 6px;
+            overflow: hidden;
+            margin-top: 8px;
+        }
+        .load-fill {
+            height: 100%;
+            border-radius: 6px;
+            transition: width 0.3s ease, background 0.3s ease;
+        }
+        .sub-info {
+            display: flex;
+            gap: 16px;
+            margin-top: 10px;
+            font-size: 12px;
+            color: var(--muted);
+            flex-wrap: wrap;
+        }
+        .sub-info span {
+            color: var(--accent);
+            font-weight: 600;
+        }
+        .person-status {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            margin-top: 8px;
+        }
+        .person-status.detected {
+            background: rgba(52, 168, 83, 0.15);
+            color: var(--green);
+        }
+        .person-status.not-detected {
+            background: rgba(234, 67, 53, 0.15);
+            color: var(--red);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="panel" id="left-panel">
+            <div class="panel-header">
+                <span class="panel-title">实时监测</span>
+            </div>
+            <div class="toggle-container">
+                <label>异常值剔除</label>
+                <div class="toggle-switch active" id="cleanToggle" onclick="toggleClean()"></div>
+                <span class="mode-label clean" id="modeLabel">已开启</span>
+            </div>
+            <div class="card blue">
+                <div class="label">心率</div>
+                <div>
+                    <span class="val" id="vHr">-</span>
+                    <span class="unit">bpm</span>
+                </div>
+                <div class="sub-info">
+                    <div>RMSSD: <span id="vRmssd">-</span> ms</div>
+                </div>
+            </div>
+            <div class="card green">
+                <div class="label">呼吸率</div>
+                <div>
+                    <span class="val" id="vBr">-</span>
+                    <span class="unit">bpm</span>
+                </div>
+            </div>
+            <div class="chart-card">
+                <div class="chart-header">
+                    <div>
+                        <span class="chart-title">心率波形</span>
+                        <span class="chart-hint"> · 滚轮缩放 · 拖拽平移 · 双击还原</span>
+                    </div>
+                    <div class="chart-legend">
+                        <div class="legend-item" id="legend-hr-clean" onclick="toggleDataset('hr', 'clean')">
+                            <div class="legend-color" style="background: #34A853;"></div>
+                            <span>已剔除</span>
+                        </div>
+                        <div class="legend-item" id="legend-hr-raw" onclick="toggleDataset('hr', 'raw')">
+                            <div class="legend-color" style="background: #EA4335;"></div>
+                            <span>源数据</span>
+                        </div>
+                    </div>
+                </div>
+                <canvas class="chart-canvas" id="rtHr"></canvas>
+            </div>
+            <div class="chart-card">
+                <div class="chart-header">
+                    <div>
+                        <span class="chart-title">呼吸波形</span>
+                        <span class="chart-hint"> · 滚轮缩放 · 拖拽平移 · 双击还原</span>
+                    </div>
+                    <div class="chart-legend">
+                        <div class="legend-item" id="legend-br-clean" onclick="toggleDataset('br', 'clean')">
+                            <div class="legend-color" style="background: #34A853;"></div>
+                            <span>已剔除</span>
+                        </div>
+                        <div class="legend-item" id="legend-br-raw" onclick="toggleDataset('br', 'raw')">
+                            <div class="legend-color" style="background: #EA4335;"></div>
+                            <span>源数据</span>
+                        </div>
+                    </div>
+                </div>
+                <canvas class="chart-canvas" id="rtBr"></canvas>
+            </div>
+        </div>
+        <div class="panel" id="right-panel">
+            <div class="panel-header">
+                <span class="panel-title">综合分析</span>
+            </div>
+            <div class="card purple">
+                <div class="label">身份信息</div>
+                <div class="sub-info">
+                    <div>年龄: <span id="vAge">35</span> 岁</div>
+                    <div>性别: <span id="vGender">未检测</span></div>
+                </div>
+                <div class="person-status not-detected" id="personStatus">
+                    <span id="personIcon">○</span>
+                    <span id="personText">未检测</span>
+                </div>
+                <div class="sub-info" style="margin-top: 8px;">
+                    <div>HRmax: <span id="vHrmax">185</span></div>
+                    <div>RMSSD基线: <span id="vRmssdBase">45</span></div>
+                </div>
+            </div>
+            <div class="card blue">
+                <div class="label">HRV 指数</div>
+                <div>
+                    <span class="val" id="vHrv">-</span>
+                </div>
+                <div class="sub-info">
+                    <div>SDNN: <span id="vSdnn">-</span> ms</div>
+                </div>
+                <div class="chart-card" style="height: 140px; margin-bottom: 0; margin-top: 8px;">
+                    <canvas class="chart-canvas" id="hrvChart"></canvas>
+                </div>
+            </div>
+            <div class="card orange">
+                <div class="label">生理负荷</div>
+                <div>
+                    <span class="val" id="vPhys">-</span>
+                    <span class="unit">%</span>
+                </div>
+                <div class="sub-info" id="vPhysLevel" style="color: var(--green);">轻松</div>
+                <div class="load-progress">
+                    <div class="load-fill" id="physFill" style="width: 0%; background: var(--green);"></div>
+                </div>
+                <div class="chart-card" style="height: 140px; margin-bottom: 0; margin-top: 8px;">
+                    <canvas class="chart-canvas" id="physChart"></canvas>
+                </div>
+            </div>
+            <div class="card red">
+                <div class="label">认知负荷</div>
+                <div>
+                    <span class="val" id="vCog">-</span>
+                    <span class="unit">%</span>
+                </div>
+                <div class="sub-info" id="vCogLevel" style="color: var(--green);">轻松</div>
+                <div class="load-progress">
+                    <div class="load-fill" id="cogFill" style="width: 0%; background: var(--green);"></div>
+                </div>
+                <div class="chart-card" style="height: 140px; margin-bottom: 0; margin-top: 8px;">
+                    <canvas class="chart-canvas" id="cogChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script>
+        function fmtTs(ts) {
+            var d = new Date(ts * 1000);
+            return String(d.getHours()).padStart(2, '0') + ':' +
+                   String(d.getMinutes()).padStart(2, '0') + ':' +
+                   String(d.getSeconds()).padStart(2, '0');
+        }
+        function toPoints(times, vals) {
+            var pts = [];
+            for (var i = 0; i < times.length; i++) {
+                pts.push({ x: times[i], y: vals[i] });
+            }
+            return pts;
+        }
+        function getLoadLevel(v) {
+            if (v < 30) return { text: '轻松', color: '#34A853' };
+            if (v < 50) return { text: '轻度', color: '#34A853' };
+            if (v < 70) return { text: '中度', color: '#FF9800' };
+            if (v < 85) return { text: '较大', color: '#FF9800' };
+            return { text: '极限', color: '#EA4335' };
+        }
+
+        const state = {
+            hidden: {
+                hr: { clean: false, raw: false },
+                br: { clean: false, raw: false }
+            },
+            chart: {
+                rtHr: null,
+                rtBr: null,
+                hrv: null,
+                phys: null,
+                cog: null
+            },
+            chartState: {
+                rtHr: { xMin: null, xMax: null, yMin: null, yMax: null },
+                rtBr: { xMin: null, xMax: null, yMin: null, yMax: null }
+            },
+            isUserZoomed: { rtHr: false, rtBr: false }
+        };
+
+        const rtOpts = {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            interaction: { intersect: false, mode: 'index' },
+            elements: { point: { radius: 0 }, line: { borderWidth: 2, tension: 0.3 } },
+            scales: {
+                x: { type: 'linear', grid: { color: '#1a2236', drawBorder: false }, ticks: { color: '#3a4a64', font: { size: 10 }, maxTicksLimit: 6, callback: function(v) { return fmtTs(v); } } },
+                y: { min: 40, max: 120, grid: { color: '#1a2236', drawBorder: false, borderDash: [3,3] }, ticks: { color: '#3a4a64', font: { size: 10 }, maxTicksLimit: 6 } }
+            },
+            plugins: {
+                legend: { display: false },
+                zoom: {
+                    zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'xy' },
+                    pan: { enabled: true, mode: 'xy' }
+                }
+            }
+        };
+
+        const smallOpts = {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            interaction: { intersect: false, mode: 'index' },
+            elements: { point: { radius: 0 }, line: { borderWidth: 2, tension: 0.3 } },
+            scales: {
+                x: { type: 'linear', grid: { color: '#1a2236', drawBorder: false }, ticks: { color: '#3a4a64', font: { size: 10 }, maxTicksLimit: 4, callback: function(v) { return fmtTs(v); } } },
+                y: { min: 0, max: 100, grid: { color: '#1a2236', drawBorder: false, borderDash: [3,3] }, ticks: { color: '#3a4a64', font: { size: 10 }, maxTicksLimit: 4 } }
+            },
+            plugins: {
+                legend: { display: false }
+            }
+        };
+
+        function initCharts() {
+            state.chart.rtHr = new Chart(document.getElementById('rtHr'), {
+                type: 'line',
+                data: {
+                    datasets: [
+                        { label: '已剔除', data: [], borderColor: '#34A853', backgroundColor: 'rgba(52,168,83,0.1)', fill: true },
+                        { label: '源数据', data: [], borderColor: '#EA4335', backgroundColor: 'rgba(234,67,53,0.1)', fill: true }
+                    ]
+                },
+                options: JSON.parse(JSON.stringify(rtOpts))
+            });
+
+            const brOpts = JSON.parse(JSON.stringify(rtOpts));
+            brOpts.scales.y.min = 0;
+            brOpts.scales.y.max = 40;
+            state.chart.rtBr = new Chart(document.getElementById('rtBr'), {
+                type: 'line',
+                data: {
+                    datasets: [
+                        { label: '已剔除', data: [], borderColor: '#34A853', backgroundColor: 'rgba(52,168,83,0.1)', fill: true },
+                        { label: '源数据', data: [], borderColor: '#EA4335', backgroundColor: 'rgba(234,67,53,0.1)', fill: true }
+                    ]
+                },
+                options: brOpts
+            });
+
+            state.chart.hrv = new Chart(document.getElementById('hrvChart'), {
+                type: 'line',
+                data: {
+                    datasets: [
+                        { label: 'HRV', data: [], borderColor: '#9C27B0', backgroundColor: 'rgba(156,39,176,0.1)', fill: true }
+                    ]
+                },
+                options: JSON.parse(JSON.stringify(smallOpts))
+            });
+
+            state.chart.phys = new Chart(document.getElementById('physChart'), {
+                type: 'line',
+                data: {
+                    datasets: [
+                        { label: '生理负荷', data: [], borderColor: '#FF9800', backgroundColor: 'rgba(255,152,0,0.1)', fill: true }
+                    ]
+                },
+                options: JSON.parse(JSON.stringify(smallOpts))
+            });
+
+            state.chart.cog = new Chart(document.getElementById('cogChart'), {
+                type: 'line',
+                data: {
+                    datasets: [
+                        { label: '认知负荷', data: [], borderColor: '#EA4335', backgroundColor: 'rgba(234,67,53,0.1)', fill: true }
+                    ]
+                },
+                options: JSON.parse(JSON.stringify(smallOpts))
+            });
+
+            loadChartState();
+
+            // 绑定双击还原事件
+            document.getElementById('rtHr').addEventListener('dblclick', function() {
+                resetChart('rtHr');
+            });
+            document.getElementById('rtBr').addEventListener('dblclick', function() {
+                resetChart('rtBr');
+            });
+        }
+
+        function saveChartState() {
+            const saveData = {
+                chartState: {
+                    rtHr: {
+                        xMin: state.chart.rtHr.scales.x.min,
+                        xMax: state.chart.rtHr.scales.x.max,
+                        yMin: state.chart.rtHr.scales.y.min,
+                        yMax: state.chart.rtHr.scales.y.max
+                    },
+                    rtBr: {
+                        xMin: state.chart.rtBr.scales.x.min,
+                        xMax: state.chart.rtBr.scales.x.max,
+                        yMin: state.chart.rtBr.scales.y.min,
+                        yMax: state.chart.rtBr.scales.y.max
+                    }
+                },
+                hidden: state.hidden,
+                isUserZoomed: state.isUserZoomed
+            };
+            localStorage.setItem('mmwChartState', JSON.stringify(saveData));
+            updateLegendUI();
+        }
+
+        function loadChartState() {
+            const saved = localStorage.getItem('mmwChartState');
+            if (saved) {
+                try {
+                    const data = JSON.parse(saved);
+                    if (data.hidden) {
+                        state.hidden = data.hidden;
+                    }
+                    if (data.isUserZoomed) {
+                        state.isUserZoomed = data.isUserZoomed;
+                    }
+                    if (data.chartState) {
+                        state.chartState = data.chartState;
+                    }
+                    updateLegendUI();
+                } catch (e) {
+                    console.error('Load state failed:', e);
+                }
+            }
+        }
+
+        function applyChartState(chartId, data) {
+            const chart = state.chart[chartId];
+            const savedState = state.chartState[chartId];
+            if (state.isUserZoomed[chartId] && savedState && savedState.xMin !== null) {
+                chart.options.scales.x.min = savedState.xMin;
+                chart.options.scales.x.max = savedState.xMax;
+                if (savedState.yMin !== null) {
+                    chart.options.scales.y.min = savedState.yMin;
+                    chart.options.scales.y.max = savedState.yMax;
+                }
+            } else if (data && data.length > 0) {
+                const times = data.map(p => p.x);
+                const maxTime = Math.max(...times);
+                const timeSpan = chartId === 'rtHr' ? 60 : 60;
+                chart.options.scales.x.min = maxTime - timeSpan;
+                chart.options.scales.x.max = maxTime;
+                if (chartId === 'rtHr') {
+                    chart.options.scales.y.min = 40;
+                    chart.options.scales.y.max = 120;
+                } else {
+                    chart.options.scales.y.min = 0;
+                    chart.options.scales.y.max = 40;
+                }
+            }
+        }
+
+        function resetChart(chartId) {
+            const chart = state.chart[chartId];
+            chart.resetZoom();
+            state.isUserZoomed[chartId] = false;
+            state.chartState[chartId] = { xMin: null, xMax: null, yMin: null, yMax: null };
+            saveChartState();
+        }
+
+        function toggleDataset(type, dataset) {
+            state.hidden[type][dataset] = !state.hidden[type][dataset];
+
+            const chart = type === 'hr' ? state.chart.rtHr : state.chart.rtBr;
+            const idx = dataset === 'clean' ? 0 : 1;
+            chart.data.datasets[idx].hidden = state.hidden[type][dataset];
+            chart.update('none');
+
+            saveChartState();
+        }
+
+        function updateLegendUI() {
+            ['hr', 'br'].forEach(type => {
+                ['clean', 'raw'].forEach(ds => {
+                    const el = document.getElementById(`legend-${type}-${ds}`);
+                    if (el) {
+                        el.classList.toggle('hidden', state.hidden[type][ds]);
+                    }
+                });
+            });
+        }
+
+        function toggleClean() {
+            const el = document.getElementById('cleanToggle');
+            const isOn = el.classList.contains('active');
+            el.classList.toggle('active');
+            const labelEl = document.getElementById('modeLabel');
+            if (!isOn) {
+                labelEl.textContent = '已开启';
+                labelEl.className = 'mode-label clean';
+            } else {
+                labelEl.textContent = '已关闭';
+                labelEl.className = 'mode-label raw';
+            }
+            fetch('/toggle_clean?v=' + !isOn);
+        }
+
+        function updateLoadBar(elId, val) {
+            const fill = document.getElementById(elId);
+            if (fill) {
+                const level = getLoadLevel(val);
+                fill.style.width = Math.min(100, Math.max(0, val)) + '%';
+                fill.style.background = level.color;
+            }
+        }
+
+        let rtData = { time: [], hrClean: [], hrRaw: [], brClean: [], brRaw: [] };
+
+        setInterval(function() {
+            fetch('/data').then(function(r) { return r.json(); }).then(function(d) {
+                if (!d.rt) return;
+
+                document.getElementById('vHr').textContent = Math.round(d.hr);
+                document.getElementById('vBr').textContent = d.br ? Math.round(d.br) : '-';
+                document.getElementById('vRmssd').textContent = d.rmssd || '-';
+                document.getElementById('vHrv').textContent = d.hrv || '-';
+                document.getElementById('vSdnn').textContent = d.sdnn || '-';
+
+                const phys = Math.round(d.phys || 0);
+                const cog = Math.round(d.cog || 0);
+                const stress = Math.round(d.stress || 0);
+
+                document.getElementById('vPhys').textContent = phys;
+                document.getElementById('vCog').textContent = cog;
+
+                const physLevel = getLoadLevel(phys);
+                document.getElementById('vPhysLevel').textContent = physLevel.text;
+                document.getElementById('vPhysLevel').style.color = physLevel.color;
+                updateLoadBar('physFill', phys);
+
+                const cogLevel = getLoadLevel(cog);
+                document.getElementById('vCogLevel').textContent = cogLevel.text;
+                document.getElementById('vCogLevel').style.color = cogLevel.color;
+                updateLoadBar('cogFill', cog);
+
+                if (d.baseline) {
+                    document.getElementById('vAge').textContent = d.baseline.age_assumed || '-';
+                    document.getElementById('vHrmax').textContent = d.baseline.hr_max || '-';
+                    document.getElementById('vRmssdBase').textContent = d.baseline.rmssd_baseline ? d.baseline.rmssd_baseline.toFixed(0) : '-';
+                }
+
+                if (d.attribute) {
+                    if (d.attribute.gender) {
+                        document.getElementById('vGender').textContent = d.attribute.gender === 'Male' ? '男' : '女';
+                    } else {
+                        document.getElementById('vGender').textContent = '未检测';
+                    }
+                }
+
+                const personStatus = document.getElementById('personStatus');
+                const personIcon = document.getElementById('personIcon');
+                const personText = document.getElementById('personText');
+                if (d.face_detected) {
+                    personStatus.className = 'person-status detected';
+                    personIcon.textContent = '●';
+                    personText.textContent = '已检测';
+                } else {
+                    personStatus.className = 'person-status not-detected';
+                    personIcon.textContent = '○';
+                    personText.textContent = '未检测';
+                }
+
+                if (d.is_clean) {
+                    document.getElementById('cleanToggle').classList.add('active');
+                    document.getElementById('modeLabel').textContent = '已开启';
+                    document.getElementById('modeLabel').className = 'mode-label clean';
+                } else {
+                    document.getElementById('cleanToggle').classList.remove('active');
+                    document.getElementById('modeLabel').textContent = '已关闭';
+                    document.getElementById('modeLabel').className = 'mode-label raw';
+                }
+
+                rtData.time = d.rt.time;
+                rtData.hrClean = d.rt.hr;
+                rtData.brClean = d.rt.br;
+
+            }).catch(console.error);
+        }, 250);
+
+        setInterval(function() {
+            fetch('/longterm').then(function(r) { return r.json(); }).then(function(data) {
+                const clean = data.clean;
+                const raw = data.raw;
+                if (!clean || !clean.time || !clean.time.length) return;
+
+                const hrCleanPoints = toPoints(clean.time, clean.hr);
+                const hrRawPoints = toPoints(raw.time, raw.hr);
+                const brCleanPoints = toPoints(clean.time, clean.br);
+                const brRawPoints = toPoints(raw.time, raw.br);
+
+                // 更新数据
+                state.chart.rtHr.data.datasets[0].data = hrCleanPoints;
+                state.chart.rtHr.data.datasets[0].hidden = state.hidden.hr.clean;
+                state.chart.rtHr.data.datasets[1].data = hrRawPoints;
+                state.chart.rtHr.data.datasets[1].hidden = state.hidden.hr.raw;
+
+                state.chart.rtBr.data.datasets[0].data = brCleanPoints;
+                state.chart.rtBr.data.datasets[0].hidden = state.hidden.br.clean;
+                state.chart.rtBr.data.datasets[1].data = brRawPoints;
+                state.chart.rtBr.data.datasets[1].hidden = state.hidden.br.raw;
+
+                // 应用缩放平移状态
+                if (state.isUserZoomed.rtHr && state.chartState.rtHr.xMin !== null) {
+                    state.chart.rtHr.options.scales.x.min = state.chartState.rtHr.xMin;
+                    state.chart.rtHr.options.scales.x.max = state.chartState.rtHr.xMax;
+                    state.chart.rtHr.options.scales.y.min = state.chartState.rtHr.yMin;
+                    state.chart.rtHr.options.scales.y.max = state.chartState.rtHr.yMax;
+                } else {
+                    const now = Date.now() / 1000;
+                    const maxTimeHr = hrCleanPoints.length > 0 ? hrCleanPoints[hrCleanPoints.length - 1].x : now;
+                    state.chart.rtHr.options.scales.x.min = maxTimeHr - 60;
+                    state.chart.rtHr.options.scales.x.max = maxTimeHr;
+                    state.chart.rtHr.options.scales.y.min = 40;
+                    state.chart.rtHr.options.scales.y.max = 120;
+                }
+
+                if (state.isUserZoomed.rtBr && state.chartState.rtBr.xMin !== null) {
+                    state.chart.rtBr.options.scales.x.min = state.chartState.rtBr.xMin;
+                    state.chart.rtBr.options.scales.x.max = state.chartState.rtBr.xMax;
+                    state.chart.rtBr.options.scales.y.min = state.chartState.rtBr.yMin;
+                    state.chart.rtBr.options.scales.y.max = state.chartState.rtBr.yMax;
+                } else {
+                    const now = Date.now() / 1000;
+                    const maxTimeBr = brCleanPoints.length > 0 ? brCleanPoints[brCleanPoints.length - 1].x : now;
+                    state.chart.rtBr.options.scales.x.min = maxTimeBr - 60;
+                    state.chart.rtBr.options.scales.x.max = maxTimeBr;
+                    state.chart.rtBr.options.scales.y.min = 0;
+                    state.chart.rtBr.options.scales.y.max = 40;
+                }
+
+                state.chart.rtHr.update('none');
+                state.chart.rtBr.update('none');
+
+                // 保存当前状态
+                state.chartState.rtHr.xMin = state.chart.rtHr.scales.x.min;
+                state.chartState.rtHr.xMax = state.chart.rtHr.scales.x.max;
+                state.chartState.rtHr.yMin = state.chart.rtHr.scales.y.min;
+                state.chartState.rtHr.yMax = state.chart.rtHr.scales.y.max;
+
+                state.chartState.rtBr.xMin = state.chart.rtBr.scales.x.min;
+                state.chartState.rtBr.xMax = state.chart.rtBr.scales.x.max;
+                state.chartState.rtBr.yMin = state.chart.rtBr.scales.y.min;
+                state.chartState.rtBr.yMax = state.chart.rtBr.scales.y.max;
+
+                // 检查用户是否操作过（判断是否是默认值）
+                if (hrCleanPoints.length > 0) {
+                    const maxTimeHr = hrCleanPoints[hrCleanPoints.length - 1].x;
+                    state.isUserZoomed.rtHr = !(Math.abs(state.chartState.rtHr.xMax - maxTimeHr) < 0.1 &&
+                                                 Math.abs(state.chartState.rtHr.xMin - (maxTimeHr - 60)) < 0.1);
+                }
+                if (brCleanPoints.length > 0) {
+                    const maxTimeBr = brCleanPoints[brCleanPoints.length - 1].x;
+                    state.isUserZoomed.rtBr = !(Math.abs(state.chartState.rtBr.xMax - maxTimeBr) < 0.1 &&
+                                                 Math.abs(state.chartState.rtBr.xMin - (maxTimeBr - 60)) < 0.1);
+                }
+
+                saveChartState();
+
+                // 更新右栏图表
+                const maxLen = Math.min(120, clean.time.length);
+                const startIdx = Math.max(0, clean.time.length - maxLen);
+                const hrvData = clean.hrv.slice(startIdx);
+                const physData = clean.phys.slice(startIdx);
+                const cogData = clean.stress.slice(startIdx);
+                const timeData = clean.time.slice(startIdx);
+
+                state.chart.hrv.data.datasets[0].data = toPoints(timeData, hrvData);
+                state.chart.phys.data.datasets[0].data = toPoints(timeData, physData);
+                state.chart.cog.data.datasets[0].data = toPoints(timeData, cogData);
+                state.chart.hrv.update('none');
+                state.chart.phys.update('none');
+                state.chart.cog.update('none');
+
+            }).catch(console.error);
+        }, 3000);
+
+        initCharts();
+    </script>
+</body>
+</html>

@@ -49,3 +49,5 @@ backend/perception/au/*.pyc
 emo/OpenFace-3.0
 backend/perception/raw_data.json
 backend/perception/au/config.json
+backend/perception/mode_history/
+mmw_history/

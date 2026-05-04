@@ -5,7 +5,13 @@
   "hints": {
     "typescript-config/is-valid": "off",
     "no-inline-styles": "off",
-    "meta-viewport": "off"
+    "meta-viewport": "off",
+    "axe/forms": [
+      "default",
+      {
+        "label": "off"
+      }
+    ]
   },
   "browserslist": [
     "defaults",

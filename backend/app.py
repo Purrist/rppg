@@ -55,7 +55,7 @@ try:
 except:
     pass
 
-TABLET_VIDEO_URL = "http://10.215.158.45:8080/video"
+TABLET_VIDEO_URL = "http://10.158.6.244:8080/video"
 PROJECTION_CAMERA_SOURCE = 1
 
 if len(sys.argv) >= 2:
