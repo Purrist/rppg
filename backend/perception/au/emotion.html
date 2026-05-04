@@ -675,6 +675,12 @@ function initAllSliders() {
     if (verifyCheckbox) {
         verifyCheckbox.addEventListener('change', handleSliderChange);
     }
+
+    // 个人基线复选框
+    const personalCheckbox = document.getElementById('personal-enabled');
+    if (personalCheckbox) {
+        personalCheckbox.addEventListener('change', handleSliderChange);
+    }
     
     slidersInitialized = true;
 }
@@ -1026,7 +1032,39 @@ async function loop() {
         console.error('API Error',e);
     }
 }
+
+// 从emodata加载历史数据到图表
+async function loadHistoryFromEmoData() {
+    try {
+        const resp = await fetch('/api/emodata/latest');
+        const data = await resp.json();
+        if (data.records && data.records.length > 0) {
+            // 计算时间偏移，使历史数据从图表左侧开始
+            const firstTime = chartData.length > 0 ? chartData[0].t : 0;
+            const baseTime = firstTime - data.records.length;
+            data.records.forEach((rec, i) => {
+                chartData.unshift({
+                    t: baseTime + i,
+                    s: {
+                        'neutral': rec.fusion.scores?.neutral || 0,
+                        'positive': rec.fusion.scores?.positive || 0,
+                        'negative': rec.fusion.scores?.negative || 0
+                    }
+                });
+            });
+            // 限制图表数据量
+            if (chartData.length > 600) {
+                chartData = chartData.slice(-600);
+            }
+            drawFusionChart();
+        }
+    } catch(e) {
+        console.error('加载历史数据失败', e);
+    }
+}
+
 setInterval(loop, 400);  // 降低轮询频率到2.5fps，减少CPU和网络开销
+loadHistoryFromEmoData();  // 页面加载时从历史数据恢复
 loop();
 </script>
 </body>

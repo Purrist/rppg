@@ -121,6 +121,31 @@ class EmotionLogger:
         with self.lock:
             self._save_current_file()
 
+    def get_latest_file(self):
+        try:
+            if not os.path.exists(self.data_dir):
+                return None
+            files = [f for f in os.listdir(self.data_dir) if f.endswith('.json')]
+            if not files:
+                return None
+            files.sort(key=lambda f: os.path.getmtime(os.path.join(self.data_dir, f)), reverse=True)
+            latest = os.path.join(self.data_dir, files[0])
+            return latest
+        except Exception as e:
+            print(f"[EmotionLogger] 获取最新文件失败: {e}")
+            return None
+
+    def get_latest_data(self):
+        latest = self.get_latest_file()
+        if not latest:
+            return None
+        try:
+            with open(latest, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"[EmotionLogger] 读取最新文件失败: {e}")
+            return None
+
     def close(self):
         self.enabled = False
         with self.lock:

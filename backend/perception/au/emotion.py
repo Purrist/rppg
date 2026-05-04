@@ -220,6 +220,7 @@ class EmotionMapper:
         # 个人基线：在线学习的neutral
         self.personal_baseline = None
         self.personal_baseline_samples = []
+        self.consecutive_calm_frames = 0  # 连续平静帧计数器
         self.buffers = {}; self.calibrating = None; self.hist = deque(maxlen=history)
         self.config = {
             'front': {'h_thresh': 2.0, 's_thresh': 2.0}, 'up': {'h_thresh': 2.0, 's_thresh': 2.0},
@@ -258,8 +259,6 @@ class EmotionMapper:
             # 加载个人基线
             if '_personal' in d and 'mu' in d['_personal'] and 'sigma' in d['_personal']:
                 self.personal_baseline = {'mu': d['_personal']['mu'], 'sigma': d['_personal']['sigma']}
-            if '_personal_samples' in d:
-                self.personal_baseline_samples = d['_personal_samples']
             # 加载配置
             if '_config' in d:
                 for k, v in d['_config'].items():
@@ -280,10 +279,9 @@ class EmotionMapper:
                 d[p] = {}
                 for e in EMOTIONS:
                     if self.system_baselines[p][e]: d[p][e] = {'mu': self.system_baselines[p][e]['mu'], 'sigma': self.system_baselines[p][e]['sigma']}
-            # 保存个人基线
+            # 保存个人基线（只保存一套mu和sigma，不保存样本）
             if self.personal_baseline:
                 d['_personal'] = {'mu': self.personal_baseline['mu'], 'sigma': self.personal_baseline['sigma']}
-            d['_personal_samples'] = self.personal_baseline_samples
             d['_config'] = self.config
             with open(self.persist_path, 'w', encoding='utf-8') as f: json.dump(d, f, indent=2, ensure_ascii=False)
         except Exception as ex: print(f"[Mapper] 保存失败: {ex}")
@@ -321,23 +319,32 @@ class EmotionMapper:
         self.buffers[key].append(au)
         return len(self.buffers[key])
     def get_calibrated(self): return {p: [e for e in EMOTIONS if self.system_baselines[p][e]] for p in POSES}
-    def update_personal_baseline(self, au, pitch, yaw):
+    def update_personal_baseline(self, au, pitch, yaw, is_calm=False):
         # 只记录正脸（pitch不太低，yaw不太大）
         if abs(pitch) > 10 or abs(yaw) > 25: 
-            #print(f"[PersonalBaseline] 忽略样本: pitch={pitch:.1f}, yaw={yaw:.1f} (超出角度范围)")
+            self.consecutive_calm_frames = 0
             return False
         # 检查AU是否有效
         if not au or not isinstance(au, dict): 
-            print(f"[PersonalBaseline] 忽略样本: AU无效 {au}")
+            self.consecutive_calm_frames = 0
             return False
         # 检查功能是否启用
         if not self.config.get('enable_personal_baseline', False):
-            #print(f"[PersonalBaseline] 功能未启用，忽略样本")
+            self.consecutive_calm_frames = 0
             return False
+        
+        # 只有连续平静帧才采集样本
+        calm_threshold = 5  # 需要连续5帧平静
+        if is_calm:
+            self.consecutive_calm_frames += 1
+            if self.consecutive_calm_frames < calm_threshold:
+                return False  # 还没达到连续平静阈值，不采集
+        else:
+            self.consecutive_calm_frames = 0
+            return False  # 当前帧不平静，不采集
         
         # 保存样本
         self.personal_baseline_samples.append(au.copy())
-        print(f"[PersonalBaseline] 收集到样本! 总数: {len(self.personal_baseline_samples)}")
         # 限制最大样本数
         max_samples = self.config.get('personal_baseline_max_samples', 200)
         if len(self.personal_baseline_samples) > max_samples:
@@ -358,7 +365,6 @@ class EmotionMapper:
                     sigma[k] = max(float(np.std(vals)), 0.1)
             self.personal_baseline = {'mu': mu, 'sigma': sigma}
             self._save()
-            print(f"[PersonalBaseline] 个人基线已就绪!")
             return True
         return False
     def delete_baseline(self, pose, emotion):
@@ -377,7 +383,6 @@ class EmotionMapper:
         self.personal_baseline = None
         self.personal_baseline_samples = []
         self._save()
-        print("[PersonalBaseline] 个人基线已重置")
         return True
     @staticmethod
     def get_pose(pitch, yaw):
@@ -542,26 +547,6 @@ class EmotionMapper:
         elif self.last_emotion == 'negative': raw = 'neutral' if s_act < s_thr_adj * 0.4 else 'negative'
         else: raw = 'neutral'
         
-        # 类间距离佐证，用于调整置信度
-        if self.config.get('enable_interclass_verify', True):
-            verify_emotion = self._compute_interclass_verify(au, pose)
-            if verify_emotion is not None:
-                boost = self.config.get('verify_boost_factor', 1.15)
-                reduce = self.config.get('verify_reduce_factor', 0.85)
-                if verify_emotion == raw:
-                    # 匹配，提高置信度
-                    scores[raw] = min(1.0, scores[raw] * boost)
-                    # 归一化
-                    total = sum(scores.values()) + 1e-6
-                    scores = {e: v/total for e, v in scores.items()}
-                elif verify_emotion != 'neutral' and verify_emotion != raw:
-                    # 不匹配，降低置信度，提高neutral
-                    scores[raw] = max(0.05, scores[raw] * reduce)
-                    scores['neutral'] = min(0.95, scores['neutral'] + (1 - reduce) * 0.5)
-                    # 归一化
-                    total = sum(scores.values()) + 1e-6
-                    scores = {e: v/total for e, v in scores.items()}
-        
         # 类间距离佐证，用于调整置信度（默认关闭）
         if self.config.get('enable_interclass_verify', False):
             verify_emotion = self._compute_interclass_verify(au, pose)
@@ -599,8 +584,6 @@ class FERDetector:
             self.net = cv2.dnn.readNetFromONNX(model_path)
             self.net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
             self.net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
-            print(f"[FER+] 权重已加载: {model_path}")
-        else: print(f"[FER+] 权重缺失: {model_path}")
 
     def predict(self, aligned_64):
         if self.net is None: return "neutral", 0.0, np.zeros(8)
@@ -691,13 +674,49 @@ class EmotionEngine:
         self.annotated = None
         self.t0 = time.time(); self._fc_au = 0; self._fc_fer = 2
         
-        self.au_result = {'emotion':'no_face','confidence':0.,'scores':{'neutral':0,'positive':0,'negative':0},'pose':'-','pitch':0,'yaw':0,'roll':0,'au':{},'speaking':False,'calibrating':False,'calib_pose':None,'calib_emotion':None,'calib_count':0,'personal_samples':0,'personal_ready':False}
+        self.au_result = {'emotion':'no_face','confidence':0.,'scores':{'neutral':0,'positive':0,'negative':0},'pose':'-','pitch':0,'yaw':0,'roll':0,'au':{},'speaking':False,'calibrating':False,'calib_pose':None,'calib_emotion':None,'calib_count':0,'personal_samples':0,'personal_ready':False,'engagement':'None'}
         self.fer_result = {'label':'neutral','conf':0.0,'probs_3':{'neutral':0,'positive':0,'negative':0},'has_face':False}
+        
+        # 专注度估算相关
+        self.engagement_buffer = deque(maxlen=15)  # 15帧平滑窗口
         
         # 画面快照缓存（最近20次）
         self.snapshots = deque(maxlen=20)
         self.prev_emotion = None
         self.last_snap_time = 0  # 上次快照时间
+
+    def estimate_engagement(self, pitch, yaw, iris_pos=None):
+        """
+        基于姿态和视线的专注度估计
+        pitch: 负值代表低头，正值代表抬头 (SixDRepNet坐标系)
+        iris_pos: [x, y] 虹膜相对坐标，None表示无数据
+        """
+        # 1. 阈值定义 (建议通过校准获得)
+        PITCH_THRESHOLD = -15.0  # 低头角度阈值（负值，因为在SixDRepNet中负值表示低头）
+        Y_GAZE_THRESHOLD = 0.6  # 视线偏下的阈值 (0.5为中心)
+        
+        # 2. 瞬时判定
+        # 注意：在SixDRepNet中，pitch负值表示低头，正值表示抬头
+        is_head_down = pitch < PITCH_THRESHOLD  # pitch < -15 表示低头超过15度
+        is_looking_down = iris_pos[1] > Y_GAZE_THRESHOLD if iris_pos else False
+        
+        # 3. 逻辑组合
+        if is_head_down and is_looking_down:
+            current_eng = "High"
+        elif is_head_down or is_looking_down:
+            current_eng = "Low"
+        else:
+            current_eng = "None"
+        
+        # 4. 时间平滑 (重要：防止数值抖动)
+        self.engagement_buffer.append(current_eng)
+        # 取最近 15 帧出现频率最高的作为最终状态
+        if len(self.engagement_buffer) > 0:
+            final_eng = max(set(self.engagement_buffer), key=self.engagement_buffer.count)
+        else:
+            final_eng = "None"
+        
+        return final_eng
 
     def grab_loop(self):
         if not self.cap.isOpened(): return
@@ -826,17 +845,21 @@ class EmotionEngine:
                         last_yaw = yaw
                         au = self.au_ext.predict(frame, lm)
                         
+                        # 估算专注度（基于头部姿态）
+                        # 注意：这里暂时只用姿态估算，因为需要更复杂的视线追踪才能获取iris_pos
+                        # 如果未来集成视线追踪，可以传入iris_pos
+                        iris_pos = None  # [x, y] 虹膜相对坐标，暂无数据
+                        engagement = self.estimate_engagement(pitch, yaw, iris_pos)
+                        
                         # 更新个人基线：当FER+检测到高信度正脸中性时（仅在功能开启时）
                         if self.mapper.config.get('enable_personal_baseline', False):
                             fer_label = self.fer_result.get('label')
                             fer_conf = self.fer_result.get('conf', 0.0)
                             fer_probs = self.fer_result.get('probs_3', {})
                             neutral_prob = fer_probs.get('neutral', 0)
-                            # 打印调试信息
-                            print(f"[PersonalBaseline] FER: label={fer_label}, conf={fer_conf:.2f}, neutral_prob={neutral_prob:.2f}, pitch={pitch:.1f}, yaw={yaw:.1f}")
-                            
-                            if au and fer_label == 'neutral' and fer_conf > 0.7 and neutral_prob > 0.7:
-                                self.mapper.update_personal_baseline(au, pitch, yaw)
+                            # 判断当前帧是否平静：FER+检测到高置信度中性
+                            is_calm = (au and fer_label == 'neutral' and fer_conf > 0.7 and neutral_prob > 0.7)
+                            self.mapper.update_personal_baseline(au, pitch, yaw, is_calm)
                         
                         if self.mapper.calibrating and au:
                             cp, ce = self.mapper.calibrating; cnt = self.mapper.feed_calib(au, yaw)
@@ -849,13 +872,13 @@ class EmotionEngine:
                         personal_samples = len(self.mapper.personal_baseline_samples)
                         personal_ready = self.mapper.personal_baseline is not None
                         
-                        res.update(pose=pose, emotion=emotion, confidence=round(conf,3), pitch=round(pitch,1), yaw=round(yaw,1), roll=round(roll,1), scores={k:round(v,3) for k,v in scores.items()}, au={k:round(v,1) for k,v in au.items()} if au else {}, speaking=speaking, personal_samples=personal_samples, personal_ready=personal_ready)
+                        res.update(pose=pose, emotion=emotion, confidence=round(conf,3), pitch=round(pitch,1), yaw=round(yaw,1), roll=round(roll,1), scores={k:round(v,3) for k,v in scores.items()}, au={k:round(v,1) for k,v in au.items()} if au else {}, speaking=speaking, personal_samples=personal_samples, personal_ready=personal_ready, engagement=engagement)
                     else:
                         # 更新个人基线状态（即使无人脸）
                         personal_samples = len(self.mapper.personal_baseline_samples)
                         personal_ready = self.mapper.personal_baseline is not None
                         
-                        res.update(emotion='no_face', au={}, scores={'neutral':0,'positive':0,'negative':0}, speaking=False, personal_samples=personal_samples, personal_ready=personal_ready)
+                        res.update(emotion='no_face', au={}, scores={'neutral':0,'positive':0,'negative':0}, speaking=False, personal_samples=personal_samples, personal_ready=personal_ready, engagement='None')
                     
                     self.au_result = res
                     emotion_logger.log(self.au_result, self.fer_result, self.get_fusion())
@@ -1073,6 +1096,13 @@ def api_snapshots():
                 del item['img_raw']
             result.append(item)
         return jsonify(result)
+
+@app.route("/api/emodata/latest")
+def api_emodata_latest():
+    data = emotion_logger.get_latest_data()
+    if data is None:
+        return jsonify({"records": [], "summary": {"au": {}, "fer": {}, "fusion": {}}})
+    return jsonify(data)
 
 @app.route("/api/all")
 def api_all():

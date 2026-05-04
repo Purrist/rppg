@@ -3,58 +3,27 @@ import serial
 import struct
 import time
 import threading
-import json
-import os
-import logging
 from collections import deque
 from flask import Flask, render_template_string, jsonify, request
-
-# 禁用Flask的访问日志
-log = logging.getLogger('werkzeug')
-log.setLevel(logging.ERROR)
 
 # ====================== 配置 ======================
 PORT = "COM9"
 BAUD = 115200
 
 # ====================== 全局数据 ======================
-data = {"breath": 0, "heart": 0, "distance": 0.0, "human": False, "mode": "smooth", "human_count": 0}
-raw_data_cache_global = {"breath": 0, "heart": 0, "human": False, "human_count": 0}
+data = {"breath": 0, "heart": 0, "distance": 0.0, "human": False, "mode": "smooth"}
 
 realtime_buf = {"time": [], "breath": [], "heart": []}
 longterm_buf = {"time": [], "breath": [], "heart": []}
 
-# -------------------- 低频模式 --------------------
-lowfreq_buf = {"breath": [], "heart": []}
-lowfreq_last_time = 0.0
-lowfreq_data = {"breath": 0, "heart": 0}
-
-# ====================== JSON 文件配置 ======================
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-JSON_DIR = os.path.join(SCRIPT_DIR)
-RAW_JSON_FILE = os.path.join(JSON_DIR, "raw_data.json")
-SMOOTH_JSON_FILE = os.path.join(JSON_DIR, "smooth_data.json")
-
-def init_json_files():
-    for f in [RAW_JSON_FILE, SMOOTH_JSON_FILE]:
-        with open(f, 'w', encoding='utf-8') as fp:
-            json.dump({"time": [], "breath": [], "heart": [], "human": []}, fp)
-    print(f"✅ JSON文件已创建: {RAW_JSON_FILE}, {SMOOTH_JSON_FILE}")
-
-def write_json_file(filepath, time_data, breath_data, heart_data, human_data):
-    try:
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump({
-                "time": time_data,
-                "breath": breath_data,
-                "heart": heart_data,
-                "human": human_data
-            }, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        print(f"❌ 写入JSON失败 {filepath}: {e}")
-
-# -------------------- 0值插值器 --------------------
+# ---- 0值插值器 ----
 class ZeroInterpolator:
+    """
+    对传感器偶发的 0 值做延迟窗口线性插值。
+    例: 98, 0, 0, 69  ->  98, 90, 80, 69
+    例: 98, 0, 95     ->  98, 98, 95  (或 98, 96, 95，取决于窗口内有效值)
+    引入约 (window-1) * SAMPLE_INTERVAL 秒的延迟。
+    """
     def __init__(self, window=5):
         self.raw_buf = deque(maxlen=window)
         self.window = window
@@ -63,9 +32,12 @@ class ZeroInterpolator:
         self.raw_buf.append(float(raw))
         arr = list(self.raw_buf)
         n = len(arr)
+
+        # 找有效值索引
         valid_idx = [i for i, v in enumerate(arr) if v > 0]
 
         if len(valid_idx) >= 2:
+            # 被有效值包围的 0 做线性插值；边缘 0 做最近有效值填充
             for i in range(n):
                 if arr[i] == 0:
                     left = max([j for j in valid_idx if j < i], default=None)
@@ -78,10 +50,13 @@ class ZeroInterpolator:
                     elif right is not None:
                         arr[i] = arr[right]
         elif len(valid_idx) == 1:
+            # 只有一个有效值，全部填充
             for i in range(n):
                 if arr[i] == 0:
                     arr[i] = arr[valid_idx[0]]
+        # 全 0 则保持原样
 
+        # 返回最旧值（延迟输出），缓冲未满时返回最新插值结果
         if n >= self.window:
             return round(arr[0])
         else:
@@ -90,14 +65,15 @@ class ZeroInterpolator:
     def flush(self):
         self.raw_buf.clear()
 
+
 breath_interp = ZeroInterpolator(window=5)
 heart_interp = ZeroInterpolator(window=5)
 
-# -------------------- 平滑状态 --------------------
-breath_hist = []
-heart_hist = []
-breath_ema = 0.0
-heart_ema = 0.0
+# ---- 平滑状态 ----
+breath_hist = []          # 中值滤波历史
+heart_hist = []           # 中值滤波历史
+breath_ema = 0.0          # EMA 状态
+heart_ema = 0.0           # EMA 状态
 ema_initialized = {"breath": False, "heart": False}
 
 last_human_time = 0.0
@@ -107,7 +83,7 @@ last_valid_data = {"breath": 0, "heart": 0}
 consecutive_invalid_count = 0
 data_status = "normal"
 
-# -------------------- 参数 --------------------
+# ---- 参数 ----
 MEDIAN_WINDOW = 7
 EMA_ALPHA_BREATH = 0.15
 EMA_ALPHA_HEART = 0.25
@@ -150,35 +126,16 @@ def ema_filter(v, prev, alpha, initialized):
 def clamp(v, lo, hi):
     return max(lo, min(hi, v))
 
-def process_lowfreq(b, h):
-    global lowfreq_buf, lowfreq_last_time, lowfreq_data
-    now = time.time()
-    
-    # 收集数据
-    if b > 0:
-        lowfreq_buf["breath"].append(b)
-    if h > 0:
-        lowfreq_buf["heart"].append(h)
-    
-    # 每2秒更新一次均值
-    if now - lowfreq_last_time >= 2.0:
-        if len(lowfreq_buf["breath"]) > 0:
-            lowfreq_data["breath"] = round(sum(lowfreq_buf["breath"]) / len(lowfreq_buf["breath"]))
-        if len(lowfreq_buf["heart"]) > 0:
-            lowfreq_data["heart"] = round(sum(lowfreq_buf["heart"]) / len(lowfreq_buf["heart"]))
-        
-        # 清空缓冲区
-        lowfreq_buf["breath"].clear()
-        lowfreq_buf["heart"].clear()
-        lowfreq_last_time = now
-    
-    return lowfreq_data["breath"], lowfreq_data["heart"]
-
 def process_sensor_data(new_b, new_h, is_human):
+    """
+    处理传感器数据：
+    1. 无人且 < AWAY_FADE_DURATION：线性淡出到 0
+    2. 无人且 >= AWAY_FADE_DURATION：强制归零并清空所有状态
+    3. 有人：中值滤波去尖峰 → EMA 平滑 → 自适应异常检测
+    """
     global last_valid_data, consecutive_invalid_count, data_status
     global breath_ema, heart_ema, ema_initialized
     global away_start_time
-    global lowfreq_buf, lowfreq_data, lowfreq_last_time
 
     now = time.time()
 
@@ -204,26 +161,30 @@ def process_sensor_data(new_b, new_h, is_human):
             ema_initialized = {"breath": False, "heart": False}
             breath_hist.clear()
             heart_hist.clear()
+            # 清空插值器，避免旧数据干扰下次回座
             breath_interp.flush()
             heart_interp.flush()
-            # 清理低频数据
-            lowfreq_buf["breath"].clear()
-            lowfreq_buf["heart"].clear()
-            lowfreq_data = {"breath": 0, "heart": 0}
-            lowfreq_last_time = 0.0
             data_status = "away"
             return 0, 0, "away"
 
+    # 回座，重置离座计时
     away_start_time = None
 
+    # 中值滤波
     b_med = median_filter(new_b, breath_hist, MEDIAN_WINDOW)
     h_med = median_filter(new_h, heart_hist, MEDIAN_WINDOW)
 
-    b_ema, ema_initialized["breath"] = ema_filter(b_med, breath_ema, EMA_ALPHA_BREATH, ema_initialized["breath"])
-    h_ema, ema_initialized["heart"] = ema_filter(h_med, heart_ema, EMA_ALPHA_HEART, ema_initialized["heart"])
+    # EMA 平滑
+    b_ema, ema_initialized["breath"] = ema_filter(
+        b_med, breath_ema, EMA_ALPHA_BREATH, ema_initialized["breath"]
+    )
+    h_ema, ema_initialized["heart"] = ema_filter(
+        h_med, heart_ema, EMA_ALPHA_HEART, ema_initialized["heart"]
+    )
     breath_ema = b_ema
     heart_ema = h_ema
 
+    # 异常检测
     is_b_invalid = (new_b == 0 or abs(new_b - last_valid_data["breath"]) > DIFF_THRESHOLD_BREATH) \
         if last_valid_data["breath"] > 0 else (new_b == 0)
     is_h_invalid = (new_h == 0 or abs(new_h - last_valid_data["heart"]) > DIFF_THRESHOLD_HEART) \
@@ -247,11 +208,12 @@ def process_sensor_data(new_b, new_h, is_human):
         last_valid_data["heart"] = h_ema
         return round(b_ema), round(h_ema), "normal"
 
+
 # ====================== 串口任务 ======================
 def serial_task():
     global last_human_time
     buf = b""
-    raw_data_cache = {"breath": 0, "heart": 0, "breath_valid": False, "heart_valid": False, "human_count": 0}
+    raw_data_cache = {"breath": 0, "heart": 0, "breath_valid": False, "heart_valid": False}
     try:
         ser = serial.Serial(PORT, BAUD, timeout=0.005)
         print("✅ 串口已打开")
@@ -293,23 +255,15 @@ def serial_task():
                         if mode == "smooth":
                             data["breath"] = clamp(processed_breath, 4, 60)
                             data["heart"] = clamp(processed_heart, 30, 180)
-                        elif mode == "lowfreq":
-                            lf_breath, lf_heart = process_lowfreq(raw_data_cache["breath"], raw_data_cache["heart"])
-                            data["breath"] = clamp(lf_breath, 4, 60)
-                            data["heart"] = clamp(lf_heart, 30, 180)
                         else:
                             data["breath"] = raw_data_cache["breath"]
                             data["heart"] = raw_data_cache["heart"]
 
                         data["human"] = is_human
-                        data["human_count"] = raw_data_cache["human_count"]
-                        raw_data_cache_global["breath"] = raw_data_cache["breath"]
-                        raw_data_cache_global["heart"] = raw_data_cache["heart"]
-                        raw_data_cache_global["human"] = is_human
-                        raw_data_cache_global["human_count"] = raw_data_cache["human_count"]
 
                     elif tid == 0x0A14:
                         raw = round(float_le(fd[:4]))
+                        # 先过 0 值插值器，再存缓存
                         raw_data_cache["breath"] = breath_interp.feed(raw)
                         raw_data_cache["breath_valid"] = (4 <= raw <= 60)
 
@@ -322,15 +276,9 @@ def serial_task():
                         flag = struct.unpack('<I', fd[0:4])[0]
                         data["distance"] = round(float_le(fd[4:8]), 1) if flag == 1 else 0.0
 
-                    elif tid == 0x0A18 and len(fd) >= 2:
-                        target_count = struct.unpack('<H', fd[:2])[0]
-                        raw_data_cache["human_count"] = target_count
-
                 time.sleep(0.001)
     except Exception as e:
         print("串口异常:", e)
-        time.sleep(2)
-        print("尝试重新连接串口...")
 
 # ====================== 采样任务 ======================
 def sampler_task():
@@ -346,33 +294,6 @@ def sampler_task():
                     store["time"].pop(0)
                     store["breath"].pop(0)
                     store["heart"].pop(0)
-
-            write_json_file(
-                SMOOTH_JSON_FILE,
-                list(realtime_buf["time"]),
-                list(realtime_buf["breath"]),
-                list(realtime_buf["heart"]),
-                [data["human"]] * len(realtime_buf["time"])
-            )
-
-            if not hasattr(sampler_task, 'raw_buf'):
-                sampler_task.raw_buf = {"time": [], "breath": [], "heart": [], "human": []}
-            sampler_task.raw_buf["time"].append(ts)
-            sampler_task.raw_buf["breath"].append(raw_data_cache_global["breath"])
-            sampler_task.raw_buf["heart"].append(raw_data_cache_global["heart"])
-            sampler_task.raw_buf["human"].append(raw_data_cache_global["human"])
-            if len(sampler_task.raw_buf["time"]) > LONGTERM_MAX:
-                sampler_task.raw_buf["time"] = sampler_task.raw_buf["time"][-LONGTERM_MAX:]
-                sampler_task.raw_buf["breath"] = sampler_task.raw_buf["breath"][-LONGTERM_MAX:]
-                sampler_task.raw_buf["heart"] = sampler_task.raw_buf["heart"][-LONGTERM_MAX:]
-                sampler_task.raw_buf["human"] = sampler_task.raw_buf["human"][-LONGTERM_MAX:]
-            write_json_file(
-                RAW_JSON_FILE,
-                list(sampler_task.raw_buf["time"]),
-                list(sampler_task.raw_buf["breath"]),
-                list(sampler_task.raw_buf["heart"]),
-                list(sampler_task.raw_buf["human"])
-            )
 
 # ====================== Flask ======================
 app = Flask(__name__)
@@ -391,12 +312,11 @@ HTML_PAGE = r"""<!DOCTYPE html>
 html,body{width:100%;height:100%;background:#0c1018;color:#c8cee0;overflow:hidden}
 .wrapper{display:grid;grid-template-rows:auto 1fr 1.5fr auto;height:100vh;gap:10px;padding:14px 16px}
 .top-bar{display:flex;align-items:center;justify-content:space-between}
-.cards{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;flex:1}
+.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;flex:1}
 .card{background:linear-gradient(135deg,#151c2c,#1a2236);border-radius:10px;padding:14px 18px;position:relative;overflow:hidden;border:1px solid #232e44;transition:border-color 0.3s}
 .card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:3px 0 0 3px;transition:background 0.3s}
 .card.blue::before{background:#4285F4}.card.red::before{background:#EA4335}
 .card.green::before{background:#34A853}.card.yellow::before{background:#FBBC05}
-.card.purple::before{background:#9C27B0}
 .card.status-normal{border-color:#34A853}
 .card.status-compensating{border-color:#FBBC05}
 .card.status-compensating::before{background:#FBBC05}
@@ -409,7 +329,6 @@ html,body{width:100%;height:100%;background:#0c1018;color:#c8cee0;overflow:hidde
 .card .unit{font-size:12px;color:#556;margin-left:4px;font-weight:400}
 .blue .val{color:#4285F4}.red .val{color:#EA4335}
 .green .val{color:#34A853}.yellow .val{color:#FBBC05}
-.purple .val{color:#9C27B0}
 .card.status-away .val{color:#555}
 .card.status-compensating .val{color:#FBBC05}
 .card.status-recovered .val{color:#4285F4}
@@ -437,7 +356,6 @@ html,body{width:100%;height:100%;background:#0c1018;color:#c8cee0;overflow:hidde
 .mode-tag{font-size:10px;padding:2px 8px;border-radius:4px;font-weight:600;margin-left:8px}
 .mode-tag.smooth{background:rgba(66,133,244,.15);color:#4285F4}
 .mode-tag.raw{background:rgba(234,67,53,.15);color:#EA4335}
-.mode-tag.lowfreq{background:rgba(156,39,176,.15);color:#9C27B0}
 .status-sub{font-size:10px;margin-top:4px;color:#6b7a94}
 </style>
 </head>
@@ -460,11 +378,6 @@ html,body{width:100%;height:100%;background:#0c1018;color:#c8cee0;overflow:hidde
         <div><span class="val" id="vDist">-</span><span class="unit">cm</span></div>
         <div class="status-sub" id="statusDist">正常</div>
       </div>
-      <div class="card purple" id="cardPeople">
-        <div class="label">人数</div>
-        <div><span class="val" id="vPeople">-</span><span class="unit">人</span></div>
-        <div class="status-sub" id="statusPeople">正常</div>
-      </div>
       <div class="card yellow" id="cardStatus">
         <div class="label">状态</div>
         <div class="val" id="vHuman" style="font-size:22px">
@@ -476,7 +389,6 @@ html,body{width:100%;height:100%;background:#0c1018;color:#c8cee0;overflow:hidde
     </div>
     <div class="mode-group">
       <button class="mode-btn active" id="btnSmooth" onclick="setMode('smooth')">平滑模式</button>
-      <button class="mode-btn" id="btnLowfreq" onclick="setMode('lowfreq')">低频</button>
       <button class="mode-btn" id="btnRaw" onclick="setMode('raw')">源数据</button>
     </div>
   </div>
@@ -519,11 +431,11 @@ function fmtTs(ts) {
            String(d.getMinutes()).padStart(2,'0') + ':' +
            String(d.getSeconds()).padStart(2,'0');
 }
-function makeOpts(isZoomable, yMin, yMax, tension) {
+function makeOpts(isZoomable, yMin, yMax) {
     return {
         responsive: true, maintainAspectRatio: false, animation: false,
         interaction: { intersect: false, mode: 'index' },
-        elements: { point: { radius: 0 }, line: { borderWidth: 1.8, tension: tension } },
+        elements: { point: { radius: 0 }, line: { borderWidth: 1.8, tension: 0.3 } },
         scales: {
             x: { type: 'linear', grid: { color: '#1a2236', drawBorder: false },
                  ticks: { color: '#3a4a64', font: { size: 10 }, maxTicksLimit: 8,
@@ -552,53 +464,23 @@ var bMin = 0, bMax = 30, hMin = 40, hMax = 120;
 var rtB = new Chart(document.getElementById('rtBreath'), {
     type: 'line',
     data: { datasets: [{ label: '呼吸率', data: [], borderColor: '#4285F4', backgroundColor: 'rgba(66,133,244,0.08)', fill: true }] },
-    options: makeOpts(false, bMin, bMax, 0.3)
+    options: makeOpts(false, bMin, bMax)
 });
 var rtH = new Chart(document.getElementById('rtHeart'), {
     type: 'line',
     data: { datasets: [{ label: '心率', data: [], borderColor: '#EA4335', backgroundColor: 'rgba(234,67,53,0.08)', fill: true }] },
-    options: makeOpts(false, hMin, hMax, 0.3)
+    options: makeOpts(false, hMin, hMax)
 });
 var ltB = new Chart(document.getElementById('ltBreath'), {
     type: 'line',
     data: { datasets: [{ label: '呼吸率', data: [], borderColor: '#4285F4', backgroundColor: 'rgba(66,133,244,0.06)', fill: true }] },
-    options: makeOpts(true, bMin, bMax, 0.3)
+    options: makeOpts(true, bMin, bMax)
 });
 var ltH = new Chart(document.getElementById('ltHeart'), {
     type: 'line',
     data: { datasets: [{ label: '心率', data: [], borderColor: '#EA4335', backgroundColor: 'rgba(234,67,53,0.06)', fill: true }] },
-    options: makeOpts(true, hMin, hMax, 0.3)
+    options: makeOpts(true, hMin, hMax)
 });
-
-function updateChartTension(mode) {
-    var tension;
-    if (mode === 'lowfreq') {
-        tension = 0.0; // 低频模式用阶梯状
-    } else if (mode === 'smooth') {
-        tension = 0.4; // 平滑模式中等
-    } else {
-        tension = 0.1; // 源数据模式更少平滑
-    }
-    [rtB, rtH, ltB, ltH].forEach(function(c) {
-        c.options.elements.line.tension = tension;
-        c.update('none');
-    });
-}
-
-// 对低频模式数据进行降采样
-function downsampleForLowfreq(times, vals) {
-    if (currentMode !== 'lowfreq') return toPoints(times, vals);
-    
-    var result = [];
-    var lastTime = -1;
-    for (var i = 0; i < times.length; i++) {
-        if (times[i] - lastTime >= 2 || lastTime === -1) {
-            result.push({ x: times[i], y: vals[i] });
-            lastTime = times[i];
-        }
-    }
-    return result;
-}
 document.getElementById('ltBreath').addEventListener('dblclick', function() { ltB.resetZoom(); });
 document.getElementById('ltHeart').addEventListener('dblclick', function() { ltH.resetZoom(); });
 function toPoints(times, vals) {
@@ -610,18 +492,10 @@ var currentMode = 'smooth';
 function setMode(m) {
     currentMode = m;
     document.getElementById('btnSmooth').className = 'mode-btn' + (m === 'smooth' ? ' active' : '');
-    document.getElementById('btnLowfreq').className = 'mode-btn' + (m === 'lowfreq' ? ' active' : '');
     document.getElementById('btnRaw').className = 'mode-btn' + (m === 'raw' ? ' active' : '');
     var tag = document.getElementById('modeTag');
     tag.className = 'mode-tag ' + m;
-    if (m === 'smooth') {
-        tag.textContent = '平滑';
-    } else if (m === 'lowfreq') {
-        tag.textContent = '低频';
-    } else {
-        tag.textContent = '源数据';
-    }
-    updateChartTension(m);
+    tag.textContent = m === 'smooth' ? '平滑' : '源数据';
     fetch('/mode?v=' + m);
 }
 function applyScale() {
@@ -640,15 +514,14 @@ setInterval(function() {
         document.getElementById('vBreath').textContent = d.breath;
         document.getElementById('vHeart').textContent = d.heart;
         document.getElementById('vDist').textContent = d.distance;
-        document.getElementById('vPeople').textContent = d.human_count;
         var dot = document.getElementById('dotHuman');
         var txt = document.getElementById('txtHuman');
         if (d.human) { dot.className = 'status-dot on'; txt.textContent = '有人'; }
         else { dot.className = 'status-dot off'; txt.textContent = '无人'; }
         var status = d.status || 'normal';
-        var cards = ['cardBreath', 'cardHeart', 'cardDist', 'cardPeople', 'cardStatus'];
+        var cards = ['cardBreath', 'cardHeart', 'cardDist', 'cardStatus'];
         var statusLabels = { 'normal': '正常', 'compensating': '补偿中', 'away': '离座', 'recovered': '已恢复' };
-        var statusTexts = { 'normal': '数据正常', 'compensating': '惯性滑动中', 'away': '无人检测', 'recovered': '数据已恢复' };
+        var statusTexts = { 'normal': '数据正常', 'compensating': '数据波动，保持中', 'away': '无人检测', 'recovered': '数据已恢复' };
         cards.forEach(function(id) {
             var el = document.getElementById(id);
             el.className = el.className.replace(/status-\w+/g, '');
@@ -657,23 +530,21 @@ setInterval(function() {
         document.getElementById('statusBreath').textContent = statusLabels[status];
         document.getElementById('statusHeart').textContent = statusLabels[status];
         document.getElementById('statusDist').textContent = statusLabels[status];
-        document.getElementById('statusPeople').textContent = statusLabels[status];
         document.getElementById('statusText').textContent = statusTexts[status];
         if (d.mode !== currentMode) setMode(d.mode);
-        rtB.data.datasets[0].data = downsampleForLowfreq(d.rt.time, d.rt.breath);
-        rtH.data.datasets[0].data = downsampleForLowfreq(d.rt.time, d.rt.heart);
+        rtB.data.datasets[0].data = toPoints(d.rt.time, d.rt.breath);
+        rtH.data.datasets[0].data = toPoints(d.rt.time, d.rt.heart);
         rtB.update('none');
         rtH.update('none');
     });
 }, 250);
 setInterval(function() {
     fetch('/longterm').then(function(r) { return r.json(); }).then(function(d) {
-        ltB.data.datasets[0].data = downsampleForLowfreq(d.time, d.breath);
-        ltH.data.datasets[0].data = downsampleForLowfreq(d.time, d.heart);
+        ltB.data.datasets[0].data = toPoints(d.time, d.breath);
+        ltH.data.datasets[0].data = toPoints(d.time, d.heart);
         ltB.update('none');
         ltH.update('none');
-        var displayData = currentMode === 'lowfreq' ? ltB.data.datasets[0].data.length : d.time.length;
-        document.getElementById('pointInfo').textContent = displayData + ' 点';
+        document.getElementById('pointInfo').textContent = d.time.length + ' 点';
     });
 }, 2000);
 </script>
@@ -692,7 +563,6 @@ def get_data():
               "heart": list(realtime_buf["heart"])}
     return jsonify({"breath": data["breath"], "heart": data["heart"],
                     "distance": data["distance"], "human": data["human"],
-                    "human_count": data["human_count"],
                     "mode": data["mode"], "status": data_status, "rt": rt})
 
 @app.route('/longterm')
@@ -709,7 +579,6 @@ def set_mode():
     return "ok"
 
 if __name__ == "__main__":
-    init_json_files()
     threading.Thread(target=serial_task, daemon=True).start()
     threading.Thread(target=sampler_task, daemon=True).start()
     app.run(host="127.0.0.1", port=5001, debug=False, use_reloader=False)
