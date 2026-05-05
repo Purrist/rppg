@@ -1,6 +1,3 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>生理监测</title>
@@ -323,6 +320,7 @@
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    parsing: false,
                     animation: { duration: 0 },
                     plugins: { legend: { display: false } },
                     scales: {
@@ -366,6 +364,7 @@
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    parsing: false,
                     animation: { duration: 0 },
                     plugins: { legend: { display: true, labels: { color: '#4b5563', font: { size: 8 }, boxWidth: 8 } } },
                     scales: {
@@ -420,6 +419,7 @@
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    parsing: false,
                     animation: { duration: 0 },
                     plugins: { legend: { display: true, labels: { color: '#4b5563', font: { size: 8 }, boxWidth: 8 } } },
                     scales: {
@@ -469,6 +469,7 @@
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    parsing: false,
                     animation: { duration: 0 },
                     plugins: { legend: { display: true, labels: { color: '#4b5563', font: { size: 8 }, boxWidth: 8 } } },
                     scales: {
@@ -692,5 +693,3 @@
             tick();
         });
     </script>
-</body>
-</html>
