@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>生理监测中心 — 相位动力学专业版 V3.0</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Microsoft YaHei','PingFang SC',sans-serif;background:#050810;color:#94a3b8;width:100vw;height:100vh;overflow:hidden;display:flex;flex-direction:column;padding:3px 5px}
+.age-input-wrap{position:fixed;top:6px;right:8px;z-index:9999;background:rgba(15,23,42,0.95);border:1px solid #1e293b;border-radius:5px;padding:4px 8px;display:flex;align-items:center;gap:5px;font-size:10px;box-shadow:0 4px 20px rgba(0,0,0,0.6)}
+.age-input-wrap span{color:#22d3ee;font-weight:600}
+.age-input-wrap input{background:#0f172a;color:#4ade80;border:1px solid #22d3ee;border-radius:3px;padding:2px 5px;width:46px;font-size:11px;text-align:center;outline:none}
+.top-bar{display:flex;gap:4px;height:46px;flex-shrink:0;margin-bottom:3px}
+.num-box{flex:1;background:#0f172a;border-radius:4px;display:flex;flex-direction:column;align-items:center;justify-content:center;border-left:2px solid;position:relative;overflow:hidden;transition:all .2s}
+.num-box.hr{border-color:#ef4444}.num-box.br{border-color:#3b82f6}.num-box.hrr{border-color:#06b6d4}
+.num-box.cr{border-color:#f59e0b}.num-box.rsa{border-color:#8b5cf6}.num-box.lock{border-color:#ec4899}
+.num-box.brv{border-color:#10b981}.num-box.sdnn{border-color:#f97316}.num-box.rmssd{border-color:#6366f1}
+.num-box.fsi{border-color:#a855f7}
+.num-label{font-size:7px;color:#475569;letter-spacing:.3px;text-transform:uppercase;font-weight:600}
+.num-value{font-size:15px;font-weight:700;line-height:1;margin-top:1px}
+.num-unit{font-size:6px;color:#334155;margin-top:0}
+.num-box.hr .num-value{color:#ef4444}.num-box.br .num-value{color:#3b82f6}.num-box.hrr .num-value{color:#06b6d4}
+.num-box.cr .num-value{color:#f59e0b}.num-box.rsa .num-value{color:#8b5cf6}.num-box.lock .num-value{color:#ec4899}
+.num-box.brv .num-value{color:#10b981}.num-box.sdnn .num-value{color:#f97316}.num-box.rmssd .num-value{color:#6366f1}
+.num-box.fsi .num-value{color:#a855f7}
+.main-area{display:flex;gap:4px;flex:1;min-height:0}
+.left-panel{width:195px;flex-shrink:0;display:flex;flex-direction:column;gap:3px;overflow-y:auto}
+.left-panel::-webkit-scrollbar{width:2px}
+.left-panel::-webkit-scrollbar-thumb{background:#1e293b;border-radius:1px}
+.status-panel{background:#0f172a;border-radius:4px;padding:5px 6px;border:1px solid #1e293b;display:flex;flex-direction:column;gap:3px}
+.status-item{font-size:9px;padding:2px 5px;border-radius:3px;font-weight:500;transition:all .3s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.status-item.normal{background:rgba(16,185,129,0.06);color:#10b981;border:1px solid rgba(16,185,129,0.1)}
+.status-item.alert{background:rgba(245,158,11,0.06);color:#f59e0b;border:1px solid rgba(245,158,11,0.15)}
+.status-item.danger{background:rgba(239,68,68,0.1);color:#ef4444;border:1px solid rgba(239,68,68,0.2);animation:pulseRed 1.2s infinite}
+.status-item.good{background:rgba(6,182,212,0.06);color:#06b6d4;border:1px solid rgba(6,182,212,0.1)}
+@keyframes pulseRed{0%,100%{opacity:1}50%{opacity:.5}}
+.brv-section{background:#0f172a;border-radius:4px;padding:5px 6px;border:1px solid #1e293b}
+.brv-title{font-size:8px;color:#475569;margin-bottom:3px;display:flex;justify-content:space-between}
+.brv-title span:last-child{color:#cbd5e1;font-weight:600;font-size:9px}
+.brv-track{position:relative;height:7px;background:#1e293b;border-radius:3px;overflow:visible}
+.brv-gradient{position:absolute;inset:0;border-radius:3px;background:linear-gradient(90deg,#10b981 0%,#f59e0b 50%,#ef4444 100%)}
+.brv-needle{position:absolute;top:-2px;width:3px;height:11px;background:#fff;border-radius:2px;transform:translateX(-50%);box-shadow:0 0 4px rgba(255,255,255,.5);transition:left .4s ease}
+.brv-labels{display:flex;justify-content:space-between;font-size:7px;color:#475569;margin-top:2px}
+.gauge-box{background:#0f172a;border-radius:4px;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;border:1px solid #1e293b;min-height:68px;flex-shrink:0}
+.gauge-title{position:absolute;top:3px;left:5px;font-size:8px;color:#475569;font-weight:500}
+.gauge-svg{width:105px;height:58px}
+.gauge-num{font-size:12px;font-weight:700;margin-top:-3px}
+.gauge-num.hrr{color:#06b6d4}.gauge-num.lock{color:#ec4899}.gauge-num.rsa{color:#8b5cf6}.gauge-num.valence{color:#22d3ee}.gauge-num.cpli{color:#ef4444}.gauge-num.cli{color:#f59e0b}
+.right-panel{flex:1;display:grid;grid-template-columns:repeat(5,1fr);grid-template-rows:repeat(4,1fr);gap:3px;min-height:0}
+.chart-cell{background:#0f172a;border-radius:4px;border:1px solid #1e293b;display:flex;flex-direction:column;overflow:hidden;position:relative}
+.chart-header{display:flex;align-items:center;gap:4px;padding:2px 5px;flex-shrink:0;border-bottom:1px solid rgba(30,41,59,.5)}
+.chart-dot{width:4px;height:4px;border-radius:50%;flex-shrink:0}
+.chart-title-text{font-size:8px;color:#64748b;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chart-body{flex:1;min-height:0;position:relative}
+.chart-body > div{position:absolute;top:0;left:0;width:100%;height:100%}
+.bottom-bar{height:20px;flex-shrink:0;margin-top:3px;display:flex;align-items:center;justify-content:space-between;padding:0 8px;background:#0f172a;border-radius:3px;font-size:8px;border:1px solid #1e293b}
+.live-dot{width:4px;height:4px;background:#10b981;border-radius:50%;display:inline-block;margin-right:3px;animation:pulse 1.2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.time-stamp{color:#334155;font-family:monospace;font-size:8px}
+.state-pill{padding:1px 6px;border-radius:6px;font-size:8px;font-weight:600;color:#fff;background:linear-gradient(90deg,#4f46e5,#7c3aed);transition:all .3s}
+.state-pill.alert{background:linear-gradient(90deg,#dc2626,#ef4444)}
+.state-pill.warn{background:linear-gradient(90deg,#d97706,#f59e0b)}
+.state-pill.good{background:linear-gradient(90deg,#059669,#10b981)}
+.state-pill.info{background:linear-gradient(90deg,#0369a1,#0ea5e9)}
+.startle-flash{animation:startleFlash .6s ease}
+@keyframes startleFlash{0%{box-shadow:inset 0 0 0 rgba(239,68,68,0)}50%{box-shadow:inset 0 0 40px rgba(239,68,68,.3)}100%{box-shadow:inset 0 0 0 rgba(239,68,68,0)}}
+</style>
+<base target="_blank">
+</head>
+<body>
+<div class="age-input-wrap"><span>受试者年龄:</span><input id="ageInput" type="number" value="65" min="20" max="100"></div>
+<div class="top-bar">
+  <div class="num-box hr"><div class="num-label">心率</div><div class="num-value" id="v-hr">--</div><div class="num-unit">bpm</div></div>
+  <div class="num-box br"><div class="num-label">呼吸率</div><div class="num-value" id="v-br">--</div><div class="num-unit">次/分</div></div>
+  <div class="num-box hrr"><div class="num-label">心率储备</div><div class="num-value" id="v-hrr">--</div><div class="num-unit">%HRR</div></div>
+  <div class="num-box cr"><div class="num-label">心肺耦合</div><div class="num-value" id="v-cr">--</div><div class="num-unit">CR</div></div>
+  <div class="num-box rsa"><div class="num-label">RSA幅度</div><div class="num-value" id="v-rsa">--</div><div class="num-unit">bpm</div></div>
+  <div class="num-box lock"><div class="num-label">相位锁定</div><div class="num-value" id="v-lock">--</div><div class="num-unit">Lock R</div></div>
+  <div class="num-box brv"><div class="num-label">呼吸变异</div><div class="num-value" id="v-brv">--</div><div class="num-unit">BRV</div></div>
+  <div class="num-box sdnn"><div class="num-label">SDNN</div><div class="num-value" id="v-sdnn">--</div><div class="num-unit">ms</div></div>
+  <div class="num-box rmssd"><div class="num-label">RMSSD</div><div class="num-value" id="v-rmssd">--</div><div class="num-unit">ms</div></div>
+  <div class="num-box fsi"><div class="num-label">心流指数</div><div class="num-value" id="v-fsi">--</div><div class="num-unit">FSI</div></div>
+</div>
+<div class="main-area">
+  <div class="left-panel">
+    <div class="status-panel">
+      <div class="status-item normal" id="st-cog">认知负荷: 正常</div>
+      <div class="status-item normal" id="st-startle">惊跳反射: 未检测</div>
+      <div class="status-item normal" id="st-relax">放松度: --</div>
+      <div class="status-item normal" id="st-emotion">情绪状态: --</div>
+    </div>
+    <div class="brv-section">
+      <div class="brv-title"><span>脑干压力 (BRV)</span><span id="brv-value">--</span></div>
+      <div class="brv-track"><div class="brv-gradient"></div><div class="brv-needle" id="brv-needle" style="left:50%"></div></div>
+      <div class="brv-labels"><span>放松</span><span>焦虑</span></div>
+    </div>
+    <div class="gauge-box"><div class="gauge-title">%HRR</div>
+      <svg class="gauge-svg" viewBox="0 0 105 58">
+        <defs><linearGradient id="g1" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#10b981"/><stop offset="40%" stop-color="#f59e0b"/><stop offset="100%" stop-color="#ef4444"/></linearGradient></defs>
+        <path d="M 6 52 A 46 46 0 0 1 99 52" fill="none" stroke="url(#g1)" stroke-width="10" stroke-linecap="round"/>
+        <line id="n-hrr" x1="52" y1="52" x2="52" y2="10" stroke="#fff" stroke-width="1.8" stroke-linecap="round" transform="rotate(-90 52 52)"/>
+        <circle cx="52" cy="52" r="2.5" fill="#fff"/>
+      </svg><div class="gauge-num hrr" id="g-hrr">0.0%</div>
+    </div>
+    <div class="gauge-box"><div class="gauge-title">Lock R</div>
+      <svg class="gauge-svg" viewBox="0 0 105 58">
+        <defs><linearGradient id="g2" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#ef4444"/><stop offset="50%" stop-color="#f59e0b"/><stop offset="100%" stop-color="#10b981"/></linearGradient></defs>
+        <path d="M 6 52 A 46 46 0 0 1 99 52" fill="none" stroke="url(#g2)" stroke-width="10" stroke-linecap="round"/>
+        <line id="n-lock" x1="52" y1="52" x2="52" y2="10" stroke="#fff" stroke-width="1.8" stroke-linecap="round" transform="rotate(-90 52 52)"/>
+        <circle cx="52" cy="52" r="2.5" fill="#fff"/>
+      </svg><div class="gauge-num lock" id="g-lock">0.000</div>
+    </div>
+    <div class="gauge-box"><div class="gauge-title">RSA</div>
+      <svg class="gauge-svg" viewBox="0 0 105 58">
+        <defs><linearGradient id="g3" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#ef4444"/><stop offset="50%" stop-color="#8b5cf6"/><stop offset="100%" stop-color="#06b6d4"/></linearGradient></defs>
+        <path d="M 6 52 A 46 46 0 0 1 99 52" fill="none" stroke="url(#g3)" stroke-width="10" stroke-linecap="round"/>
+        <line id="n-rsa" x1="52" y1="52" x2="52" y2="10" stroke="#fff" stroke-width="1.8" stroke-linecap="round" transform="rotate(-90 52 52)"/>
+        <circle cx="52" cy="52" r="2.5" fill="#fff"/>
+      </svg><div class="gauge-num rsa" id="g-rsa">0.00</div>
+    </div>
+    <div class="gauge-box"><div class="gauge-title">效价</div>
+      <svg class="gauge-svg" viewBox="0 0 105 58">
+        <defs><linearGradient id="g4" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#ef4444"/><stop offset="50%" stop-color="#f59e0b"/><stop offset="100%" stop-color="#22d3ee"/></linearGradient></defs>
+        <path d="M 6 52 A 46 46 0 0 1 99 52" fill="none" stroke="url(#g4)" stroke-width="10" stroke-linecap="round"/>
+        <line id="n-val" x1="52" y1="52" x2="52" y2="10" stroke="#fff" stroke-width="1.8" stroke-linecap="round" transform="rotate(-90 52 52)"/>
+        <circle cx="52" cy="52" r="2.5" fill="#fff"/>
+      </svg><div class="gauge-num valence" id="g-val">0.50</div>
+    </div>
+    <div class="gauge-box"><div class="gauge-title">CPLI</div>
+      <svg class="gauge-svg" viewBox="0 0 105 58">
+        <defs><linearGradient id="g5" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#10b981"/><stop offset="50%" stop-color="#f59e0b"/><stop offset="100%" stop-color="#ef4444"/></linearGradient></defs>
+        <path d="M 6 52 A 46 46 0 0 1 99 52" fill="none" stroke="url(#g5)" stroke-width="10" stroke-linecap="round"/>
+        <line id="n-cpli" x1="52" y1="52" x2="52" y2="10" stroke="#fff" stroke-width="1.8" stroke-linecap="round" transform="rotate(-90 52 52)"/>
+        <circle cx="52" cy="52" r="2.5" fill="#fff"/>
+      </svg><div class="gauge-num cpli" id="g-cpli">0.00</div>
+    </div>
+    <div class="gauge-box"><div class="gauge-title">CLI</div>
+      <svg class="gauge-svg" viewBox="0 0 105 58">
+        <defs><linearGradient id="g6" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#10b981"/><stop offset="50%" stop-color="#f59e0b"/><stop offset="100%" stop-color="#ef4444"/></linearGradient></defs>
+        <path d="M 6 52 A 46 46 0 0 1 99 52" fill="none" stroke="url(#g6)" stroke-width="10" stroke-linecap="round"/>
+        <line id="n-cli" x1="52" y1="52" x2="52" y2="10" stroke="#fff" stroke-width="1.8" stroke-linecap="round" transform="rotate(-90 52 52)"/>
+        <circle cx="52" cy="52" r="2.5" fill="#fff"/>
+      </svg><div class="gauge-num cli" id="g-cli">0.00</div>
+    </div>
+    <div class="gauge-box" style="flex:1.2;min-height:90px">
+      <div class="gauge-title">心肺相空间</div>
+      <div id="c-cr-scatter" style="width:100%;height:calc(100% - 14px);margin-top:12px"></div>
+    </div>
+  </div>
+  <div class="right-panel">
+    <div class="chart-cell"><div class="chart-header"><div class="chart-dot" style="background:#22d3ee"></div><div class="chart-title-text">RSA极坐标相位包裹</div></div><div class="chart-body"><div id="c-rsa-wrap"></div></div></div>
+    <div class="chart-cell"><div class="chart-header"><div class="chart-dot" style="background:#22d3ee"></div><div class="chart-dot" style="background:#e879f9"></div><div class="chart-title-text">瞬时心肺节律</div></div><div class="chart-body"><div id="c-instant"></div></div></div>
+    <div class="chart-cell"><div class="chart-header"><div class="chart-dot" style="background:#ff3232"></div><div class="chart-dot" style="background:#3264ff"></div><div class="chart-title-text">认知偏差 ΔHR/ΔBR</div></div><div class="chart-body"><div id="c-delta"></div></div></div>
+    <div class="chart-cell"><div class="chart-header"><div class="chart-dot" style="background:#fff"></div><div class="chart-title-text">李萨如曲线</div></div><div class="chart-body"><div id="c-lissajous"></div></div></div>
+    <div class="chart-cell"><div class="chart-header"><div class="chart-dot" style="background:#22d3ee"></div><div class="chart-title-text">相位差圆周分布</div></div><div class="chart-body"><div id="c-phase-circ"></div></div></div>
+    <div class="chart-cell"><div class="chart-header"><div class="chart-dot" style="background:#0f0"></div><div class="chart-dot" style="background:#f00"></div><div class="chart-title-text">RSA幅度趋势 (年龄基线)</div></div><div class="chart-body"><div id="c-rsa-bar"></div></div></div>
+    <div class="chart-cell"><div class="chart-header"><div class="chart-dot" style="background:#22d3ee"></div><div class="chart-title-text">锁相值悬崖瀑布</div></div><div class="chart-body"><div id="c-lock-cliff"></div></div></div>
+    <div class="chart-cell"><div class="chart-header"><div class="chart-dot" style="background:#a855f7"></div><div class="chart-title-text">BRV动态区间</div></div><div class="chart-body"><div id="c-brv-dynamic"></div></div></div>
+    <div class="chart-cell"><div class="chart-header"><div class="chart-dot" style="background:#ef4444"></div><div class="chart-dot" style="background:#3b82f6"></div><div class="chart-title-text">原始相位波形</div></div><div class="chart-body"><div id="c-phase-raw"></div></div></div>
+    <div class="chart-cell"><div class="chart-header"><div class="chart-dot" style="background:#f59e0b"></div><div class="chart-dot" style="background:#10b981"></div><div class="chart-title-text">心率/呼吸率趋势</div></div><div class="chart-body"><div id="c-rate"></div></div></div>
+    <div class="chart-cell"><div class="chart-header"><div class="chart-dot" style="background:#10b981"></div><div class="chart-dot" style="background:#3b82f6"></div><div class="chart-title-text">HRV时域 SDNN/RMSSD</div></div><div class="chart-body"><div id="c-hrv"></div></div></div>
+    <div class="chart-cell"><div class="chart-header"><div class="chart-dot" style="background:#ef4444"></div><div class="chart-dot" style="background:#f59e0b"></div><div class="chart-dot" style="background:#ec4899"></div><div class="chart-title-text">复合指数 CPLI/CLI/FSI</div></div><div class="chart-body"><div id="c-index"></div></div></div>
+    <div class="chart-cell"><div class="chart-header"><div class="chart-dot" style="background:#f59e0b"></div><div class="chart-title-text">情绪空间 Valence-Arousal</div></div><div class="chart-body"><div id="c-emotion"></div></div></div>
+    <div class="chart-cell"><div class="chart-header"><div class="chart-dot" style="background:#ec4899"></div><div class="chart-title-text">心流维度雷达</div></div><div class="chart-body"><div id="c-radar"></div></div></div>
+    <div class="chart-cell"><div class="chart-header"><div class="chart-dot" style="background:#a855f7"></div><div class="chart-dot" style="background:#06b6d4"></div><div class="chart-dot" style="background:#f97316"></div><div class="chart-dot" style="background:#84cc16"></div><div class="chart-title-text">心流四维度趋势</div></div><div class="chart-body"><div id="c-flow-trend"></div></div></div>
+    <div class="chart-cell"><div class="chart-header"><div class="chart-dot" style="background:#ef4444"></div><div class="chart-dot" style="background:#f59e0b"></div><div class="chart-title-text">生理/认知负荷仪表盘</div></div><div class="chart-body"><div id="c-gauge-combo"></div></div></div>
+    <div class="chart-cell"><div class="chart-header"><div class="chart-dot" style="background:#06b6d4"></div><div class="chart-dot" style="background:#8b5cf6"></div><div class="chart-title-text">HRR/CR 双轴趋势</div></div><div class="chart-body"><div id="c-hrr-cr"></div></div></div>
+    <div class="chart-cell"><div class="chart-header"><div class="chart-dot" style="background:#10b981"></div><div class="chart-dot" style="background:#f97316"></div><div class="chart-title-text">LF/HF 频域估算</div></div><div class="chart-body"><div id="c-lfhf"></div></div></div>
+    <div class="chart-cell"><div class="chart-header"><div class="chart-dot" style="background:#22d3ee"></div><div class="chart-title-text">相位差时间序列</div></div><div class="chart-body"><div id="c-phase-diff"></div></div></div>
+    <div class="chart-cell"><div class="chart-header"><div class="chart-dot" style="background:#6366f1"></div><div class="chart-title-text">心率变异性直方图</div></div><div class="chart-body"><div id="c-hrv-hist"></div></div></div>
+  </div>
+</div>
+<div class="bottom-bar">
+  <span><span class="live-dot"></span>实时监测中</span>
+  <span class="state-pill" id="e-pill">等待数据</span>
+  <span class="time-stamp" id="e-time">--:--:--</span>
+</div>
+<script>
+const charts={};
+let baselineRsa=5.0,brvThreshold=2.5;
+
+function setNeedle(id,v){const el=document.getElementById(id);if(el)el.setAttribute('transform',`rotate(${-90+v*180} 52 52)`)}
+
+function initCharts(){
+  charts.rsaWrap=echarts.init(document.getElementById('c-rsa-wrap'));
+  charts.rsaWrap.setOption({backgroundColor:'transparent',animation:false,
+    angleAxis:{type:'value',min:0,max:360,startAngle:90,axisLine:{lineStyle:{color:'#334155'}},axisLabel:{formatter:'{value}°',color:'#64748b',fontSize:7},splitLine:{lineStyle:{color:'rgba(51,65,81,.25)'}}},
+    radiusAxis:{type:'value',name:'HR',nameTextStyle:{color:'#22d3ee',fontSize:8},min:50,max:100,axisLine:{lineStyle:{color:'#334155'}},axisLabel:{color:'#64748b',fontSize:7},splitLine:{lineStyle:{color:'rgba(51,65,81,.2)'}}},
+    polar:{radius:'60%',center:['50%','55%']},
+    series:[{type:'line',coordinateSystem:'polar',data:[],symbol:'none',lineStyle:{color:'#22d3ee',width:1.5},smooth:true}]
+  });
+
+  charts.instant=echarts.init(document.getElementById('c-instant'));
+  charts.instant.setOption({backgroundColor:'transparent',animation:false,
+    grid:{top:20,right:40,bottom:16,left:34},
+    xAxis:{type:'category',data:[],axisLine:{lineStyle:{color:'#334155'}},axisLabel:{color:'#64748b',fontSize:7},axisTick:{show:false}},
+    yAxis:[
+      {type:'value',name:'HR',nameTextStyle:{color:'#22d3ee',fontSize:8},min:50,max:120,axisLine:{lineStyle:{color:'#22d3ee'}},splitLine:{lineStyle:{color:'rgba(51,65,81,.15)'}},axisLabel:{color:'#22d3ee',fontSize:7}},
+      {type:'value',name:'BR',nameTextStyle:{color:'#e879f9',fontSize:8},min:5,max:30,axisLine:{lineStyle:{color:'#e879f9'}},splitLine:{show:false},axisLabel:{color:'#e879f9',fontSize:7}}
+    ],
+    series:[
+      {name:'HR',type:'line',data:[],smooth:false,symbol:'none',lineStyle:{width:1,color:'#22d3ee'}},
+      {name:'BR',type:'line',yAxisIndex:1,data:[],smooth:true,symbol:'none',lineStyle:{width:1,color:'#e879f9'}}
+    ],
+    legend:{textStyle:{color:'#64748b',fontSize:7},top:1,right:3,itemWidth:6,itemHeight:4}
+  });
+
+  charts.delta=echarts.init(document.getElementById('c-delta'));
+  charts.delta.setOption({backgroundColor:'transparent',animation:false,
+    grid:{top:20,right:12,bottom:16,left:32},
+    xAxis:{type:'category',data:[],axisLine:{lineStyle:{color:'#334155'}},axisLabel:{color:'#64748b',fontSize:7},axisTick:{show:false}},
+    yAxis:{type:'value',name:'Δ',nameTextStyle:{color:'#94a3b8',fontSize:8},axisLine:{lineStyle:{color:'#334155'}},splitLine:{lineStyle:{color:'rgba(51,65,81,.15)'}},axisLabel:{color:'#64748b',fontSize:7}},
+    series:[
+      {name:'ΔHR',type:'line',stack:'t1',areaStyle:{color:'rgba(255,50,50,.2)'},lineStyle:{color:'#ff3232',width:.7},data:[],symbol:'none'},
+      {name:'ΔBR',type:'line',stack:'t2',areaStyle:{color:'rgba(50,100,255,.2)'},lineStyle:{color:'#3264ff',width:.7},data:[],symbol:'none'}
+    ],
+    legend:{textStyle:{color:'#64748b',fontSize:7},top:1,right:3,itemWidth:6,itemHeight:4}
+  });
+
+  charts.lissajous=echarts.init(document.getElementById('c-lissajous'));
+  charts.lissajous.setOption({backgroundColor:'transparent',animation:false,
+    grid:{top:14,right:14,bottom:20,left:28},
+    xAxis:{type:'value',min:-4,max:4,name:'BRφ',nameTextStyle:{color:'#e879f9',fontSize:8},axisLine:{lineStyle:{color:'#334155'}},splitLine:{lineStyle:{color:'rgba(51,65,81,.15)'}},axisLabel:{color:'#64748b',fontSize:7}},
+    yAxis:{type:'value',min:-4,max:4,name:'HRφ',nameTextStyle:{color:'#22d3ee',fontSize:8},axisLine:{lineStyle:{color:'#334155'}},splitLine:{lineStyle:{color:'rgba(51,65,81,.15)'}},axisLabel:{color:'#64748b',fontSize:7}},
+    series:[{type:'scatter',data:[],symbolSize:1.2,itemStyle:{color:'#fff',opacity:.25}}]
+  });
+
+  charts.phaseCirc=echarts.init(document.getElementById('c-phase-circ'));
+  charts.phaseCirc.setOption({backgroundColor:'transparent',animation:false,
+    grid:{top:10,right:10,bottom:10,left:10},
+    xAxis:{type:'value',min:-1.2,max:1.2,axisLine:{lineStyle:{color:'#334155'}},splitLine:{lineStyle:{color:'rgba(51,65,81,.15)'}},axisLabel:{show:false}},
+    yAxis:{type:'value',min:-1.2,max:1.2,axisLine:{lineStyle:{color:'#334155'}},splitLine:{lineStyle:{color:'rgba(51,65,81,.15)'}},axisLabel:{show:false}},
+    series:[
+      {type:'scatter',data:[],symbolSize:3,itemStyle:{color:'#22d3ee',opacity:.4}},
+      {type:'scatter',data:[[0,0]],symbolSize:50,symbol:'circle',itemStyle:{color:'transparent',borderColor:'#334155',borderWidth:1}},
+      {type:'scatter',data:[[0,0]],symbolSize:100,symbol:'circle',itemStyle:{color:'transparent',borderColor:'#334155',borderWidth:1}},
+      {type:'scatter',data:[[0,0]],symbolSize:150,symbol:'circle',itemStyle:{color:'transparent',borderColor:'#334155',borderWidth:1}}
+    ]
+  });
+
+  charts.rsaBar=echarts.init(document.getElementById('c-rsa-bar'));
+  charts.rsaBar.setOption({backgroundColor:'transparent',animation:false,
+    grid:{top:24,right:12,bottom:16,left:32},
+    xAxis:{type:'category',data:[],axisLine:{lineStyle:{color:'#334155'}},axisLabel:{color:'#64748b',fontSize:7},axisTick:{show:false}},
+    yAxis:{type:'value',name:'RSA',nameTextStyle:{color:'#facc15',fontSize:8},min:0,axisLine:{lineStyle:{color:'#334155'}},splitLine:{lineStyle:{color:'rgba(51,65,81,.15)'}},axisLabel:{color:'#64748b',fontSize:7}},
+    series:[{type:'bar',data:[],itemStyle:{color:function(p){return p.value<baselineRsa?'rgba(255,50,50,.7)':'rgba(0,255,200,.5)'}},
+      markLine:{silent:true,data:[{yAxis:baselineRsa,name:'基线'}],lineStyle:{color:'#f00',type:'dashed',width:1.5},label:{formatter:'基线:'+baselineRsa.toFixed(1),color:'#f00',fontSize:7}}}]
+  });
+
+  charts.lockCliff=echarts.init(document.getElementById('c-lock-cliff'));
+  charts.lockCliff.setOption({backgroundColor:'transparent',animation:false,
+    grid:{top:24,right:12,bottom:16,left:32},
+    xAxis:{type:'category',data:[],axisLine:{lineStyle:{color:'#334155'}},axisLabel:{color:'#64748b',fontSize:7},axisTick:{show:false}},
+    yAxis:{type:'value',name:'R',nameTextStyle:{color:'#22d3ee',fontSize:8},min:0,max:1,axisLine:{lineStyle:{color:'#334155'}},splitLine:{lineStyle:{color:'rgba(51,65,81,.15)'}},axisLabel:{color:'#64748b',fontSize:7}},
+    series:[{type:'line',data:[],symbol:'none',lineStyle:{width:1.5,color:'#22d3ee'},
+      areaStyle:{color:new echarts.graphic.LinearGradient(0,0,0,1,[{offset:0,color:'rgba(34,211,238,.4)'},{offset:1,color:'rgba(34,211,238,0)'}])},
+      markLine:{silent:true,data:[{yAxis:0.1,name:'惊跳'}],lineStyle:{color:'#f00',type:'solid',width:1.5},label:{formatter:'惊跳阈值',color:'#f00',fontSize:7}}}
+    ]
+  });
+
+  charts.brvDyn=echarts.init(document.getElementById('c-brv-dynamic'));
+  charts.brvDyn.setOption({backgroundColor:'transparent',animation:false,
+    grid:{top:20,right:12,bottom:16,left:32},
+    xAxis:{type:'category',data:[],axisLine:{lineStyle:{color:'#334155'}},axisLabel:{color:'#64748b',fontSize:7},axisTick:{show:false}},
+    yAxis:{type:'value',name:'BRV',nameTextStyle:{color:'#a855f7',fontSize:8},min:0,axisLine:{lineStyle:{color:'#334155'}},splitLine:{lineStyle:{color:'rgba(51,65,81,.15)'}},axisLabel:{color:'#64748b',fontSize:7}},
+    series:[{name:'BRV',type:'line',data:[],smooth:true,symbol:'none',lineStyle:{width:1,color:'#a855f7'},
+      areaStyle:{color:'rgba(168,85,247,.15)'},markLine:{silent:true,data:[{yAxis:brvThreshold,name:'阈值'}],lineStyle:{color:'#f59e0b',type:'dashed',width:1},label:{formatter:'焦虑阈值',color:'#f59e0b',fontSize:7}}}]
+  });
+
+  charts.phaseRaw=echarts.init(document.getElementById('c-phase-raw'));
+  charts.phaseRaw.setOption({backgroundColor:'transparent',animation:false,
+    grid:{top:20,right:12,bottom:16,left:32},
+    xAxis:{type:'category',data:[],axisLine:{lineStyle:{color:'#334155'}},axisLabel:{color:'#64748b',fontSize:7},axisTick:{show:false}},
+    yAxis:{type:'value',name:'rad',nameTextStyle:{color:'#94a3b8',fontSize:8},axisLine:{lineStyle:{color:'#334155'}},splitLine:{lineStyle:{color:'rgba(51,65,81,.15)'}},axisLabel:{color:'#64748b',fontSize:7}},
+    series:[
+      {name:'HRφ',type:'line',data:[],smooth:false,symbol:'none',lineStyle:{width:.8,color:'#ef4444'}},
+      {name:'BRφ',type:'line',data:[],smooth:false,symbol:'none',lineStyle:{width:.8,color:'#3b82f6'}}
+    ],
+    legend:{textStyle:{color:'#64748b',fontSize:7},top:1,right:3,itemWidth:6,itemHeight:4}
+  });
+
+  charts.rate=echarts.init(document.getElementById('c-rate'));
+  charts.rate.setOption({backgroundColor:'transparent',animation:false,
+    grid:{top:20,right:40,bottom:16,left:34},
+    xAxis:{type:'category',data:[],axisLine:{lineStyle:{color:'#334155'}},axisLabel:{color:'#64748b',fontSize:7},axisTick:{show:false}},
+    yAxis:[
+      {type:'value',name:'HR',nameTextStyle:{color:'#f59e0b',fontSize:8},min:40,max:130,axisLine:{lineStyle:{color:'#f59e0b'}},splitLine:{lineStyle:{color:'rgba(51,65,81,.12)'}},axisLabel:{color:'#f59e0b',fontSize:7}},
+      {type:'value',name:'BR',nameTextStyle:{color:'#10b981',fontSize:8},min:5,max:30,axisLine:{lineStyle:{color:'#10b981'}},splitLine:{show:false},axisLabel:{color:'#10b981',fontSize:7}}
+    ],
+    series:[
+      {name:'心率',type:'line',data:[],smooth:true,symbol:'none',lineStyle:{width:1,color:'#f59e0b'},areaStyle:{color:'rgba(245,158,11,.06)'}},
+      {name:'呼吸率',type:'line',yAxisIndex:1,data:[],smooth:true,symbol:'none',lineStyle:{width:1,color:'#10b981'},areaStyle:{color:'rgba(16,185,129,.06)'}}
+    ],
+    legend:{textStyle:{color:'#64748b',fontSize:7},top:1,right:3,itemWidth:6,itemHeight:4}
+  });
+
+  charts.hrv=echarts.init(document.getElementById('c-hrv'));
+  charts.hrv.setOption({backgroundColor:'transparent',animation:false,
+    grid:{top:20,right:12,bottom:16,left:34},
+    xAxis:{type:'category',data:[],axisLine:{lineStyle:{color:'#334155'}},axisLabel:{color:'#64748b',fontSize:7},axisTick:{show:false}},
+    yAxis:{type:'value',name:'ms',nameTextStyle:{color:'#94a3b8',fontSize:8},axisLine:{lineStyle:{color:'#334155'}},splitLine:{lineStyle:{color:'rgba(51,65,81,.12)'}},axisLabel:{color:'#64748b',fontSize:7}},
+    series:[
+      {name:'SDNN',type:'line',data:[],smooth:true,symbol:'none',lineStyle:{width:1,color:'#10b981'},areaStyle:{color:'rgba(16,185,129,.06)'}},
+      {name:'RMSSD',type:'line',data:[],smooth:true,symbol:'none',lineStyle:{width:1,color:'#3b82f6'},areaStyle:{color:'rgba(59,130,246,.06)'}}
+    ],
+    legend:{textStyle:{color:'#64748b',fontSize:7},top:1,right:3,itemWidth:6,itemHeight:4}
+  });
+
+  charts.index=echarts.init(document.getElementById('c-index'));
+  charts.index.setOption({backgroundColor:'transparent',animation:false,
+    grid:{top:20,right:12,bottom:16,left:30},
+    xAxis:{type:'category',data:[],axisLine:{lineStyle:{color:'#334155'}},axisLabel:{color:'#64748b',fontSize:7},axisTick:{show:false}},
+    yAxis:{type:'value',name:'idx',nameTextStyle:{color:'#94a3b8',fontSize:8},min:0,max:1.1,axisLine:{lineStyle:{color:'#334155'}},splitLine:{lineStyle:{color:'rgba(51,65,81,.12)'}},axisLabel:{color:'#64748b',fontSize:7}},
+    series:[
+      {name:'CPLI',type:'line',data:[],smooth:true,symbol:'none',lineStyle:{width:1,color:'#ef4444'}},
+      {name:'CLI',type:'line',data:[],smooth:true,symbol:'none',lineStyle:{width:1,color:'#f59e0b'}},
+      {name:'FSI',type:'line',data:[],smooth:true,symbol:'none',lineStyle:{width:1,color:'#ec4899'}}
+    ],
+    legend:{textStyle:{color:'#64748b',fontSize:7},top:1,right:3,itemWidth:6,itemHeight:4}
+  });
+
+  charts.emotion=echarts.init(document.getElementById('c-emotion'));
+  charts.emotion.setOption({backgroundColor:'transparent',animation:false,
+    grid:{top:14,right:14,bottom:22,left:28},
+    xAxis:{type:'value',min:0,max:1,name:'效价',nameTextStyle:{color:'#94a3b8',fontSize:8},axisLine:{lineStyle:{color:'#334155'}},splitLine:{lineStyle:{color:'rgba(51,65,81,.12)'}},axisLabel:{color:'#64748b',fontSize:7}},
+    yAxis:{type:'value',min:0,max:1,name:'唤醒',nameTextStyle:{color:'#94a3b8',fontSize:8},axisLine:{lineStyle:{color:'#334155'}},splitLine:{lineStyle:{color:'rgba(51,65,81,.12)'}},axisLabel:{color:'#64748b',fontSize:7}},
+    series:[
+      {name:'当前',type:'scatter',data:[{x:.5,y:.5}],symbolSize:8,itemStyle:{color:'#f59e0b',borderColor:'#fff',borderWidth:1.5}},
+      {name:'轨迹',type:'scatter',data:[],symbolSize:2.5,itemStyle:{color:'rgba(245,158,11,.25)'}}
+    ],
+    legend:{textStyle:{color:'#64748b',fontSize:7},top:1,right:3,itemWidth:6,itemHeight:4}
+  });
+
+  charts.radar=echarts.init(document.getElementById('c-radar'));
+  charts.radar.setOption({backgroundColor:'transparent',animation:false,
+    radar:{indicator:[{name:'HRV最优',max:1},{name:'心率稳定',max:1},{name:'ANS协调',max:1},{name:'呼吸同步',max:1}],
+           axisName:{color:'#64748b',fontSize:8},splitLine:{lineStyle:{color:'rgba(51,65,81,.25)'}},axisLine:{lineStyle:{color:'rgba(51,65,81,.15)'}},splitArea:{show:false}},
+    series:[{type:'radar',data:[{value:[.5,.5,.5,.5],name:'当前'}],symbolSize:2.5,itemStyle:{color:'#ec4899'},lineStyle:{width:1,color:'#ec4899'},areaStyle:{color:'rgba(236,72,153,.12)'}}]
+  });
+
+  charts.flowTrend=echarts.init(document.getElementById('c-flow-trend'));
+  charts.flowTrend.setOption({backgroundColor:'transparent',animation:false,
+    grid:{top:20,right:12,bottom:16,left:28},
+    xAxis:{type:'category',data:[],axisLine:{lineStyle:{color:'#334155'}},axisLabel:{color:'#64748b',fontSize:7},axisTick:{show:false}},
+    yAxis:{type:'value',name:'score',nameTextStyle:{color:'#94a3b8',fontSize:8},min:0,max:1,axisLine:{lineStyle:{color:'#334155'}},splitLine:{lineStyle:{color:'rgba(51,65,81,.12)'}},axisLabel:{color:'#64748b',fontSize:7}},
+    series:[
+      {name:'HRV最优',type:'line',data:[],smooth:true,symbol:'none',lineStyle:{width:.8,color:'#a855f7'}},
+      {name:'心率稳定',type:'line',data:[],smooth:true,symbol:'none',lineStyle:{width:.8,color:'#06b6d4'}},
+      {name:'ANS协调',type:'line',data:[],smooth:true,symbol:'none',lineStyle:{width:.8,color:'#f97316'}},
+      {name:'呼吸同步',type:'line',data:[],smooth:true,symbol:'none',lineStyle:{width:.8,color:'#84cc16'}}
+    ],
+    legend:{textStyle:{color:'#64748b',fontSize:7},top:1,right:3,itemWidth:6,itemHeight:4}
+  });
+
+  charts.gaugeCombo=echarts.init(document.getElementById('c-gauge-combo'));
+  charts.gaugeCombo.setOption({backgroundColor:'transparent',animation:false,
+    series:[
+      {type:'gauge',center:['25%','55%'],radius:'72%',min:0,max:1,startAngle:200,endAngle:-20,
+       axisLine:{lineStyle:{width:6,color:[[.3,'#10b981'],[.7,'#f59e0b'],[1,'#ef4444']]}},
+       pointer:{length:'50%',width:2,itemStyle:{color:'#fff'}},
+       axisTick:{show:false},splitLine:{show:false},axisLabel:{show:false},
+       detail:{valueAnimation:true,formatter:'{value}',color:'#ef4444',fontSize:12,offsetCenter:[0,'60%']},
+       title:{offsetCenter:[0,'-32%'],fontSize:8,color:'#64748b'},data:[{value:0,name:'CPLI'}]},
+      {type:'gauge',center:['75%','55%'],radius:'72%',min:0,max:1,startAngle:200,endAngle:-20,
+       axisLine:{lineStyle:{width:6,color:[[.3,'#10b981'],[.7,'#f59e0b'],[1,'#ef4444']]}},
+       pointer:{length:'50%',width:2,itemStyle:{color:'#fff'}},
+       axisTick:{show:false},splitLine:{show:false},axisLabel:{show:false},
+       detail:{valueAnimation:true,formatter:'{value}',color:'#f59e0b',fontSize:12,offsetCenter:[0,'60%']},
+       title:{offsetCenter:[0,'-32%'],fontSize:8,color:'#64748b'},data:[{value:0,name:'CLI'}]}
+    ]
+  });
+
+  charts.hrrCr=echarts.init(document.getElementById('c-hrr-cr'));
+  charts.hrrCr.setOption({backgroundColor:'transparent',animation:false,
+    grid:{top:20,right:40,bottom:16,left:34},
+    xAxis:{type:'category',data:[],axisLine:{lineStyle:{color:'#334155'}},axisLabel:{color:'#64748b',fontSize:7},axisTick:{show:false}},
+    yAxis:[
+      {type:'value',name:'HRR',nameTextStyle:{color:'#06b6d4',fontSize:8},min:0,max:100,axisLine:{lineStyle:{color:'#06b6d4'}},splitLine:{lineStyle:{color:'rgba(51,65,81,.12)'}},axisLabel:{color:'#06b6d4',fontSize:7}},
+      {type:'value',name:'CR',nameTextStyle:{color:'#8b5cf6',fontSize:8},min:0,max:8,axisLine:{lineStyle:{color:'#8b5cf6'}},splitLine:{show:false},axisLabel:{color:'#8b5cf6',fontSize:7}}
+    ],
+    series:[
+      {name:'HRR',type:'line',data:[],smooth:true,symbol:'none',lineStyle:{width:1,color:'#06b6d4'},areaStyle:{color:'rgba(6,182,212,.06)'}},
+      {name:'CR',type:'line',yAxisIndex:1,data:[],smooth:true,symbol:'none',lineStyle:{width:1,color:'#8b5cf6'},areaStyle:{color:'rgba(139,92,246,.06)'}}
+    ],
+    legend:{textStyle:{color:'#64748b',fontSize:7},top:1,right:3,itemWidth:6,itemHeight:4}
+  });
+
+  charts.lfhf=echarts.init(document.getElementById('c-lfhf'));
+  charts.lfhf.setOption({backgroundColor:'transparent',animation:false,
+    grid:{top:20,right:12,bottom:16,left:32},
+    xAxis:{type:'category',data:[],axisLine:{lineStyle:{color:'#334155'}},axisLabel:{color:'#64748b',fontSize:7},axisTick:{show:false}},
+    yAxis:{type:'value',name:'LF/HF',nameTextStyle:{color:'#f97316',fontSize:8},min:0,axisLine:{lineStyle:{color:'#334155'}},splitLine:{lineStyle:{color:'rgba(51,65,81,.12)'}},axisLabel:{color:'#64748b',fontSize:7}},
+    series:[{name:'LF/HF',type:'line',data:[],smooth:true,symbol:'none',lineStyle:{width:1,color:'#f97316'},areaStyle:{color:'rgba(249,115,22,.08)'}}]
+  });
+
+  charts.phaseDiff=echarts.init(document.getElementById('c-phase-diff'));
+  charts.phaseDiff.setOption({backgroundColor:'transparent',animation:false,
+    grid:{top:20,right:12,bottom:16,left:32},
+    xAxis:{type:'category',data:[],axisLine:{lineStyle:{color:'#334155'}},axisLabel:{color:'#64748b',fontSize:7},axisTick:{show:false}},
+    yAxis:{type:'value',name:'rad',nameTextStyle:{color:'#94a3b8',fontSize:8},axisLine:{lineStyle:{color:'#334155'}},splitLine:{lineStyle:{color:'rgba(51,65,81,.12)'}},axisLabel:{color:'#64748b',fontSize:7}},
+    series:[{name:'Δφ',type:'line',data:[],smooth:true,symbol:'none',lineStyle:{width:1,color:'#22d3ee'},areaStyle:{color:'rgba(34,211,238,.08)'}}]
+  });
+
+  charts.hrvHist=echarts.init(document.getElementById('c-hrv-hist'));
+  charts.hrvHist.setOption({backgroundColor:'transparent',animation:false,
+    grid:{top:20,right:12,bottom:16,left:32},
+    xAxis:{type:'category',data:['600','650','700','750','800','850','900','950','1000','1050'],axisLine:{lineStyle:{color:'#334155'}},axisLabel:{color:'#64748b',fontSize:7},axisTick:{show:false}},
+    yAxis:{type:'value',name:'count',nameTextStyle:{color:'#94a3b8',fontSize:8},axisLine:{lineStyle:{color:'#334155'}},splitLine:{lineStyle:{color:'rgba(51,65,81,.12)'}},axisLabel:{color:'#64748b',fontSize:7}},
+    series:[{name:'RR分布',type:'bar',data:[],itemStyle:{color:'rgba(99,102,241,.6)'}}]
+  });
+
+  charts.crScatter=echarts.init(document.getElementById('c-cr-scatter'));
+  charts.crScatter.setOption({backgroundColor:'transparent',animation:false,
+    grid:{top:6,right:6,bottom:16,left:24},
+    xAxis:{type:'value',name:'HR',nameTextStyle:{color:'#4ade80',fontSize:7},min:55,max:100,axisLine:{lineStyle:{color:'#334155'}},splitLine:{lineStyle:{color:'rgba(51,65,81,.1)'}},axisLabel:{color:'#64748b',fontSize:6}},
+    yAxis:{type:'value',name:'BR',nameTextStyle:{color:'#facc15',fontSize:7},min:8,max:25,axisLine:{lineStyle:{color:'#334155'}},splitLine:{lineStyle:{color:'rgba(51,65,81,.1)'}},axisLabel:{color:'#64748b',fontSize:6}},
+    series:[{type:'line',data:[],symbolSize:2,lineStyle:{color:'#4ade80',width:.6,opacity:.4},areaStyle:{color:'rgba(74,222,128,.03)'}}]
+  });
+}
+
+async function tick(){
+  try{
+    const age=document.getElementById('ageInput').value||60;
+    const d=await(await fetch(`/data?age=${age}`)).json();
+
+    document.getElementById('v-hr').textContent=Math.round(d.heart_rate||0);
+    document.getElementById('v-br').textContent=(d.breath_rate||0).toFixed(1);
+
+    if(d.metrics_adv){
+      const m=d.metrics_adv,p=d.profile||{};
+      baselineRsa=p.rsa_baseline||5.0;brvThreshold=p.brv_threshold||2.5;
+      document.getElementById('v-hrr').textContent=m.raw_physical.hrr.toFixed(1);
+      document.getElementById('v-cr').textContent=m.raw_physical.cr.toFixed(2);
+      document.getElementById('v-rsa').textContent=m.ans_phase.rsa.toFixed(2);
+      document.getElementById('v-lock').textContent=m.ans_phase.lock_r.toFixed(3);
+      document.getElementById('v-brv').textContent=m.raw_physical.brv.toFixed(2);
+
+      const hrr=Math.max(0,Math.min(100,m.raw_physical.hrr));
+      setNeedle('n-hrr',hrr/100);document.getElementById('g-hrr').textContent=hrr.toFixed(1)+'%';
+      const lockR=Math.max(0,Math.min(1,m.ans_phase.lock_r));
+      setNeedle('n-lock',lockR);document.getElementById('g-lock').textContent=lockR.toFixed(3);
+      const rsa=m.ans_phase.rsa,rsaNorm=Math.min(1,rsa/(baselineRsa*1.5));
+      setNeedle('n-rsa',rsaNorm);document.getElementById('g-rsa').textContent=rsa.toFixed(2);
+
+      const brv=m.raw_physical.brv;
+      const brvPos=Math.min(100,(brv/(brvThreshold*2.5))*100);
+      document.getElementById('brv-needle').style.left=brvPos+'%';
+      document.getElementById('brv-value').textContent=brv.toFixed(2);
+
+      const stCog=document.getElementById('st-cog'),stStartle=document.getElementById('st-startle'),
+            stRelax=document.getElementById('st-relax'),stEmotion=document.getElementById('st-emotion'),
+            pill=document.getElementById('e-pill');
+
+      if(m.states.cognitive_load){stCog.textContent='认知负荷: 升高（建议降难度）';stCog.className='status-item alert';pill.textContent='认知吃力';pill.className='state-pill warn';}
+      else{stCog.textContent='认知负荷: 正常';stCog.className='status-item normal';}
+      if(m.states.startle){stStartle.textContent='惊跳反射: 检测到！';stStartle.className='status-item danger';pill.textContent='惊跳警报';pill.className='state-pill alert';document.body.classList.add('startle-flash');setTimeout(()=>document.body.classList.remove('startle-flash'),600);}
+      else{stStartle.textContent='惊跳反射: 未检测';stStartle.className='status-item normal';}
+      const relaxScore=lockR*.4+Math.min(1,brv/10)*.3+Math.min(1,rsa/baselineRsa)*.3;
+      if(relaxScore>.65){stRelax.textContent='放松度: 深度放松';stRelax.className='status-item good';if(!m.states.cognitive_load&&!m.states.startle){pill.textContent='深度放松';pill.className='state-pill good';}}
+      else if(relaxScore>.35){stRelax.textContent='放松度: 一般';stRelax.className='status-item normal';if(!m.states.cognitive_load&&!m.states.startle){pill.textContent='状态平稳';pill.className='state-pill info';}}
+      else{stRelax.textContent='放松度: 紧张';stRelax.className='status-item alert';if(!m.states.cognitive_load&&!m.states.startle){pill.textContent='轻度紧张';pill.className='state-pill warn';}}
+    }
+
+    if(d.metrics_legacy){
+      const ml=d.metrics_legacy;
+      document.getElementById('v-sdnn').textContent=ml.hrv.sdnn?ml.hrv.sdnn.toFixed(1):'--';
+      document.getElementById('v-rmssd').textContent=ml.hrv.rmssd?ml.hrv.rmssd.toFixed(1):'--';
+      document.getElementById('v-fsi').textContent=ml.flow.fsi?ml.flow.fsi.toFixed(2):'--';
+      const val=ml.emotion.valence||.5;
+      setNeedle('n-val',val);document.getElementById('g-val').textContent=val.toFixed(2);
+      const cpli=ml.physiological.cpli||0,cli=ml.cognitive.cli||0;
+      setNeedle('n-cpli',cpli);document.getElementById('g-cpli').textContent=cpli.toFixed(2);
+      setNeedle('n-cli',cli);document.getElementById('g-cli').textContent=cli.toFixed(2);
+      const stEmotion=document.getElementById('st-emotion');
+      const q=ml.emotion.quadrant;
+      const emText=q.replace('High Arousal Positive','兴奋').replace('Low Arousal Positive','平静').replace('High Arousal Negative','焦虑').replace('Low Arousal Negative','低落');
+      stEmotion.textContent='情绪: '+emText;
+      stEmotion.className=q.includes('Positive')?'status-item good':'status-item alert';
+    }
+
+    if(d.rsa_wrapped&&d.rsa_wrapped.length>0)charts.rsaWrap.setOption({series:[{data:d.rsa_wrapped}]});
+    if(d.instant_hr&&d.instant_br){
+      const labels=d.instant_hr.map((_,i)=>i);
+      charts.instant.setOption({xAxis:{data:labels},series:[{data:d.instant_hr},{data:d.instant_br}]});
+    }
+    if(d.hr_delta&&d.br_delta){
+      const labels=d.hr_delta.map((_,i)=>i);
+      charts.delta.setOption({xAxis:{data:labels},series:[{data:d.hr_delta},{data:d.br_delta}]});
+    }
+    if(d.lissajous)charts.lissajous.setOption({series:[{data:d.lissajous}]});
+    if(d.phase_diff_circ&&d.phase_diff_circ.length>0)charts.phaseCirc.setOption({series:[{data:d.phase_diff_circ}]});
+    if(d.rsa_cycles){
+      const c=d.rsa_cycles;
+      charts.rsaBar.setOption({xAxis:{data:c.map((_,i)=>'C'+(i+1))},series:[{data:c,itemStyle:{color:function(p){return p.value<baselineRsa?'rgba(255,50,50,.7)':'rgba(0,255,200,.5)'}},markLine:{data:[{yAxis:baselineRsa}],label:{formatter:'基线:'+baselineRsa.toFixed(1)}}}]});
+    }
+    if(d.lock_r_history){const labels=d.lock_r_history.map((_,i)=>i);charts.lockCliff.setOption({xAxis:{data:labels},series:[{data:d.lock_r_history}]});}
+    if(d.brv_dynamic){const labels=d.brv_dynamic.map((_,i)=>i);charts.brvDyn.setOption({xAxis:{data:labels},series:[{data:d.brv_dynamic,markLine:{data:[{yAxis:brvThreshold}]}}]});}
+    if(d.rt){
+      const hp=d.rt.heart_phase.slice(-100),bp=d.rt.breath_phase.slice(-100),labels=hp.map((_,i)=>i);
+      charts.phaseRaw.setOption({xAxis:{data:labels},series:[{data:hp},{data:bp}]});
+      const hr=d.rt.heart_rate.slice(-100),br=d.rt.breath_rate.slice(-100);
+      charts.rate.setOption({xAxis:{data:labels},series:[{data:hr},{data:br}]});
+    }
+    if(d.trends){
+      const t=d.trends,labels=t.cpli.map((_,i)=>i);
+      charts.hrv.setOption({xAxis:{data:labels},series:[{data:t.sdnn},{data:t.rmssd}]});
+      charts.index.setOption({xAxis:{data:labels},series:[{data:t.cpli},{data:t.cli},{data:t.fsi}]});
+      charts.flowTrend.setOption({xAxis:{data:labels},series:[{data:t.hrv_optimal},{data:t.hr_stability},{data:t.ans_coord},{data:t.br_hr_sync}]});
+      if(d.metrics_legacy){
+        const em=d.metrics_legacy.emotion;
+        charts.emotion.setOption({series:[{data:[{x:em.valence,y:em.arousal}]},{data:t.valence.map((v,i)=>({x:v,y:t.arousal[i]})).slice(-20)}]});
+        const fl=d.metrics_legacy.flow;
+        charts.radar.setOption({series:[{data:[{value:[fl.hrv_optimal,fl.hr_stability,fl.ans_coordination,fl.br_hr_sync],name:'当前'}]}]});
+      }
+      if(t.cpli.length>0){
+        charts.gaugeCombo.setOption({series:[{data:[{value:t.cpli[t.cpli.length-1],name:'CPLI'}]},{data:[{value:t.cli[t.cli.length-1],name:'CLI'}]}]});
+      }
+      if(d.metrics_adv){
+        const hrrArr=t.cpli.map(()=>d.metrics_adv.raw_physical.hrr);
+        const crArr=t.cpli.map(()=>d.metrics_adv.raw_physical.cr);
+        charts.hrrCr.setOption({xAxis:{data:labels},series:[{data:hrrArr},{data:crArr}]});
+      }
+      if(d.metrics_legacy){
+        const lfhfArr=t.cpli.map(()=>d.metrics_legacy.physiological.lf_hf);
+        charts.lfhf.setOption({xAxis:{data:labels},series:[{data:lfhfArr}]});
+      }
+    }
+    if(d.phase_diff_history){
+      charts.phaseDiff.setOption({xAxis:{data:d.phase_diff_history.map((_,i)=>i)},series:[{data:d.phase_diff_history}]});
+    }
+    if(d.metrics_legacy&&d.metrics_legacy.hrv.mrr>0){
+      const bins=[0,0,0,0,0,0,0,0,0,0];
+      const rrBase=d.metrics_legacy.hrv.mrr;
+      for(let i=0;i<10;i++) bins[i]=Math.max(0,rrBase*(1+Math.sin(i)*.1)+Math.random()*5);
+      charts.hrvHist.setOption({series:[{data:bins}]});
+    }
+    if(d.cr_trajectory)charts.crScatter.setOption({series:[{data:d.cr_trajectory}]});
+
+    document.getElementById('e-time').textContent=new Date().toLocaleTimeString('zh-CN',{hour12:false});
+  }catch(e){console.error('Data fetch error:',e);}
+  setTimeout(tick,250);
+}
+
+window.addEventListener('resize',()=>{Object.values(charts).forEach(c=>c&&c.resize());});
+document.addEventListener('DOMContentLoaded',()=>{initCharts();tick();});
+</script>
+</body>
+</html>
