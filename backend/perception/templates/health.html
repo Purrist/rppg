@@ -31,8 +31,6 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #050a12; c
 
 input.age-input { width: 60px; background: #050a12; border: 1px solid #13203a; border-radius: 4px; color: #c8d6e5; font-size: 14px; padding: 2px 4px; text-align: center; }
 select.gender-select { background: #050a12; border: 1px solid #13203a; border-radius: 4px; color: #c8d6e5; font-size: 12px; padding: 2px 4px; }
-.btn-update { background: #1a365d; border: 1px solid #3182ce; border-radius: 4px; color: #63b3ed; font-size: 10px; padding: 2px 8px; cursor: pointer; }
-.btn-update:hover { background: #2c5282; }
 
 .AX { axisLine: { lineStyle: { color: '#13203a' } }, axisLabel: { color: '#2a4060', fontSize: 8 }, splitLine: { lineStyle: { color: '#0f1a2d', type: 'dashed' } } }
 </style>
@@ -52,36 +50,25 @@ select.gender-select { background: #050a12; border: 1px solid #13203a; border-ra
                 <div class="card-unit">/min</div>
             </div>
         </div>
-        
+
         <div class="chart-container">
             <div class="chart-title">心率趋势 <span style="font-size: 8px; color: #4a6a8a;">(HR Trend)</span></div>
             <div class="chart-body" id="hr-chart"></div>
         </div>
-        
+
         <div class="chart-container">
             <div class="chart-title">呼吸趋势 <span style="font-size: 8px; color: #4a6a8a;">(BR Trend)</span></div>
             <div class="chart-body" id="br-chart"></div>
         </div>
-        
-        <div class="card-row">
-            <div class="card">
-                <div class="card-title">瞬时心率 <span style="font-size: 8px; color: #4a6a8a;">(Inst HR)</span></div>
-                <div class="card-value" id="inst-hr">--</div>
-                <div class="card-unit">bpm</div>
-            </div>
-            <div class="card">
-                <div class="card-title">瞬时呼吸 <span style="font-size: 8px; color: #4a6a8a;">(Inst BR)</span></div>
-                <div class="card-value" id="inst-br">--</div>
-                <div class="card-unit">/min</div>
-            </div>
-        </div>
-        
+
+        <!-- 已删除: 瞬时心率/呼吸率卡片 -->
+
         <div class="chart-container">
             <div class="chart-title">原始相位 <span style="font-size: 8px; color: #4a6a8a;">(Phase Raw)</span></div>
             <div class="chart-body" id="phase-chart"></div>
         </div>
     </div>
-    
+
     <div class="right-panel">
         <div class="card-row">
             <div class="card">
@@ -111,7 +98,7 @@ select.gender-select { background: #050a12; border: 1px solid #13203a; border-ra
                 <div class="card-unit">/min</div>
             </div>
         </div>
-        
+
         <div class="chart-row">
             <div style="display: flex; flex-direction: column; gap: 6px; flex: 2;">
                 <div class="chart-container">
@@ -138,7 +125,7 @@ select.gender-select { background: #050a12; border: 1px solid #13203a; border-ra
                 <div class="chart-body" id="lissajous-chart"></div>
             </div>
         </div>
-        
+
         <div class="chart-row" style="flex: 0 0 180px;">
             <div class="chart-container">
                 <div class="chart-title">相位锁定值 <span style="font-size: 8px; color: #4a6a8a;">(PLV)</span> <span id="plv-value" style="font-size: 14px; font-weight: 700; color: #a855f7;">--</span> <span id="plv-level" style="font-size: 10px; padding: 1px 4px; border-radius: 3px; background: #1e3a5f; color: #64ffda;">--</span></div>
@@ -194,13 +181,14 @@ function update(data) {
     const t = data.trends || { rsa: [], plv: [], hrr: [], cr_ratio: [], brv: [], hri: [], br_elevation: [] };
     const pf = data.profile || { hr_rest_est: 62, hr_max_est: 166, br_rest_est: 14 };
     const h = data.physiology || { rsa_amp: 0, plv_r: 0, hrr_pct: 0, cr_ratio: 0, brv_cv: 0, hri_sd: 0, br_elevation: 0 };
-    
+
     document.getElementById('hr-value').textContent = raw.hr.toFixed(0);
     document.getElementById('br-value').textContent = raw.br.toFixed(0);
     document.getElementById('hr-rest').textContent = pf.hr_rest_est;
     document.getElementById('hr-max').textContent = pf.hr_max_est;
     document.getElementById('br-rest').textContent = pf.br_rest_est;
-    
+
+    // HRR
     document.getElementById('hrr-value').textContent = h.hrr_pct.toFixed(1);
     const hrrLevel = document.getElementById('hrr-level');
     if (h.hrr_pct < 40) {
@@ -216,6 +204,8 @@ function update(data) {
         hrrLevel.style.background = '#4a1a1a';
         hrrLevel.style.color = '#fc8181';
     }
+
+    // BRV
     document.getElementById('brv-value').textContent = h.brv_cv.toFixed(1);
     const brvLevel = document.getElementById('brv-level');
     if (h.brv_cv < 5) {
@@ -231,6 +221,8 @@ function update(data) {
         brvLevel.style.background = '#4a1a1a';
         brvLevel.style.color = '#fc8181';
     }
+
+    // CR
     document.getElementById('cr-value').textContent = h.cr_ratio.toFixed(2);
     const crLevel = document.getElementById('cr-level');
     if (h.cr_ratio < 3.5) {
@@ -246,10 +238,12 @@ function update(data) {
         crLevel.style.background = '#4a1a1a';
         crLevel.style.color = '#fc8181';
     }
-    document.getElementById('hri-value').textContent = h.hri_sd.toFixed(2) + ' bpm';
+
+    // HRI - 修复标签: HRI是心率标准差，不是心率本身
+    document.getElementById('hri-value').textContent = h.hri_sd.toFixed(2);
     const hriLevel = document.getElementById('hri-level');
     if (h.hri_sd < 2) {
-        hriLevel.textContent = '心率过缓';
+        hriLevel.textContent = '非常稳定';      // 修复: 不是"心率过缓"
         hriLevel.style.background = '#1e3a5f';
         hriLevel.style.color = '#64ffda';
     } else if (h.hri_sd <= 8) {
@@ -261,10 +255,12 @@ function update(data) {
         hriLevel.style.background = '#4a3520';
         hriLevel.style.color = '#fbd38d';
     } else {
-        hriLevel.textContent = '剧烈振荡';
+        hriLevel.textContent = '剧烈变化';
         hriLevel.style.background = '#4a1a1a';
         hriLevel.style.color = '#fc8181';
     }
+
+    // PLV
     document.getElementById('plv-value').textContent = h.plv_r.toFixed(2);
     const plvLevel = document.getElementById('plv-level');
     if (h.plv_r < 0.3) {
@@ -280,10 +276,18 @@ function update(data) {
         plvLevel.style.background = '#1e3a5f';
         plvLevel.style.color = '#64ffda';
     }
+
+    // Phase Diff
     document.getElementById('phase-value').textContent = ((h.mean_phase_diff || 0) * 180 / Math.PI).toFixed(0) + '°';
+
+    // BR Elevation - 修复阈值
     document.getElementById('br-elev-value').textContent = h.br_elevation.toFixed(1);
     const brElevLevel = document.getElementById('br-elev-level');
-    if (h.br_elevation < 0) {
+    if (h.br_elevation < -20) {
+        brElevLevel.textContent = '呼吸过缓';     // 修复: 新增过缓判断
+        brElevLevel.style.background = '#1e3a5f';
+        brElevLevel.style.color = '#64ffda';
+    } else if (h.br_elevation < 0) {
         brElevLevel.textContent = '放松';
         brElevLevel.style.background = '#1e3a5f';
         brElevLevel.style.color = '#64ffda';
@@ -291,46 +295,43 @@ function update(data) {
         brElevLevel.textContent = '正常';
         brElevLevel.style.background = '#2d3748';
         brElevLevel.style.color = '#f6ad55';
-    } else if (h.br_elevation <= 50) {
-        brElevLevel.textContent = '紧张';
+    } else if (h.br_elevation <= 60) {
+        brElevLevel.textContent = '急促';
         brElevLevel.style.background = '#4a3520';
         brElevLevel.style.color = '#fbd38d';
     } else {
-        brElevLevel.textContent = '异常';
+        brElevLevel.textContent = '异常急促';
         brElevLevel.style.background = '#4a1a1a';
         brElevLevel.style.color = '#fc8181';
     }
-    
-    const instHrAvg = s.inst_hr.length ? (s.inst_hr.reduce((a,b)=>a+b,0)/s.inst_hr.length).toFixed(1) : '--';
-    const instBrAvg = s.inst_br.length ? (s.inst_br.reduce((a,b)=>a+b,0)/s.inst_br.length).toFixed(1) : '--';
-    document.getElementById('inst-hr').textContent = instHrAvg;
-    document.getElementById('inst-br').textContent = instBrAvg;
-    
+
+    // 已删除: 瞬时心率/呼吸率显示
+
     const hrData = rt.heart_rate.slice(-200);
     const brData = rt.breath_rate.slice(-200);
     const xData = hrData.map((_,i) => i);
-    
+
     charts.hr.setOption({
         ...NA, grid: { top: 4, right: 8, bottom: 10, left: 28 },
         xAxis: { type: 'category', data: xData, ...AX, axisLabel: { show: false } },
         yAxis: { type: 'value', ...AX },
         series: [{ type: 'line', data: hrData, smooth: true, symbol: 'none', lineStyle: { color: '#ff4757', width: 1.2 } }]
     }, true);
-    
+
     charts.br.setOption({
         ...NA, grid: { top: 4, right: 8, bottom: 10, left: 28 },
         xAxis: { type: 'category', data: xData, ...AX, axisLabel: { show: false } },
         yAxis: { type: 'value', ...AX },
         series: [{ type: 'line', data: brData, smooth: true, symbol: 'none', lineStyle: { color: '#00e5ff', width: 1.2 } }]
     }, true);
-    
+
     const hpData = rt.heart_phase.slice(-200);
     const bpData = rt.breath_phase.slice(-200);
     const allPhase = hpData.concat(bpData);
     const minP = Math.min(...allPhase, 0), maxP = Math.max(...allPhase, 0);
     const span = Math.max(maxP - minP, 0.1) * 0.6;
     const center = (minP + maxP) / 2;
-    
+
     charts.phase.setOption({
         ...NA, grid: { top: 4, right: 8, bottom: 10, left: 28 },
         xAxis: { type: 'category', data: xData.slice(0, hpData.length), ...AX, axisLabel: { show: false } },
@@ -340,7 +341,7 @@ function update(data) {
             { type: 'line', data: bpData, smooth: false, symbol: 'none', lineStyle: { color: '#00e5ff', width: 0.8 } }
         ]
     }, true);
-    
+
     const hrrData = t.hrr.slice(-300);
     const hrrX = hrrData.map((_,i) => i);
     const hrrMin = hrrData.length ? Math.min(...hrrData) : 0;
@@ -355,7 +356,7 @@ function update(data) {
             { type: 'line', markLine: { silent: true, data: [{ yAxis: 60, lineStyle: { color: 'rgba(250,204,21,0.3)', type: 'dashed' } }] }, data: [] }
         ]
     }, true);
-    
+
     const lissajousData = s.lissajous || [];
     if (lissajousData.length > 5) {
         const lissaX = lissajousData.map(p => p[0]);
@@ -372,7 +373,7 @@ function update(data) {
         const lambda1 = trace / 2 + disc;
         const lambda2 = trace / 2 - disc;
         const roundness = lambda2 / lambda1;
-        
+
         const lissajousLevel = document.getElementById('lissajous-level');
         if (roundness > 0.5) {
             lissajousLevel.textContent = '同步良好';
@@ -387,7 +388,7 @@ function update(data) {
             lissajousLevel.style.background = '#4a1a1a';
             lissajousLevel.style.color = '#fc8181';
         }
-        
+
         const a = Math.sqrt(lambda1) * 2;
         const b = Math.sqrt(lambda2) * 2;
         const theta = Math.atan2(2 * covXY, varX - varY) / 2;
@@ -398,7 +399,7 @@ function update(data) {
             const y = meanY + a * Math.cos(t) * Math.sin(theta) + b * Math.sin(t) * Math.cos(theta);
             ellipsePoints.push([x, y]);
         }
-        
+
         const allXY = [...lissaX, ...lissaY];
         const minVal = Math.min(...allXY);
         const maxVal = Math.max(...allXY);
@@ -423,7 +424,7 @@ function update(data) {
         }, true);
         document.getElementById('lissajous-level').textContent = '--';
     }
-    
+
     const brvData = t.brv.slice(-300);
     const brvX = brvData.map((_,i) => i);
     const brvMin = brvData.length ? Math.min(...brvData) : 0;
@@ -435,7 +436,7 @@ function update(data) {
         yAxis: { type: 'value', min: Math.max(0, brvMin - brvPad), max: brvMax + brvPad, ...AX },
         series: [{ type: 'line', data: brvData, smooth: true, symbol: 'none', lineStyle: { color: '#00e5ff', width: 1.2 }, areaStyle: { color: 'rgba(0,229,255,0.1)' } }]
     }, true);
-    
+
     const crData = t.cr_ratio.slice(-300);
     const crX = crData.map((_,i) => i);
     const crMin = crData.length ? Math.min(...crData) : 3;
@@ -447,7 +448,7 @@ function update(data) {
         yAxis: { type: 'value', min: Math.max(0, crMin - crPad), max: crMax + crPad, ...AX },
         series: [{ type: 'line', data: crData, smooth: true, symbol: 'none', lineStyle: { color: '#f97316', width: 1.2 }, areaStyle: { color: 'rgba(249,115,22,0.1)' } }]
     }, true);
-    
+
     const hriData = t.hri.slice(-300);
     const hriMin = hriData.length ? Math.min(...hriData) : 0;
     const hriMax = hriData.length ? Math.max(...hriData) : 10;
@@ -458,7 +459,7 @@ function update(data) {
         yAxis: { type: 'value', min: Math.max(0, hriMin - hriPad), max: hriMax + hriPad, ...AX },
         series: [{ type: 'line', data: hriData, smooth: true, symbol: 'none', lineStyle: { color: '#3b82f6', width: 1.2 }, areaStyle: { color: 'rgba(59,130,246,0.1)' } }]
     }, true);
-    
+
     const plvData = t.plv.slice(-200);
     const plvMin = plvData.length ? Math.min(...plvData) : 0;
     const plvMax = plvData.length ? Math.max(...plvData) : 1;
@@ -469,7 +470,7 @@ function update(data) {
         yAxis: { type: 'value', min: Math.max(0, plvMin - plvPad), max: Math.min(1, plvMax + plvPad), ...AX },
         series: [{ type: 'line', data: plvData, smooth: true, symbol: 'circle', symbolSize: 4, lineStyle: { color: '#a855f7', width: 1 }, itemStyle: { color: function(params) { return params.value > 0.7 ? '#ff4757' : params.value > 0.4 ? '#f97316' : '#00e5ff'; } } }]
     }, true);
-    
+
     const phaseDiffCirc = s.phase_diff_circ || [];
     if (phaseDiffCirc.length) {
         const last = phaseDiffCirc[phaseDiffCirc.length - 1];
@@ -483,10 +484,10 @@ function update(data) {
             ]
         }, true);
     }
-    
+
     const brElevData = t.br_elevation.slice(-300);
-    const brElevMin = brElevData.length ? Math.min(...brElevData) : -100;
-    const brElevMax = brElevData.length ? Math.max(...brElevData) : 0;
+    const brElevMin = brElevData.length ? Math.min(...brElevData) : -30;
+    const brElevMax = brElevData.length ? Math.max(...brElevData) : 30;
     const brElevPad = Math.max((brElevMax - brElevMin) * 0.2, 5);
     charts.brvHri.setOption({
         ...NA, grid: { top: 4, right: 8, bottom: 10, left: 32 },
