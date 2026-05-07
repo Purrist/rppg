@@ -500,4 +500,5 @@ if __name__ == '__main__':
     threading.Thread(target=serial_thread, daemon=True).start()
     print("\nWeb服务器: http://127.0.0.1:%d" % HTTP_PORT)
     print("=" * 60 + "\n")
-    app.run(host="127.0.0.1", port=HTTP_PORT, debug=False, use_reloader=False)
+    #app.run(host="127.0.0.1", port=HTTP_PORT, debug=False, use_reloader=False)
+    app.run(host="127.0.0.1", port=HTTP_PORT, debug=False)

@@ -121,16 +121,13 @@ select.gender-select { background: #050a12; border: 1px solid #13203a; border-ra
                 <div class="chart-title">呼吸变异性 <span style="font-size: 8px; color: #4a6a8a;">(BRV)</span> <span id="brv-value" style="font-size: 14px; font-weight: 700; color: #00e5ff;">--%</span></div>
                 <div class="chart-body" id="brv-chart"></div>
             </div>
-            <div class="chart-container">
-                <div class="chart-title">心肺比 <span style="font-size: 8px; color: #4a6a8a;">(CR)</span> <span id="cr-value" style="font-size: 14px; font-weight: 700; color: #f97316;">--</span></div>
-                <div class="chart-body" id="cr-chart"></div>
-            </div>
+            <div class="chart-container"></div>
         </div>
         
         <div class="chart-row">
             <div class="chart-container">
-                <div class="chart-title">综合指标 <span style="font-size: 8px; color: #4a6a8a;">(HRR/CR/BRV)</span> <span id="composite-value" style="font-size: 14px; font-weight: 700; color: #14b8a6;">--</span></div>
-                <div class="chart-body" id="rsa-chart"></div>
+                <div class="chart-title">心肺比 <span style="font-size: 8px; color: #4a6a8a;">(CR)</span> <span id="cr-value" style="font-size: 14px; font-weight: 700; color: #f97316;">--</span></div>
+                <div class="chart-body" id="cr-chart"></div>
             </div>
             <div class="chart-container">
                 <div class="chart-title">心率振荡指数 <span style="font-size: 8px; color: #4a6a8a;">(HRI)</span> <span id="hri-value" style="font-size: 14px; font-weight: 700; color: #3b82f6;">--</span></div>
@@ -141,7 +138,7 @@ select.gender-select { background: #050a12; border: 1px solid #13203a; border-ra
         
         <div class="chart-row">
             <div class="chart-container">
-                <div class="chart-title">PLV趋势 <span style="font-size: 8px; color: #4a6a8a;">(PLV Trend)</span> <span id="plv-value" style="font-size: 14px; font-weight: 700; color: #a855f7;">--</span></div>
+                <div class="chart-title">相位锁定值 <span style="font-size: 8px; color: #4a6a8a;">(PLV)</span> <span id="plv-value" style="font-size: 14px; font-weight: 700; color: #a855f7;">--</span></div>
                 <div class="chart-body" id="rsa-plv-chart"></div>
             </div>
             <div class="chart-container polar-chart">
@@ -164,7 +161,6 @@ charts.phase = echarts.init(document.getElementById('phase-chart'), null, {rende
 charts.hrr = echarts.init(document.getElementById('hrr-chart'), null, {renderer: 'canvas'});
 charts.brv = echarts.init(document.getElementById('brv-chart'), null, {renderer: 'canvas'});
 charts.cr = echarts.init(document.getElementById('cr-chart'), null, {renderer: 'canvas'});
-charts.rsa = echarts.init(document.getElementById('rsa-chart'), null, {renderer: 'canvas'});
 charts.plv = echarts.init(document.getElementById('plv-chart'), null, {renderer: 'canvas'});
 charts.rsaPlv = echarts.init(document.getElementById('rsa-plv-chart'), null, {renderer: 'canvas'});
 charts.composite = echarts.init(document.getElementById('composite-chart'), null, {renderer: 'canvas'});
@@ -204,7 +200,6 @@ function update(data) {
     document.getElementById('hrr-value').textContent = h.hrr_pct.toFixed(1);
     document.getElementById('brv-value').textContent = h.brv_cv.toFixed(1);
     document.getElementById('cr-value').textContent = h.cr_ratio.toFixed(2);
-    document.getElementById('composite-value').textContent = 'HRR ' + h.hrr_pct.toFixed(1) + '%';
     document.getElementById('hri-value').textContent = h.hri_sd.toFixed(2) + ' bpm';
     document.getElementById('plv-value').textContent = h.plv_r.toFixed(2);
     document.getElementById('phase-value').textContent = ((h.mean_phase_diff || 0) * 180 / Math.PI).toFixed(0) + '°';
@@ -287,18 +282,6 @@ function update(data) {
         xAxis: { type: 'category', data: crX, ...AX, axisLabel: { show: false } },
         yAxis: { type: 'value', min: Math.max(0, crMin - crPad), max: crMax + crPad, ...AX },
         series: [{ type: 'line', data: crData, smooth: true, symbol: 'none', lineStyle: { color: '#f97316', width: 1.2 }, areaStyle: { color: 'rgba(249,115,22,0.1)' } }]
-    }, true);
-    
-    const compX = t.hrr.map((_,i) => i);
-    charts.rsa.setOption({
-        ...NA, grid: { top: 4, right: 8, bottom: 10, left: 32 },
-        xAxis: { type: 'category', data: compX, ...AX, axisLabel: { show: false } },
-        yAxis: [{ type: 'value', ...AX }, { type: 'value', ...AX, splitLine: { show: false } }],
-        series: [
-            { type: 'line', data: t.hrr, yAxisIndex: 0, smooth: true, symbol: 'none', lineStyle: { color: '#ff4757', width: 1 } },
-            { type: 'line', data: t.cr_ratio, yAxisIndex: 1, smooth: true, symbol: 'none', lineStyle: { color: '#f97316', width: 1 } },
-            { type: 'bar', data: t.brv, yAxisIndex: 1, barMaxWidth: 2, itemStyle: { color: 'rgba(0,229,255,0.3)' } }
-        ]
     }, true);
     
     const hriData = t.hri.slice(-300);
