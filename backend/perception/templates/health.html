@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Health Monitor</title>
+<script src="/static/echarts.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #050a12; color: #c8d6e5; font-family: 'SF Mono', 'Consolas', monospace; }
+.container { display: flex; width: 100%; height: 100%; }
+.left-panel { width: 20%; background: #080e1a; border-right: 1px solid #13203a; display: flex; flex-direction: column; padding: 8px; gap: 8px; }
+.right-panel { width: 80%; background: #050a12; display: flex; flex-direction: column; padding: 8px; gap: 8px; }
+
+.card-row { display: flex; gap: 6px; }
+.card { flex: 1; background: #0b1322; border: 1px solid #13203a; border-radius: 6px; padding: 8px; }
+.card-title { font-size: 9px; color: #4a6a8a; margin-bottom: 4px; }
+.card-value { font-size: 20px; font-weight: 700; }
+.card-unit { font-size: 10px; color: #3a5570; }
+.card.hr .card-value { color: #ff4757; }
+.card.br .card-value { color: #00e5ff; }
+.card.purple .card-value { color: #a855f7; }
+.card.teal .card-value { color: #14b8a6; }
+.card.orange .card-value { color: #f97316; }
+
+.chart-row { flex: 1; display: flex; gap: 6px; min-height: 0; }
+.chart-container { flex: 1; min-height: 0; background: #0a1220; border: 1px solid #13203a; border-radius: 6px; padding: 6px; }
+.chart-container.polar-chart { flex: 0 0 150px; }
+.chart-title { font-size: 9px; color: #4a6a8a; margin-bottom: 4px; }
+.chart-body { height: calc(100% - 18px); }
+
+input.age-input { width: 60px; background: #050a12; border: 1px solid #13203a; border-radius: 4px; color: #c8d6e5; font-size: 14px; padding: 2px 4px; text-align: center; }
+select.gender-select { background: #050a12; border: 1px solid #13203a; border-radius: 4px; color: #c8d6e5; font-size: 12px; padding: 2px 4px; }
+.btn-update { background: #1a365d; border: 1px solid #3182ce; border-radius: 4px; color: #63b3ed; font-size: 10px; padding: 2px 8px; cursor: pointer; }
+.btn-update:hover { background: #2c5282; }
+
+.AX { axisLine: { lineStyle: { color: '#13203a' } }, axisLabel: { color: '#2a4060', fontSize: 8 }, splitLine: { lineStyle: { color: '#0f1a2d', type: 'dashed' } } }
+</style>
+</head>
+<body>
+<div class="container">
+    <div class="left-panel">
+        <div class="card-row">
+            <div class="card hr">
+                <div class="card-title">心率 <span style="font-size: 8px; color: #4a6a8a;">(HR)</span></div>
+                <div class="card-value" id="hr-value">--</div>
+                <div class="card-unit">bpm</div>
+            </div>
+            <div class="card br">
+                <div class="card-title">呼吸率 <span style="font-size: 8px; color: #4a6a8a;">(BR)</span></div>
+                <div class="card-value" id="br-value">--</div>
+                <div class="card-unit">/min</div>
+            </div>
+        </div>
+        
+        <div class="chart-container">
+            <div class="chart-title">心率趋势 <span style="font-size: 8px; color: #4a6a8a;">(HR Trend)</span></div>
+            <div class="chart-body" id="hr-chart"></div>
+        </div>
+        
+        <div class="chart-container">
+            <div class="chart-title">呼吸趋势 <span style="font-size: 8px; color: #4a6a8a;">(BR Trend)</span></div>
+            <div class="chart-body" id="br-chart"></div>
+        </div>
+        
+        <div class="card-row">
+            <div class="card">
+                <div class="card-title">瞬时心率 <span style="font-size: 8px; color: #4a6a8a;">(Inst HR)</span></div>
+                <div class="card-value" id="inst-hr">--</div>
+                <div class="card-unit">bpm</div>
+            </div>
+            <div class="card">
+                <div class="card-title">瞬时呼吸 <span style="font-size: 8px; color: #4a6a8a;">(Inst BR)</span></div>
+                <div class="card-value" id="inst-br">--</div>
+                <div class="card-unit">/min</div>
+            </div>
+        </div>
+        
+        <div class="chart-container">
+            <div class="chart-title">原始相位 <span style="font-size: 8px; color: #4a6a8a;">(Phase Raw)</span></div>
+            <div class="chart-body" id="phase-chart"></div>
+        </div>
+    </div>
+    
+    <div class="right-panel">
+        <div class="card-row">
+            <div class="card">
+                <div class="card-title">年龄 <span style="font-size: 8px; color: #4a6a8a;">(Age)</span></div>
+                <input type="number" id="age-input" class="age-input" value="30" min="1" max="120">
+            </div>
+            <div class="card">
+                <div class="card-title">性别 <span style="font-size: 8px; color: #4a6a8a;">(Gender)</span></div>
+                <select id="gender-select" class="gender-select">
+                    <option value="male" selected>男</option>
+                    <option value="female">女</option>
+                </select>
+            </div>
+            <div class="card purple">
+                <div class="card-title">静息心率 <span style="font-size: 8px; color: #4a6a8a;">(HR Rest)</span></div>
+                <div class="card-value" id="hr-rest">--</div>
+                <div class="card-unit">bpm</div>
+            </div>
+            <div class="card teal">
+                <div class="card-title">最大心率 <span style="font-size: 8px; color: #4a6a8a;">(HR Max)</span></div>
+                <div class="card-value" id="hr-max">--</div>
+                <div class="card-unit">bpm</div>
+            </div>
+            <div class="card orange">
+                <div class="card-title">静息呼吸 <span style="font-size: 8px; color: #4a6a8a;">(BR Rest)</span></div>
+                <div class="card-value" id="br-rest">--</div>
+                <div class="card-unit">/min</div>
+            </div>
+        </div>
+        
+        <div class="chart-row">
+            <div class="chart-container">
+                <div class="chart-title">心率储备 <span style="font-size: 8px; color: #4a6a8a;">(HRR)</span> <span id="hrr-value" style="font-size: 14px; font-weight: 700; color: #ff4757;">--%</span></div>
+                <div class="chart-body" id="hrr-chart"></div>
+            </div>
+            <div class="chart-container">
+                <div class="chart-title">呼吸变异性 <span style="font-size: 8px; color: #4a6a8a;">(BRV)</span> <span id="brv-value" style="font-size: 14px; font-weight: 700; color: #00e5ff;">--%</span></div>
+                <div class="chart-body" id="brv-chart"></div>
+            </div>
+            <div class="chart-container">
+                <div class="chart-title">心肺比 <span style="font-size: 8px; color: #4a6a8a;">(CR)</span> <span id="cr-value" style="font-size: 14px; font-weight: 700; color: #f97316;">--</span></div>
+                <div class="chart-body" id="cr-chart"></div>
+            </div>
+        </div>
+        
+        <div class="chart-row">
+            <div class="chart-container">
+                <div class="chart-title">综合指标 <span style="font-size: 8px; color: #4a6a8a;">(HRR/CR/BRV)</span> <span id="composite-value" style="font-size: 14px; font-weight: 700; color: #14b8a6;">--</span></div>
+                <div class="chart-body" id="rsa-chart"></div>
+            </div>
+            <div class="chart-container">
+                <div class="chart-title">心率振荡指数 <span style="font-size: 8px; color: #4a6a8a;">(HRI)</span> <span id="hri-value" style="font-size: 14px; font-weight: 700; color: #3b82f6;">--</span></div>
+                <div class="chart-body" id="plv-chart"></div>
+            </div>
+            <div class="chart-container"></div>
+        </div>
+        
+        <div class="chart-row">
+            <div class="chart-container">
+                <div class="chart-title">PLV趋势 <span style="font-size: 8px; color: #4a6a8a;">(PLV Trend)</span> <span id="plv-value" style="font-size: 14px; font-weight: 700; color: #a855f7;">--</span></div>
+                <div class="chart-body" id="rsa-plv-chart"></div>
+            </div>
+            <div class="chart-container polar-chart">
+                <div class="chart-title">相位差圆周 <span style="font-size: 8px; color: #4a6a8a;">(Phase Diff)</span> <span id="phase-value" style="font-size: 14px; font-weight: 700; color: #14b8a6;">--°</span></div>
+                <div class="chart-body" id="composite-chart"></div>
+            </div>
+            <div class="chart-container">
+                <div class="chart-title">呼吸急促度 <span style="font-size: 8px; color: #4a6a8a;">(BR Elevation)</span> <span id="br-elev-value" style="font-size: 14px; font-weight: 700; color: #14b8a6;">--%</span></div>
+                <div class="chart-body" id="brv-hri-chart"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const charts = {};
+charts.hr = echarts.init(document.getElementById('hr-chart'), null, {renderer: 'canvas'});
+charts.br = echarts.init(document.getElementById('br-chart'), null, {renderer: 'canvas'});
+charts.phase = echarts.init(document.getElementById('phase-chart'), null, {renderer: 'canvas'});
+charts.hrr = echarts.init(document.getElementById('hrr-chart'), null, {renderer: 'canvas'});
+charts.brv = echarts.init(document.getElementById('brv-chart'), null, {renderer: 'canvas'});
+charts.cr = echarts.init(document.getElementById('cr-chart'), null, {renderer: 'canvas'});
+charts.rsa = echarts.init(document.getElementById('rsa-chart'), null, {renderer: 'canvas'});
+charts.plv = echarts.init(document.getElementById('plv-chart'), null, {renderer: 'canvas'});
+charts.rsaPlv = echarts.init(document.getElementById('rsa-plv-chart'), null, {renderer: 'canvas'});
+charts.composite = echarts.init(document.getElementById('composite-chart'), null, {renderer: 'canvas'});
+charts.brvHri = echarts.init(document.getElementById('brv-hri-chart'), null, {renderer: 'canvas'});
+
+window.addEventListener('resize', () => { Object.values(charts).forEach(c => c && c.resize()); });
+
+const AX = { axisLine: { lineStyle: { color: '#13203a' } }, axisLabel: { color: '#2a4060', fontSize: 8, formatter: function(value) { return value.toFixed(2); } }, splitLine: { lineStyle: { color: '#0f1a2d', type: 'dashed' } } };
+const NA = { animation: false };
+
+let pA = 30, pG = 'male';
+
+function updateProfile() {
+    const age = parseInt(document.getElementById('age-input').value) || 60;
+    const gender = document.getElementById('gender-select').value;
+    if (age !== pA || gender !== pG) {
+        pA = age;
+        pG = gender;
+        fetchData();
+    }
+}
+
+function update(data) {
+    const raw = data.raw || { hr: 72, br: 16 };
+    const rt = data.rt || { heart_rate: [], breath_rate: [], heart_phase: [], breath_phase: [] };
+    const s = data.signals || { inst_hr: [], inst_br: [], lissajous: [], phase_diff_circ: [] };
+    const t = data.trends || { rsa: [], plv: [], hrr: [], cr_ratio: [], brv: [], hri: [], br_elevation: [] };
+    const pf = data.profile || { hr_rest_est: 62, hr_max_est: 166, br_rest_est: 14 };
+    const h = data.physiology || { rsa_amp: 0, plv_r: 0, hrr_pct: 0, cr_ratio: 0, brv_cv: 0, hri_sd: 0, br_elevation: 0 };
+    
+    document.getElementById('hr-value').textContent = raw.hr.toFixed(0);
+    document.getElementById('br-value').textContent = raw.br.toFixed(0);
+    document.getElementById('hr-rest').textContent = pf.hr_rest_est;
+    document.getElementById('hr-max').textContent = pf.hr_max_est;
+    document.getElementById('br-rest').textContent = pf.br_rest_est;
+    
+    document.getElementById('hrr-value').textContent = h.hrr_pct.toFixed(1);
+    document.getElementById('brv-value').textContent = h.brv_cv.toFixed(1);
+    document.getElementById('cr-value').textContent = h.cr_ratio.toFixed(2);
+    document.getElementById('composite-value').textContent = 'HRR ' + h.hrr_pct.toFixed(1) + '%';
+    document.getElementById('hri-value').textContent = h.hri_sd.toFixed(2) + ' bpm';
+    document.getElementById('plv-value').textContent = h.plv_r.toFixed(2);
+    document.getElementById('phase-value').textContent = ((h.mean_phase_diff || 0) * 180 / Math.PI).toFixed(0) + '°';
+    document.getElementById('br-elev-value').textContent = h.br_elevation.toFixed(1);
+    
+    const instHrAvg = s.inst_hr.length ? (s.inst_hr.reduce((a,b)=>a+b,0)/s.inst_hr.length).toFixed(1) : '--';
+    const instBrAvg = s.inst_br.length ? (s.inst_br.reduce((a,b)=>a+b,0)/s.inst_br.length).toFixed(1) : '--';
+    document.getElementById('inst-hr').textContent = instHrAvg;
+    document.getElementById('inst-br').textContent = instBrAvg;
+    
+    const hrData = rt.heart_rate.slice(-200);
+    const brData = rt.breath_rate.slice(-200);
+    const xData = hrData.map((_,i) => i);
+    
+    charts.hr.setOption({
+        ...NA, grid: { top: 4, right: 8, bottom: 10, left: 28 },
+        xAxis: { type: 'category', data: xData, ...AX, axisLabel: { show: false } },
+        yAxis: { type: 'value', ...AX },
+        series: [{ type: 'line', data: hrData, smooth: true, symbol: 'none', lineStyle: { color: '#ff4757', width: 1.2 } }]
+    }, true);
+    
+    charts.br.setOption({
+        ...NA, grid: { top: 4, right: 8, bottom: 10, left: 28 },
+        xAxis: { type: 'category', data: xData, ...AX, axisLabel: { show: false } },
+        yAxis: { type: 'value', ...AX },
+        series: [{ type: 'line', data: brData, smooth: true, symbol: 'none', lineStyle: { color: '#00e5ff', width: 1.2 } }]
+    }, true);
+    
+    const hpData = rt.heart_phase.slice(-200);
+    const bpData = rt.breath_phase.slice(-200);
+    const allPhase = hpData.concat(bpData);
+    const minP = Math.min(...allPhase, 0), maxP = Math.max(...allPhase, 0);
+    const span = Math.max(maxP - minP, 0.1) * 0.6;
+    const center = (minP + maxP) / 2;
+    
+    charts.phase.setOption({
+        ...NA, grid: { top: 4, right: 8, bottom: 10, left: 28 },
+        xAxis: { type: 'category', data: xData.slice(0, hpData.length), ...AX, axisLabel: { show: false } },
+        yAxis: { type: 'value', min: center - span, max: center + span, ...AX },
+        series: [
+            { type: 'line', data: hpData, smooth: false, symbol: 'none', lineStyle: { color: '#ff4757', width: 0.8 } },
+            { type: 'line', data: bpData, smooth: false, symbol: 'none', lineStyle: { color: '#00e5ff', width: 0.8 } }
+        ]
+    }, true);
+    
+    const hrrData = t.hrr.slice(-300);
+    const hrrX = hrrData.map((_,i) => i);
+    const hrrMin = hrrData.length ? Math.min(...hrrData) : 0;
+    const hrrMax = hrrData.length ? Math.max(...hrrData) : 100;
+    const hrrPad = Math.max((hrrMax - hrrMin) * 0.2, 5);
+    charts.hrr.setOption({
+        ...NA, grid: { top: 4, right: 8, bottom: 10, left: 32 },
+        xAxis: { type: 'category', data: hrrX, ...AX, axisLabel: { show: false } },
+        yAxis: { type: 'value', min: Math.max(0, hrrMin - hrrPad), max: hrrMax + hrrPad, ...AX },
+        series: [
+            { type: 'line', data: hrrData, smooth: true, symbol: 'none', lineStyle: { color: '#ff4757', width: 1.2 }, areaStyle: { color: 'rgba(255,71,87,0.1)' } },
+            { type: 'line', markLine: { silent: true, data: [{ yAxis: 50, lineStyle: { color: 'rgba(250,204,21,0.3)', type: 'dashed' } }] }, data: [] }
+        ]
+    }, true);
+    
+    const brvData = t.brv.slice(-300);
+    const brvX = brvData.map((_,i) => i);
+    const brvMin = brvData.length ? Math.min(...brvData) : 0;
+    const brvMax = brvData.length ? Math.max(...brvData) : 20;
+    const brvPad = Math.max((brvMax - brvMin) * 0.2, 2);
+    charts.brv.setOption({
+        ...NA, grid: { top: 4, right: 8, bottom: 10, left: 32 },
+        xAxis: { type: 'category', data: brvX, ...AX, axisLabel: { show: false } },
+        yAxis: { type: 'value', min: Math.max(0, brvMin - brvPad), max: brvMax + brvPad, ...AX },
+        series: [{ type: 'line', data: brvData, smooth: true, symbol: 'none', lineStyle: { color: '#00e5ff', width: 1.2 }, areaStyle: { color: 'rgba(0,229,255,0.1)' } }]
+    }, true);
+    
+    const crData = t.cr_ratio.slice(-300);
+    const crX = crData.map((_,i) => i);
+    const crMin = crData.length ? Math.min(...crData) : 3;
+    const crMax = crData.length ? Math.max(...crData) : 6;
+    const crPad = Math.max((crMax - crMin) * 0.2, 0.2);
+    charts.cr.setOption({
+        ...NA, grid: { top: 4, right: 8, bottom: 10, left: 32 },
+        xAxis: { type: 'category', data: crX, ...AX, axisLabel: { show: false } },
+        yAxis: { type: 'value', min: Math.max(0, crMin - crPad), max: crMax + crPad, ...AX },
+        series: [{ type: 'line', data: crData, smooth: true, symbol: 'none', lineStyle: { color: '#f97316', width: 1.2 }, areaStyle: { color: 'rgba(249,115,22,0.1)' } }]
+    }, true);
+    
+    const compX = t.hrr.map((_,i) => i);
+    charts.rsa.setOption({
+        ...NA, grid: { top: 4, right: 8, bottom: 10, left: 32 },
+        xAxis: { type: 'category', data: compX, ...AX, axisLabel: { show: false } },
+        yAxis: [{ type: 'value', ...AX }, { type: 'value', ...AX, splitLine: { show: false } }],
+        series: [
+            { type: 'line', data: t.hrr, yAxisIndex: 0, smooth: true, symbol: 'none', lineStyle: { color: '#ff4757', width: 1 } },
+            { type: 'line', data: t.cr_ratio, yAxisIndex: 1, smooth: true, symbol: 'none', lineStyle: { color: '#f97316', width: 1 } },
+            { type: 'bar', data: t.brv, yAxisIndex: 1, barMaxWidth: 2, itemStyle: { color: 'rgba(0,229,255,0.3)' } }
+        ]
+    }, true);
+    
+    const hriData = t.hri.slice(-300);
+    const hriMin = hriData.length ? Math.min(...hriData) : 0;
+    const hriMax = hriData.length ? Math.max(...hriData) : 10;
+    const hriPad = Math.max((hriMax - hriMin) * 0.2, 0.5);
+    charts.plv.setOption({
+        ...NA, grid: { top: 4, right: 8, bottom: 10, left: 32 },
+        xAxis: { type: 'category', data: hriData.map((_,i) => i), ...AX, axisLabel: { show: false } },
+        yAxis: { type: 'value', min: Math.max(0, hriMin - hriPad), max: hriMax + hriPad, ...AX },
+        series: [{ type: 'line', data: hriData, smooth: true, symbol: 'none', lineStyle: { color: '#3b82f6', width: 1.2 }, areaStyle: { color: 'rgba(59,130,246,0.1)' } }]
+    }, true);
+    
+    const plvData = t.plv.slice(-200);
+    const plvMin = plvData.length ? Math.min(...plvData) : 0;
+    const plvMax = plvData.length ? Math.max(...plvData) : 1;
+    const plvPad = (plvMax - plvMin) * 0.15 || 0.05;
+    charts.rsaPlv.setOption({
+        ...NA, grid: { top: 4, right: 8, bottom: 10, left: 28 },
+        xAxis: { type: 'category', data: plvData.map((_,i) => i), ...AX, axisLabel: { show: false } },
+        yAxis: { type: 'value', min: Math.max(0, plvMin - plvPad), max: Math.min(1, plvMax + plvPad), ...AX },
+        series: [{ type: 'line', data: plvData, smooth: true, symbol: 'circle', symbolSize: 4, lineStyle: { color: '#a855f7', width: 1 }, itemStyle: { color: function(params) { return params.value > 0.7 ? '#ff4757' : params.value > 0.4 ? '#f97316' : '#00e5ff'; } } }]
+    }, true);
+    
+    const phaseDiffCirc = s.phase_diff_circ || [];
+    if (phaseDiffCirc.length) {
+        const last = phaseDiffCirc[phaseDiffCirc.length - 1];
+        charts.composite.setOption({
+            ...NA, polar: { radius: '70%', center: ['50%', '54%'] },
+            angleAxis: { type: 'value', min: -1, max: 1, startAngle: 90, ...AX, axisLabel: { show: false } },
+            radiusAxis: { type: 'value', min: -1, max: 1, ...AX, axisLabel: { show: false } },
+            series: [
+                { type: 'scatter', coordinateSystem: 'polar', data: phaseDiffCirc, symbolSize: 3, itemStyle: { color: '#ec4899', opacity: 0.4 } },
+                { type: 'effectScatter', coordinateSystem: 'polar', data: [last], symbolSize: 8, rippleEffect: { brushType: 'stroke', scale: 3 }, itemStyle: { color: '#ec4899' } }
+            ]
+        }, true);
+    }
+    
+    const brElevData = t.br_elevation.slice(-300);
+    const brElevMin = brElevData.length ? Math.min(...brElevData) : -100;
+    const brElevMax = brElevData.length ? Math.max(...brElevData) : 0;
+    const brElevPad = Math.max((brElevMax - brElevMin) * 0.2, 5);
+    charts.brvHri.setOption({
+        ...NA, grid: { top: 4, right: 8, bottom: 10, left: 32 },
+        xAxis: { type: 'category', data: brElevData.map((_,i) => i), ...AX, axisLabel: { show: false } },
+        yAxis: { type: 'value', min: brElevMin - brElevPad, max: brElevMax + brElevPad, ...AX },
+        series: [{ type: 'line', data: brElevData, smooth: true, symbol: 'none', lineStyle: { color: '#14b8a6', width: 1.2 }, areaStyle: { color: 'rgba(20,184,166,0.1)' } }]
+    }, true);
+}
+
+function fetchData() {
+    fetch('/data?age=' + pA + '&gender=' + pG)
+        .then(r => r.json())
+        .then(data => update(data))
+        .catch(() => {});
+}
+
+document.getElementById('age-input').addEventListener('change', updateProfile);
+document.getElementById('gender-select').addEventListener('change', updateProfile);
+
+setInterval(fetchData, 500);
+fetchData();
+</script>
+</body>
+</html>

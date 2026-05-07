@@ -60,16 +60,20 @@ class PhasePreprocessor:
     def feed(self, hr_phase, br_phase, ts):
         if self.initialized:
             diff_hr = hr_phase - self.hr_phase_buf[-1]
-            if diff_hr > np.pi:
+            while diff_hr > np.pi:
                 hr_phase -= 2 * np.pi
-            elif diff_hr < -np.pi:
+                diff_hr -= 2 * np.pi
+            while diff_hr < -np.pi:
                 hr_phase += 2 * np.pi
+                diff_hr += 2 * np.pi
 
             diff_br = br_phase - self.br_phase_buf[-1]
-            if diff_br > np.pi:
+            while diff_br > np.pi:
                 br_phase -= 2 * np.pi
-            elif diff_br < -np.pi:
+                diff_br -= 2 * np.pi
+            while diff_br < -np.pi:
                 br_phase += 2 * np.pi
+                diff_br += 2 * np.pi
         else:
             self.initialized = True
 
@@ -124,11 +128,12 @@ class PhysioEngine:
     # ---- S级: 心肺动力学 (基于相位) ----
 
     def calc_rsa(self, inst_hr, br_phase, return_all=False):
-        """[01] RSA幅度 bpm - 呼吸性窦性心律不齐 (副交感神经张力)"""
+        """[01] RSA幅度 bpm - 呼吸性窦性心律不齐"""
         cycles_max = []
         cycles_min = []
         for i in range(1, len(br_phase)):
-            if br_phase[i - 1] > 5.5 and br_phase[i] <= 0.5 and br_phase[i] > -1.0:
+            diff = br_phase[i] - br_phase[i-1]
+            if diff < -np.pi:
                 start = max(0, i - 5)
                 end = min(len(inst_hr), i + 10)
                 if end > start + 5:
@@ -331,6 +336,11 @@ def serial_thread():
 @app.route('/')
 def index():
     return render_template('hlkk.html')
+
+
+@app.route('/health')
+def health():
+    return render_template('health.html')
 
 
 @app.route('/data')

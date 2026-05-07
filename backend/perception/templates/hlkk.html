@@ -63,6 +63,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:#050a12;color:#c8d6e
 .sp3{grid-column:span 3}
 .sq{grid-row:span 2}
 </style>
+<base target="_blank">
 </head>
 <body>
 
@@ -128,7 +129,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:#050a12;color:#c8d6e
 </div>
 
 <script>
-// ========== 关键修复 1：ECharts 5 已移除 util.histogram，需自行实现 ==========
+// ECharts 5 已移除 util.histogram，自行实现
 function makeHistogram(data, bins) {
     const counts = new Array(bins.length - 1).fill(0);
     data.forEach(v => {
@@ -138,7 +139,6 @@ function makeHistogram(data, bins) {
                 return;
             }
         }
-        // 包含右边界
         if (v === bins[bins.length - 1]) {
             counts[counts.length - 1]++;
         }
@@ -185,7 +185,6 @@ function U(d){
     document.getElementById('v8').textContent=h.hr_slope.toFixed(2);
     document.getElementById('v9').textContent=h.br_elevation.toFixed(1)+'%';
 
-    // ========== 关键修复 2：修正颜色判断逻辑（原代码 v<lo 重复） ==========
     const cc=(id,v,lo,hi,inv)=>{
         const el=document.getElementById(id);if(!el)return;
         el.style.color=inv
@@ -204,17 +203,33 @@ function U(d){
 
     const lissajousData=s.lissajous||[];
     if(lissajousData.length){
-        E[2].setOption({...NA,grid:{top:4,right:4,bottom:4,left:4},xAxis:{type:'value',min:-Math.PI,max:Math.PI,show:false},yAxis:{type:'value',min:-Math.PI,max:Math.PI,show:false},
-            series:[{type:'scatter',data:lissajousData,symbolSize:1.8,itemStyle:{color:function(p){const a=.1+(p.dataIndex/lissajousData.length)*.9;return'rgba(168,85,247,'+a.toFixed(2)+')'}}}]},true);
+        const xs=lissajousData.map(p=>p[0]);
+        const ys=lissajousData.map(p=>p[1]);
+        const xMin=Math.min(...xs),xMax=Math.max(...xs);
+        const yMin=Math.min(...ys),yMax=Math.max(...ys);
+        const xSpan=xMax-xMin,ySpan=yMax-yMin;
+        const maxSpan=Math.max(xSpan,ySpan,0.1);
+        const xCenter=(xMin+xMax)/2;
+        const yCenter=(yMin+yMax)/2;
+        E[2].setOption({...NA,grid:{top:4,right:4,bottom:4,left:4},
+            xAxis:{type:'value',min:xCenter-maxSpan*0.6,max:xCenter+maxSpan*0.6,show:false},
+            yAxis:{type:'value',min:yCenter-maxSpan*0.6,max:yCenter+maxSpan*0.6,show:false},
+            series:[{type:'scatter',data:lissajousData,symbolSize:2,itemStyle:{color:function(p){const a=.1+(p.dataIndex/lissajousData.length)*.9;return'rgba(168,85,247,'+a.toFixed(2)+')'}}}]},true);
     }
 
     const rtData=d.rt||{heart_phase:[],breath_phase:[],heart_rate:[],breath_rate:[]};
-    const xP=rtData.heart_phase.slice(-200).map((_,i)=>i);
+    const hpData=rtData.heart_phase.slice(-200);
+    const bpData=rtData.breath_phase.slice(-200);
+    const hpAll=hpData.concat(bpData);
+    const hpMin=Math.min(...hpAll),hpMax=Math.max(...hpAll);
+    const hpSpan=Math.max(hpMax-hpMin,0.1)*0.6;
+    const hpCenter=(hpMin+hpMax)/2;
+    const xP=hpData.map((_,i)=>i);
     E[3].setOption({...NA,grid:{top:8,right:8,bottom:16,left:32},
         xAxis:{type:'category',data:xP,...AX,axisLabel:{...AX.axisLabel,show:false}},
-        yAxis:{type:'value',min:-7,max:7,...AX},
-        series:[{type:'line',data:rtData.heart_phase.slice(-200),smooth:false,symbol:'none',lineStyle:{color:'#ff4757',width:.8,opacity:.7}},
-                {type:'line',data:rtData.breath_phase.slice(-200),smooth:false,symbol:'none',lineStyle:{color:'#00e5ff',width:.8,opacity:.7}}]},true);
+        yAxis:{type:'value',min:hpCenter-hpSpan,max:hpCenter+hpSpan,...AX},
+        series:[{type:'line',data:hpData,smooth:false,symbol:'none',lineStyle:{color:'#ff4757',width:.8,opacity:.7}},
+                {type:'line',data:bpData,smooth:false,symbol:'none',lineStyle:{color:'#00e5ff',width:.8,opacity:.7}}]},true);
 
     const phaseDiffCirc=s.phase_diff_circ||[];
     if(phaseDiffCirc.length){
@@ -240,7 +255,6 @@ function U(d){
         yAxis:{type:'value',...AX},
         series:[{type:'bar',data:rc,barMaxWidth:12,itemStyle:{color:function(p){const v=p.value;return v<pf.rsa_baseline*.6?'#ff4757':v<pf.rsa_baseline?'#facc15':'#14b8a6'}}},{type:'line',markLine:{silent:true,data:[{yAxis:pf.rsa_baseline,lineStyle:{color:'#1a2a40',type:'dashed'}}]},data:[]}]},true);
 
-    // ========== 关键修复 3：使用自定义 makeHistogram 替代 echarts.util.histogram ==========
     if(instHrData.length>10){
         const bins=[];for(let i=40;i<=160;i+=3)bins.push(i);
         const hist = makeHistogram(instHrData, bins);
@@ -254,10 +268,21 @@ function U(d){
         visualMap:{show:false,dimension:1,pieces:[{lte:.2,color:'#ff4757'},{gt:.2,lte:.4,color:'#facc15'},{gt:.4,color:'#a855f7'}]},
         series:[{type:'line',data:t.plv||[],smooth:true,symbol:'none',lineStyle:{width:1.5},areaStyle:{color:G2('168,85,247')}},{type:'line',markLine:{silent:true,data:[{yAxis:.4,label:{formatter:'0.4',color:'#ff4757',fontSize:7},lineStyle:{color:'rgba(255,71,87,0.3)',type:'dashed'}}]},data:[]}]},true);
 
-    E[10].setOption({...NA,grid:{top:8,right:8,bottom:14,left:32},
-        xAxis:{type:'category',data:(t.phase_diff||[]).map((_,i)=>i),...AX,axisLabel:{...AX.axisLabel,show:false}},
-        yAxis:{type:'value',min:-Math.PI,max:Math.PI,...AX},
-        series:[{type:'line',data:t.phase_diff||[],smooth:true,symbol:'none',lineStyle:{color:'#ec4899',width:1},areaStyle:{color:new echarts.graphic.LinearGradient(0,0,0,1,[{offset:0,color:'rgba(236,72,153,0.1)'},{offset:1,color:'rgba(236,72,153,0)')}},{type:'line',markLine:{silent:true,data:[{yAxis:0,lineStyle:{color:'#1a2a40',type:'dashed'}}]},data:[]}]},true);
+    // ========== 关键修复：E[10] 的 areaStyle 渐变对象语法修正 ==========
+    const pdData=t.phase_diff||[];
+    if(pdData.length){
+        const pdMin=Math.min(...pdData),pdMax=Math.max(...pdData);
+        const pdSpan=Math.max(pdMax-pdMin,0.1)*0.6;
+        const pdCenter=(pdMin+pdMax)/2;
+        E[10].setOption({...NA,grid:{top:8,right:8,bottom:14,left:32},
+            xAxis:{type:'category',data:pdData.map((_,i)=>i),...AX,axisLabel:{...AX.axisLabel,show:false}},
+            yAxis:{type:'value',min:pdCenter-pdSpan,max:pdCenter+pdSpan,...AX},
+            series:[
+                {type:'line',data:pdData,smooth:true,symbol:'none',lineStyle:{color:'#ec4899',width:1},
+                 areaStyle:{color:new echarts.graphic.LinearGradient(0,0,0,1,[{offset:0,color:'rgba(236,72,153,0.1)'},{offset:1,color:'rgba(236,72,153,0)'}])}},
+                {type:'line',markLine:{silent:true,data:[{yAxis:0,lineStyle:{color:'#1a2a40',type:'dashed'}}]},data:[]}
+            ]},true);
+    }
 
     E[11].setOption({...NA,grid:{top:8,right:8,bottom:14,left:32},
         xAxis:{type:'category',data:(t.brv||[]).map((_,i)=>i),...AX,axisLabel:{...AX.axisLabel,show:false}},
