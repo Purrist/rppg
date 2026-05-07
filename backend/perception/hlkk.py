@@ -191,9 +191,13 @@ class PhysioEngine:
         y = np.mean(np.sin(delta))
         return float(np.arctan2(y, x))
 
-    def calc_brv(self, inst_br):
-        """[04] 呼吸变异性 CV%"""
-        data = inst_br[-300:] if len(inst_br) >= 300 else inst_br
+    def calc_brv(self, br_history):
+        """[04] 呼吸变异性 CV%
+        
+        修复 V4.2: 改用雷达直出的 breath_rate 历史序列，
+        不再使用相位求导的 inst_br（假数据）。
+        """
+        data = br_history[-300:] if len(br_history) >= 300 else br_history
         if len(data) < 100:
             return 0.0
         mean_val = np.mean(data)
@@ -438,7 +442,8 @@ def get_data():
         phase_diff = engine.calc_mean_phase_diff(hr_uni, br_uni)
 
         # A级指标
-        brv_val = engine.calc_brv(inst_br)
+        # ---- 修复 V4.2: BRV 改用雷达直出BR历史 ----
+        brv_val = engine.calc_brv(breath_rate_history)
         # ---- 修复 V4.1: BR Elevation 改用雷达直出BR ----
         br_elev_val = engine.calc_br_elevation(br_now)
         hri_val = engine.calc_hri(inst_hr)

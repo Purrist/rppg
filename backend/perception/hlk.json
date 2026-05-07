@@ -1,9 +1,9 @@
 {
-  "timestamp": 1778177608.9545112,
+  "timestamp": 1778182187.1610768,
   "latest": {
-    "heart_rate": 76.0,
-    "breath_rate": 24.0,
-    "heart_phase": -0.32165610790252686,
-    "breath_phase": -0.2001270055770874
+    "heart_rate": 74.0,
+    "breath_rate": 5.0,
+    "heart_phase": 0.051683951169252396,
+    "breath_phase": -0.11852055788040161
   }
 }
