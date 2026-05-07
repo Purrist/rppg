@@ -264,6 +264,7 @@ def serial_thread():
 
     buf = b""
     last_save_time = time.time()
+    ts = last_save_time
     print("开始接收数据...\n")
 
     while True:

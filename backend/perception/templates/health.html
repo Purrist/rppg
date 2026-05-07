@@ -115,30 +115,33 @@ select.gender-select { background: #050a12; border: 1px solid #13203a; border-ra
         <div class="chart-row">
             <div style="display: flex; flex-direction: column; gap: 6px; flex: 2;">
                 <div class="chart-container">
-                    <div class="chart-title">心率储备 <span style="font-size: 8px; color: #4a6a8a;">(HRR)</span> <span id="hrr-value" style="font-size: 14px; font-weight: 700; color: #ff4757;">--%</span></div>
+                    <div class="chart-title">心率储备 <span style="font-size: 8px; color: #4a6a8a;">(HRR)</span> <span id="hrr-value" style="font-size: 14px; font-weight: 700; color: #ff4757;">--%</span> <span id="hrr-level" style="font-size: 10px; padding: 1px 4px; border-radius: 3px; background: #1e3a5f; color: #64ffda;">--</span></div>
                     <div class="chart-body" id="hrr-chart"></div>
                 </div>
                 <div class="chart-container">
-                    <div class="chart-title">心肺频率比 <span style="font-size: 8px; color: #4a6a8a;">(CR)</span> <span id="cr-value" style="font-size: 14px; font-weight: 700; color: #f97316;">--</span></div>
+                    <div class="chart-title">心肺频率比 <span style="font-size: 8px; color: #4a6a8a;">(CR)</span> <span id="cr-value" style="font-size: 14px; font-weight: 700; color: #f97316;">--</span> <span id="cr-level" style="font-size: 10px; padding: 1px 4px; border-radius: 3px; background: #1e3a5f; color: #64ffda;">--</span></div>
                     <div class="chart-body" id="cr-chart"></div>
                 </div>
             </div>
             <div style="display: flex; flex-direction: column; gap: 6px; flex: 2;">
                 <div class="chart-container">
-                    <div class="chart-title">呼吸变异性 <span style="font-size: 8px; color: #4a6a8a;">(BRV)</span> <span id="brv-value" style="font-size: 14px; font-weight: 700; color: #00e5ff;">--%</span></div>
+                    <div class="chart-title">呼吸变异性 <span style="font-size: 8px; color: #4a6a8a;">(BRV)</span> <span id="brv-value" style="font-size: 14px; font-weight: 700; color: #00e5ff;">--%</span> <span id="brv-level" style="font-size: 10px; padding: 1px 4px; border-radius: 3px; background: #1e3a5f; color: #64ffda;">--</span></div>
                     <div class="chart-body" id="brv-chart"></div>
                 </div>
                 <div class="chart-container">
-                    <div class="chart-title">心率振荡指数 <span style="font-size: 8px; color: #4a6a8a;">(HRI)</span> <span id="hri-value" style="font-size: 14px; font-weight: 700; color: #3b82f6;">--</span></div>
+                    <div class="chart-title">心率振荡指数 <span style="font-size: 8px; color: #4a6a8a;">(HRI)</span> <span id="hri-value" style="font-size: 14px; font-weight: 700; color: #3b82f6;">--</span> <span id="hri-level" style="font-size: 10px; padding: 1px 4px; border-radius: 3px; background: #1e3a5f; color: #64ffda;">--</span></div>
                     <div class="chart-body" id="plv-chart"></div>
                 </div>
             </div>
-            <div class="chart-container"></div>
+            <div class="chart-container" style="flex: 1.5;">
+                <div class="chart-title">心肺相空间 <span style="font-size: 8px; color: #4a6a8a;">(Lissajous)</span> <span id="lissajous-level" style="font-size: 10px; padding: 1px 4px; border-radius: 3px; background: #1e3a5f; color: #64ffda;">--</span></div>
+                <div class="chart-body" id="lissajous-chart"></div>
+            </div>
         </div>
         
         <div class="chart-row" style="flex: 0 0 180px;">
             <div class="chart-container">
-                <div class="chart-title">PLV趋势 <span style="font-size: 8px; color: #4a6a8a;">(PLV Trend)</span> <span id="plv-value" style="font-size: 14px; font-weight: 700; color: #a855f7;">--</span></div>
+                <div class="chart-title">相位锁定值 <span style="font-size: 8px; color: #4a6a8a;">(PLV)</span> <span id="plv-value" style="font-size: 14px; font-weight: 700; color: #a855f7;">--</span> <span id="plv-level" style="font-size: 10px; padding: 1px 4px; border-radius: 3px; background: #1e3a5f; color: #64ffda;">--</span></div>
                 <div class="chart-body" id="rsa-plv-chart"></div>
             </div>
             <div class="chart-container polar-chart">
@@ -146,7 +149,7 @@ select.gender-select { background: #050a12; border: 1px solid #13203a; border-ra
                 <div class="chart-body" id="composite-chart"></div>
             </div>
             <div class="chart-container">
-                <div class="chart-title">呼吸急促度 <span style="font-size: 8px; color: #4a6a8a;">(BR Elevation)</span> <span id="br-elev-value" style="font-size: 14px; font-weight: 700; color: #14b8a6;">--%</span></div>
+                <div class="chart-title">呼吸急促度 <span style="font-size: 8px; color: #4a6a8a;">(BR Elevation)</span> <span id="br-elev-value" style="font-size: 14px; font-weight: 700; color: #14b8a6;">--%</span> <span id="br-elev-level" style="font-size: 10px; padding: 1px 4px; border-radius: 3px; background: #1e3a5f; color: #64ffda;">--</span></div>
                 <div class="chart-body" id="brv-hri-chart"></div>
             </div>
         </div>
@@ -165,6 +168,7 @@ charts.plv = echarts.init(document.getElementById('plv-chart'), null, {renderer:
 charts.rsaPlv = echarts.init(document.getElementById('rsa-plv-chart'), null, {renderer: 'canvas'});
 charts.composite = echarts.init(document.getElementById('composite-chart'), null, {renderer: 'canvas'});
 charts.brvHri = echarts.init(document.getElementById('brv-hri-chart'), null, {renderer: 'canvas'});
+charts.lissajous = echarts.init(document.getElementById('lissajous-chart'), null, {renderer: 'canvas'});
 
 window.addEventListener('resize', () => { Object.values(charts).forEach(c => c && c.resize()); });
 
@@ -198,12 +202,104 @@ function update(data) {
     document.getElementById('br-rest').textContent = pf.br_rest_est;
     
     document.getElementById('hrr-value').textContent = h.hrr_pct.toFixed(1);
+    const hrrLevel = document.getElementById('hrr-level');
+    if (h.hrr_pct < 40) {
+        hrrLevel.textContent = '低强度';
+        hrrLevel.style.background = '#1e3a5f';
+        hrrLevel.style.color = '#64ffda';
+    } else if (h.hrr_pct <= 60) {
+        hrrLevel.textContent = '中强度';
+        hrrLevel.style.background = '#2d3748';
+        hrrLevel.style.color = '#f6ad55';
+    } else {
+        hrrLevel.textContent = '高强度';
+        hrrLevel.style.background = '#4a1a1a';
+        hrrLevel.style.color = '#fc8181';
+    }
     document.getElementById('brv-value').textContent = h.brv_cv.toFixed(1);
+    const brvLevel = document.getElementById('brv-level');
+    if (h.brv_cv < 5) {
+        brvLevel.textContent = '规律';
+        brvLevel.style.background = '#1e3a5f';
+        brvLevel.style.color = '#64ffda';
+    } else if (h.brv_cv <= 15) {
+        brvLevel.textContent = '正常';
+        brvLevel.style.background = '#2d3748';
+        brvLevel.style.color = '#f6ad55';
+    } else {
+        brvLevel.textContent = '不规律';
+        brvLevel.style.background = '#4a1a1a';
+        brvLevel.style.color = '#fc8181';
+    }
     document.getElementById('cr-value').textContent = h.cr_ratio.toFixed(2);
+    const crLevel = document.getElementById('cr-level');
+    if (h.cr_ratio < 3.5) {
+        crLevel.textContent = '偏低';
+        crLevel.style.background = '#1e3a5f';
+        crLevel.style.color = '#64ffda';
+    } else if (h.cr_ratio <= 5.5) {
+        crLevel.textContent = '正常';
+        crLevel.style.background = '#2d3748';
+        crLevel.style.color = '#f6ad55';
+    } else {
+        crLevel.textContent = '偏高';
+        crLevel.style.background = '#4a1a1a';
+        crLevel.style.color = '#fc8181';
+    }
     document.getElementById('hri-value').textContent = h.hri_sd.toFixed(2) + ' bpm';
+    const hriLevel = document.getElementById('hri-level');
+    if (h.hri_sd < 2) {
+        hriLevel.textContent = '心率过缓';
+        hriLevel.style.background = '#1e3a5f';
+        hriLevel.style.color = '#64ffda';
+    } else if (h.hri_sd <= 8) {
+        hriLevel.textContent = '正常波动';
+        hriLevel.style.background = '#2d3748';
+        hriLevel.style.color = '#f6ad55';
+    } else if (h.hri_sd <= 15) {
+        hriLevel.textContent = '明显波动';
+        hriLevel.style.background = '#4a3520';
+        hriLevel.style.color = '#fbd38d';
+    } else {
+        hriLevel.textContent = '剧烈振荡';
+        hriLevel.style.background = '#4a1a1a';
+        hriLevel.style.color = '#fc8181';
+    }
     document.getElementById('plv-value').textContent = h.plv_r.toFixed(2);
+    const plvLevel = document.getElementById('plv-level');
+    if (h.plv_r < 0.3) {
+        plvLevel.textContent = '清醒焦虑';
+        plvLevel.style.background = '#4a1a1a';
+        plvLevel.style.color = '#fc8181';
+    } else if (h.plv_r <= 0.9) {
+        plvLevel.textContent = '日常活动';
+        plvLevel.style.background = '#2d3748';
+        plvLevel.style.color = '#f6ad55';
+    } else {
+        plvLevel.textContent = '深度放松';
+        plvLevel.style.background = '#1e3a5f';
+        plvLevel.style.color = '#64ffda';
+    }
     document.getElementById('phase-value').textContent = ((h.mean_phase_diff || 0) * 180 / Math.PI).toFixed(0) + '°';
     document.getElementById('br-elev-value').textContent = h.br_elevation.toFixed(1);
+    const brElevLevel = document.getElementById('br-elev-level');
+    if (h.br_elevation < 0) {
+        brElevLevel.textContent = '放松';
+        brElevLevel.style.background = '#1e3a5f';
+        brElevLevel.style.color = '#64ffda';
+    } else if (h.br_elevation <= 30) {
+        brElevLevel.textContent = '正常';
+        brElevLevel.style.background = '#2d3748';
+        brElevLevel.style.color = '#f6ad55';
+    } else if (h.br_elevation <= 50) {
+        brElevLevel.textContent = '紧张';
+        brElevLevel.style.background = '#4a3520';
+        brElevLevel.style.color = '#fbd38d';
+    } else {
+        brElevLevel.textContent = '异常';
+        brElevLevel.style.background = '#4a1a1a';
+        brElevLevel.style.color = '#fc8181';
+    }
     
     const instHrAvg = s.inst_hr.length ? (s.inst_hr.reduce((a,b)=>a+b,0)/s.inst_hr.length).toFixed(1) : '--';
     const instBrAvg = s.inst_br.length ? (s.inst_br.reduce((a,b)=>a+b,0)/s.inst_br.length).toFixed(1) : '--';
@@ -256,9 +352,77 @@ function update(data) {
         yAxis: { type: 'value', min: Math.max(0, hrrMin - hrrPad), max: hrrMax + hrrPad, ...AX },
         series: [
             { type: 'line', data: hrrData, smooth: true, symbol: 'none', lineStyle: { color: '#ff4757', width: 1.2 }, areaStyle: { color: 'rgba(255,71,87,0.1)' } },
-            { type: 'line', markLine: { silent: true, data: [{ yAxis: 50, lineStyle: { color: 'rgba(250,204,21,0.3)', type: 'dashed' } }] }, data: [] }
+            { type: 'line', markLine: { silent: true, data: [{ yAxis: 60, lineStyle: { color: 'rgba(250,204,21,0.3)', type: 'dashed' } }] }, data: [] }
         ]
     }, true);
+    
+    const lissajousData = s.lissajous || [];
+    if (lissajousData.length > 5) {
+        const lissaX = lissajousData.map(p => p[0]);
+        const lissaY = lissajousData.map(p => p[1]);
+        const n = lissaX.length;
+        const meanX = lissaX.reduce((a,b) => a+b, 0) / n;
+        const meanY = lissaY.reduce((a,b) => a+b, 0) / n;
+        const varX = lissaX.reduce((sum, x) => sum + (x - meanX) ** 2, 0) / n;
+        const varY = lissaY.reduce((sum, y) => sum + (y - meanY) ** 2, 0) / n;
+        const covXY = lissaX.reduce((sum, x, i) => sum + (x - meanX) * (lissaY[i] - meanY), 0) / n;
+        const trace = varX + varY;
+        const det = varX * varY - covXY * covXY;
+        const disc = Math.sqrt(Math.max(0, trace * trace / 4 - det));
+        const lambda1 = trace / 2 + disc;
+        const lambda2 = trace / 2 - disc;
+        const roundness = lambda2 / lambda1;
+        
+        const lissajousLevel = document.getElementById('lissajous-level');
+        if (roundness > 0.5) {
+            lissajousLevel.textContent = '同步良好';
+            lissajousLevel.style.background = '#1e3a5f';
+            lissajousLevel.style.color = '#64ffda';
+        } else if (roundness > 0.2) {
+            lissajousLevel.textContent = '同步一般';
+            lissajousLevel.style.background = '#2d3748';
+            lissajousLevel.style.color = '#f6ad55';
+        } else {
+            lissajousLevel.textContent = '同步较弱';
+            lissajousLevel.style.background = '#4a1a1a';
+            lissajousLevel.style.color = '#fc8181';
+        }
+        
+        const a = Math.sqrt(lambda1) * 2;
+        const b = Math.sqrt(lambda2) * 2;
+        const theta = Math.atan2(2 * covXY, varX - varY) / 2;
+        const ellipsePoints = [];
+        for (let i = 0; i <= 64; i++) {
+            const t = (i / 64) * 2 * Math.PI;
+            const x = meanX + a * Math.cos(t) * Math.cos(theta) - b * Math.sin(t) * Math.sin(theta);
+            const y = meanY + a * Math.cos(t) * Math.sin(theta) + b * Math.sin(t) * Math.cos(theta);
+            ellipsePoints.push([x, y]);
+        }
+        
+        const allXY = [...lissaX, ...lissaY];
+        const minVal = Math.min(...allXY);
+        const maxVal = Math.max(...allXY);
+        const span = Math.max(maxVal - minVal, 0.1);
+        const center = (minVal + maxVal) / 2;
+        const range = span * 0.6;
+        charts.lissajous.setOption({
+            ...NA, grid: { top: 4, right: 8, bottom: 10, left: 28 },
+            xAxis: { type: 'value', min: center - range, max: center + range, ...AX, axisLabel: { show: false } },
+            yAxis: { type: 'value', min: center - range, max: center + range, ...AX, axisLabel: { show: false } },
+            series: [
+                { type: 'scatter', data: lissajousData, symbol: 'circle', symbolSize: 3, itemStyle: { color: '#14b8a6', opacity: 0.6 } },
+                { type: 'line', data: ellipsePoints, smooth: false, symbol: 'none', lineStyle: { color: '#ff6b6b', width: 1.5, type: 'dashed' } }
+            ]
+        }, true);
+    } else {
+        charts.lissajous.setOption({
+            ...NA, grid: { top: 4, right: 8, bottom: 10, left: 28 },
+            xAxis: { type: 'value', ...AX, axisLabel: { show: false } },
+            yAxis: { type: 'value', ...AX, axisLabel: { show: false } },
+            series: [{ type: 'scatter', data: [] }]
+        }, true);
+        document.getElementById('lissajous-level').textContent = '--';
+    }
     
     const brvData = t.brv.slice(-300);
     const brvX = brvData.map((_,i) => i);
