@@ -19,12 +19,15 @@ os.makedirs(HEALTHDATA_DIR, exist_ok=True)
 
 start_time = time.strftime("%Y%m%d-%H%M%S")
 RAW_LOG_FILE = os.path.join(HEALTHDATA_DIR, f"{start_time}raw.json")
-RAW_RAW_LOG_FILE = os.path.join(HEALTHDATA_DIR, f"{start_time}raw_raw.json")
 ANALYSIS_LOG_FILE = os.path.join(HEALTHDATA_DIR, f"{start_time}analysis.json")
 
 raw_log_data = []
-raw_raw_log_data = []
 analysis_log_data = []
+
+with open(RAW_LOG_FILE, 'w', encoding='utf-8') as f:
+    json.dump(raw_log_data, f, ensure_ascii=False, indent=2)
+with open(ANALYSIS_LOG_FILE, 'w', encoding='utf-8') as f:
+    json.dump(analysis_log_data, f, ensure_ascii=False, indent=2)
 
 app = Flask(__name__, template_folder='templates', static_folder='static')
 
@@ -53,6 +56,10 @@ clean_br_history = [16.0] * MAX_HISTORY
 
 last_valid_hr = 72.0
 last_valid_br = 16.0
+
+rt_hr_valid_history = [True] * MAX_HISTORY
+rt_br_valid_history = [True] * MAX_HISTORY
+rt_phase_valid_history = [True] * MAX_HISTORY
 lissajous_history = []
 current_preprocessor_output = None
 
@@ -67,6 +74,10 @@ cr_ratio_trend = []
 hr_slope_trend = []
 phase_diff_trend = []
 br_elevation_trend = []
+trend_signal_state_history = []
+trend_hr_valid_history = []
+trend_br_valid_history = []
+trend_phase_valid_history = []
 
 
 # ========== PhasePreprocessor ==========
@@ -300,7 +311,7 @@ def save_to_json():
         if current_preprocessor_output is not None:
             inst_hr, inst_br, hr_uni, br_uni = current_preprocessor_output
             hr_now = float(latest_data["heart_rate"])
-            br_now = float(latest_data["breath_rate"]) if latest_data["breath_rate"] > 0 else 16.0
+            br_now = float(latest_data["breath_rate"]) if latest_data["breath_rate"] > 0 else 0.0
             
             hrr_val = engine.calc_hrr(hr_now)
             brv_val = engine.calc_brv(clean_br_history)
@@ -331,11 +342,10 @@ def save_to_json():
 
 
 def save_logs():
+    global raw_log_data, analysis_log_data
     try:
         with open(RAW_LOG_FILE, 'w', encoding='utf-8') as f:
             json.dump(raw_log_data, f, ensure_ascii=False, indent=2)
-        with open(RAW_RAW_LOG_FILE, 'w', encoding='utf-8') as f:
-            json.dump(raw_raw_log_data, f, ensure_ascii=False, indent=2)
         with open(ANALYSIS_LOG_FILE, 'w', encoding='utf-8') as f:
             json.dump(analysis_log_data, f, ensure_ascii=False, indent=2)
     except Exception as e:
@@ -404,6 +414,7 @@ def get_brel_label(brel):
 
 def validate_and_update(ts):
     global current_preprocessor_output, last_valid_hr, last_valid_br
+    global rt_hr_valid_history, rt_br_valid_history, rt_phase_valid_history
     
     raw_hr = latest_data["heart_rate"]
     raw_br = latest_data["breath_rate"]
@@ -414,6 +425,9 @@ def validate_and_update(ts):
     
     hr_valid = (40.0 <= raw_hr <= 180.0) and raw_hr != 0.0
     br_valid = (6.0 <= raw_br <= 40.0) and raw_br != 0.0
+    phase_valid = (latest_data["is_human"] == 1 and 
+                   latest_data["distance_valid"] == 1 and 
+                   not (raw_hr == 0.0 and raw_br == 0.0))
     
     if latest_data["is_human"] == 0 or latest_data["distance_valid"] == 0:
         state = "NO_TARGET"
@@ -480,7 +494,9 @@ def validate_and_update(ts):
     
     display_hr_history.append(final_hr)
     display_br_history.append(final_br)
-    signal_state_history.append(state)
+    rt_hr_valid_history.append(hr_valid)
+    rt_br_valid_history.append(br_valid)
+    rt_phase_valid_history.append(phase_valid)
     heart_phase_history.append(latest_data["heart_phase"])
     breath_phase_history.append(latest_data["breath_phase"])
     lissajous_history.append([float(latest_data["breath_phase"]), float(latest_data["heart_phase"])])
@@ -496,23 +512,40 @@ def validate_and_update(ts):
             last_valid_br = raw_br
             clean_br_history.append(raw_br)
         clean_hr_history.append(final_hr)
+    elif state == "BR_UNSTABLE":
+        if hr_valid:
+            last_valid_hr = raw_hr
+            clean_hr_history.append(raw_hr)
+    elif state == "HR_UNSTABLE":
+        if br_valid:
+            last_valid_br = raw_br
+            clean_br_history.append(raw_br)
     
     for lst in [display_hr_history, display_br_history, signal_state_history,
                 heart_phase_history, breath_phase_history,
-                clean_hr_history, clean_br_history]:
+                clean_hr_history, clean_br_history,
+                rt_hr_valid_history, rt_br_valid_history, rt_phase_valid_history]:
         if len(lst) > MAX_HISTORY:
             lst.pop(0)
     if len(lissajous_history) > 500:
         lissajous_history.pop(0)
     
-    if state == "NORMAL":
+    latest_data["hr_valid"] = hr_valid
+    latest_data["br_valid"] = br_valid
+    latest_data["phase_valid"] = phase_valid
+
+    if state not in ["NO_TARGET", "BIG_MOVE"]:
+        feed_hr = raw_hr if hr_valid else last_valid_hr
+        feed_br = raw_br if br_valid else last_valid_br
         current_preprocessor_output = preprocessor.feed(
-            latest_data["heart_phase"], latest_data["breath_phase"], ts,
-            current_hr=raw_hr, current_br=raw_br
+            latest_data["heart_phase"],
+            latest_data["breath_phase"],
+            ts,
+            current_hr=feed_hr,
+            current_br=feed_br
         )
-        return True
-    else:
-        return False
+
+    return state in ["NORMAL", "BR_UNSTABLE", "HR_UNSTABLE", "THAW"]
 
 
 def verify_cksum(buf, cksum):
@@ -527,7 +560,7 @@ def float_le(b):
 
 
 def simulate_thread():
-    global current_preprocessor_output, lissajous_history
+    global current_preprocessor_output, lissajous_history, raw_log_data, analysis_log_data
     print("模拟模式: 生成虚拟生理数据...")
     
     ts = time.time()
@@ -560,78 +593,111 @@ def simulate_thread():
             if frame_count % 3 == 0:
                 latest_data["heart_rate"] = hr
                 latest_data["breath_rate"] = br
+                latest_data["is_human"] = 1
+                latest_data["distance_valid"] = 1
+                latest_data["distance"] = 45.92
             
             latest_data["heart_phase"] = hr_phase
             latest_data["breath_phase"] = br_phase
             
-            current_preprocessor_output = preprocessor.feed(
-                hr_phase, br_phase, ts,
-                current_hr=latest_data["heart_rate"],
-                current_br=latest_data["breath_rate"]
-            )
-            
-            lissajous_history.append([float(br_phase), float(hr_phase)])
-            if len(lissajous_history) > 500:
-                lissajous_history.pop(0)
-            
-            heart_phase_history.append(hr_phase)
-            breath_phase_history.append(br_phase)
-            heart_rate_history.append(latest_data["heart_rate"])
-            breath_rate_history.append(latest_data["breath_rate"])
-            
-            for lst in [heart_phase_history, breath_phase_history,
-                        heart_rate_history, breath_rate_history]:
-                if len(lst) > MAX_HISTORY:
-                    lst.pop(0)
+            validate_and_update(ts)
             
             if ts - last_save_time > 1.0:
                 save_to_json()
                 
                 raw_entry = {
-                    "timestamp": ts,
-                    "heart_rate": float(latest_data["heart_rate"]),
-                    "breath_rate": float(latest_data["breath_rate"]),
-                    "heart_phase": float(latest_data["heart_phase"]),
-                    "breath_phase": float(latest_data["breath_phase"]),
+                    "time": ts,
+                    "hr": float(latest_data["heart_rate"]),
+                    "br": float(latest_data["breath_rate"]),
+                    "hph": float(latest_data["heart_phase"]),
+                    "bph": float(latest_data["breath_phase"]),
                     "is_human": latest_data["is_human"],
-                    "distance_valid": latest_data["distance_valid"],
                     "distance": float(latest_data["distance"]),
+                    "distance_valid": latest_data["distance_valid"],
                     "signal_state": latest_data["signal_state"]
                 }
                 raw_log_data.append(raw_entry)
                 
-                if latest_data["signal_state"] in ["NORMAL", "THAW"] and current_preprocessor_output is not None:
-                    inst_hr, inst_br, hr_uni, br_uni = current_preprocessor_output
-                    hr_now = float(latest_data["heart_rate"])
-                    br_now = float(latest_data["breath_rate"])
-                    
+                state = latest_data["signal_state"]
+                hr_valid = latest_data.get("hr_valid", False)
+                br_valid = latest_data.get("br_valid", False)
+                phase_valid = latest_data.get("phase_valid", False)
+                
+                analysis_entry = {
+                    "time": ts,
+                    "signal_state": state,
+                    "hr_valid": hr_valid,
+                    "br_valid": br_valid,
+                    "phase_valid": phase_valid
+                }
+                
+                hr_now = float(latest_data["heart_rate"])
+                br_now = float(latest_data["breath_rate"])
+                
+                # 原子化计算：根据条件分别计算
+                if hr_valid:
                     hrr_val = engine.calc_hrr(hr_now)
-                    brv_val = engine.calc_brv(clean_br_history)
-                    cr_val = engine.calc_cr_ratio(hr_now, br_now)
                     slope_val = engine.calc_hr_slope(clean_hr_history)
-                    plv_val = engine.calc_plv(hr_uni, br_uni)
-                    br_elev_val = engine.calc_br_elevation(br_now)
-                    
-                    analysis_entry = {
-                        "timestamp": ts,
-                        "signal_state": "NORMAL",
+                    analysis_entry.update({
                         "hrr": round(hrr_val, 1),
                         "hrr_label": get_hrr_label(hrr_val),
+                        "slope": round(slope_val, 2),
+                        "slope_label": get_slope_label(slope_val)
+                    })
+                else:
+                    analysis_entry.update({
+                        "hrr": "--",
+                        "hrr_label": "--",
+                        "slope": "--",
+                        "slope_label": "--"
+                    })
+                
+                if br_valid:
+                    brv_val = engine.calc_brv(clean_br_history)
+                    br_elev_val = engine.calc_br_elevation(br_now)
+                    analysis_entry.update({
                         "brv": round(brv_val, 2),
                         "brv_label": get_brv_label(brv_val),
-                        "cr": round(cr_val, 2),
-                        "cr_label": get_cr_label(cr_val),
-                        "slope": round(slope_val, 2),
-                        "slope_label": get_slope_label(slope_val),
-                        "plv": round(plv_val, 3),
-                        "plv_label": get_plv_label(plv_val),
                         "brel": round(br_elev_val, 1),
                         "brel_label": get_brel_label(br_elev_val)
-                    }
-                    analysis_log_data.append(analysis_entry)
-                    
-                    save_logs()
-                    last_save_time = ts
+                    })
+                else:
+                    analysis_entry.update({
+                        "brv": "--",
+                        "brv_label": "--",
+                        "brel": "--",
+                        "brel_label": "--"
+                    })
+                
+                if hr_valid and br_valid:
+                    cr_val = engine.calc_cr_ratio(hr_now, br_now)
+                    analysis_entry.update({
+                        "cr": round(cr_val, 2),
+                        "cr_label": get_cr_label(cr_val)
+                    })
+                else:
+                    analysis_entry.update({
+                        "cr": "--",
+                        "cr_label": "--"
+                    })
+                
+                if phase_valid and current_preprocessor_output is not None:
+                    inst_hr, inst_br, hr_uni, br_uni = current_preprocessor_output
+                    plv_val = engine.calc_plv(hr_uni, br_uni)
+                    analysis_entry.update({
+                        "plv": round(plv_val, 3),
+                        "plv_label": get_plv_label(plv_val)
+                    })
+                else:
+                    analysis_entry.update({
+                        "plv": "--",
+                        "plv_label": "--"
+                    })
+                
+                analysis_log_data.append(analysis_entry)
+                
+                save_logs()
+                last_save_time = ts
             
             time.sleep(0.02)
         except Exception as e:
@@ -640,7 +706,7 @@ def simulate_thread():
 
 
 def serial_thread():
-    global current_preprocessor_output, lissajous_history
+    global current_preprocessor_output, lissajous_history, raw_log_data, analysis_log_data
     print("尝试连接串口 %s @ %s bps..." % (PORT, BAUD))
     ser = None
     while True:
@@ -702,66 +768,102 @@ def serial_thread():
                     elif tid == 0x0A15 and len(fd) >= 4:
                         latest_data["heart_rate"] = float_le(fd[:4])
                         
-                        raw_raw_entry = {
-                            "timestamp": time.time(),
-                            "heart_rate_raw": float(latest_data["heart_rate"]),
-                            "breath_rate_raw": float(latest_data["breath_rate"]),
-                            "heart_phase_raw": float(latest_data["heart_phase"]),
-                            "breath_phase_raw": float(latest_data["breath_phase"]),
-                            "is_human_raw": latest_data["is_human"],
-                            "distance_valid_raw": latest_data["distance_valid"],
-                            "distance_raw": float(latest_data["distance"])
-                        }
-                        raw_raw_log_data.append(raw_raw_entry)
-                        
                         validate_and_update(ts)
 
                 if ts - last_save_time > 1.0:
                     save_to_json()
                     
                     raw_entry = {
-                        "timestamp": ts,
-                        "heart_rate": float(latest_data["heart_rate"]),
-                        "breath_rate": float(latest_data["breath_rate"]),
-                        "heart_phase": float(latest_data["heart_phase"]),
-                        "breath_phase": float(latest_data["breath_phase"]),
+                        "time": ts,
+                        "hr": float(latest_data["heart_rate"]),
+                        "br": float(latest_data["breath_rate"]),
+                        "hph": float(latest_data["heart_phase"]),
+                        "bph": float(latest_data["breath_phase"]),
                         "is_human": latest_data["is_human"],
-                        "distance_valid": latest_data["distance_valid"],
                         "distance": float(latest_data["distance"]),
+                        "distance_valid": latest_data["distance_valid"],
                         "signal_state": latest_data["signal_state"]
                     }
                     raw_log_data.append(raw_entry)
                     
-                    if latest_data["signal_state"] in ["NORMAL", "THAW"] and current_preprocessor_output is not None:
-                        inst_hr, inst_br, hr_uni, br_uni = current_preprocessor_output
-                        hr_now = float(latest_data["heart_rate"])
-                        br_now = float(latest_data["breath_rate"])
-                        
+                    state = latest_data["signal_state"]
+                    hr_valid = latest_data.get("hr_valid", False)
+                    br_valid = latest_data.get("br_valid", False)
+                    phase_valid = latest_data.get("phase_valid", False)
+                    
+                    analysis_entry = {
+                        "time": ts,
+                        "signal_state": state,
+                        "hr_valid": hr_valid,
+                        "br_valid": br_valid,
+                        "phase_valid": phase_valid
+                    }
+                    
+                    hr_now = float(latest_data["heart_rate"])
+                    br_now = float(latest_data["breath_rate"])
+                    
+                    # 原子化计算：根据条件分别计算
+                    if hr_valid:
                         hrr_val = engine.calc_hrr(hr_now)
-                        brv_val = engine.calc_brv(clean_br_history)
-                        cr_val = engine.calc_cr_ratio(hr_now, br_now)
                         slope_val = engine.calc_hr_slope(clean_hr_history)
-                        plv_val = engine.calc_plv(hr_uni, br_uni)
-                        br_elev_val = engine.calc_br_elevation(br_now)
-                        
-                        analysis_entry = {
-                            "timestamp": ts,
-                            "signal_state": "NORMAL",
+                        analysis_entry.update({
                             "hrr": round(hrr_val, 1),
                             "hrr_label": get_hrr_label(hrr_val),
+                            "slope": round(slope_val, 2),
+                            "slope_label": get_slope_label(slope_val)
+                        })
+                    else:
+                        analysis_entry.update({
+                            "hrr": "--",
+                            "hrr_label": "--",
+                            "slope": "--",
+                            "slope_label": "--"
+                        })
+                    
+                    if br_valid:
+                        brv_val = engine.calc_brv(clean_br_history)
+                        br_elev_val = engine.calc_br_elevation(br_now)
+                        analysis_entry.update({
                             "brv": round(brv_val, 2),
                             "brv_label": get_brv_label(brv_val),
-                            "cr": round(cr_val, 2),
-                            "cr_label": get_cr_label(cr_val),
-                            "slope": round(slope_val, 2),
-                            "slope_label": get_slope_label(slope_val),
-                            "plv": round(plv_val, 3),
-                            "plv_label": get_plv_label(plv_val),
                             "brel": round(br_elev_val, 1),
                             "brel_label": get_brel_label(br_elev_val)
-                        }
-                        analysis_log_data.append(analysis_entry)
+                        })
+                    else:
+                        analysis_entry.update({
+                            "brv": "--",
+                            "brv_label": "--",
+                            "brel": "--",
+                            "brel_label": "--"
+                        })
                     
+                    if hr_valid and br_valid:
+                        cr_val = engine.calc_cr_ratio(hr_now, br_now)
+                        analysis_entry.update({
+                            "cr": round(cr_val, 2),
+                            "cr_label": get_cr_label(cr_val)
+                        })
+                    else:
+                        analysis_entry.update({
+                            "cr": "--",
+                            "cr_label": "--"
+                        })
+                    
+                    if phase_valid and current_preprocessor_output is not None:
+                        inst_hr, inst_br, hr_uni, br_uni = current_preprocessor_output
+                        plv_val = engine.calc_plv(hr_uni, br_uni)
+                        analysis_entry.update({
+                            "plv": round(plv_val, 3),
+                            "plv_label": get_plv_label(plv_val)
+                        })
+                    else:
+                        analysis_entry.update({
+                            "plv": "--",
+                            "plv_label": "--"
+                        })
+                    
+                    analysis_log_data.append(analysis_entry)
+                
                     save_logs()
                     last_save_time = ts
             time.sleep(0.001)
@@ -798,6 +900,8 @@ def get_data():
     global current_age, current_gender, engine
     global rsa_trend, plv_trend, brv_trend, hrr_trend, hri_trend
     global cr_ratio_trend, hr_slope_trend, phase_diff_trend, br_elevation_trend
+    global trend_signal_state_history, trend_hr_valid_history
+    global trend_br_valid_history, trend_phase_valid_history
 
     age_param = request.args.get('age', type=int)
     gender_param = request.args.get('gender', type=str)
@@ -813,7 +917,7 @@ def get_data():
         engine.update_profile(current_age, current_gender)
 
     hr_now = float(latest_data["heart_rate"])
-    br_now = float(latest_data["breath_rate"]) if latest_data["breath_rate"] > 0 else 16.0
+    br_now = float(latest_data["breath_rate"]) if latest_data["breath_rate"] > 0 else 0.0
 
     result = {
         "raw": {
@@ -823,7 +927,10 @@ def get_data():
             "signal_state": latest_data["signal_state"],
             "is_human": latest_data["is_human"],
             "distance_valid": latest_data["distance_valid"],
-            "distance": latest_data["distance"]
+            "distance": latest_data["distance"],
+            "hr_valid": latest_data.get("hr_valid", False),
+            "br_valid": latest_data.get("br_valid", False),
+            "phase_valid": latest_data.get("phase_valid", False)
         },
         "signals": {
             "inst_hr": [], "inst_br": [],
@@ -831,11 +938,11 @@ def get_data():
             "rsa_wrapped": []
         },
         "physiology": {
-            "rsa_amp": 0.0, "rsa_cycles": [],
-            "plv_r": 0.0, "mean_phase_diff": 0.0,
-            "brv_cv": 0.0, "br_elevation": 0.0,
-            "hr_slope": 0.0, "hri_sd": 0.0,
-            "hrr_pct": 0.0, "cr_ratio": 0.0
+            "rsa_amp": None, "rsa_cycles": [],
+            "plv_r": None, "mean_phase_diff": None,
+            "brv_cv": None, "br_elevation": None,
+            "hr_slope": None, "hri_sd": None,
+            "hrr_pct": None, "cr_ratio": None
         },
         "profile": {
             "age": current_age, "gender": current_gender,
@@ -848,6 +955,61 @@ def get_data():
         "trends": {}
     }
 
+    # === 原子化计算：按依赖关系分层 ===
+
+    # 第1层：只依赖HR（hr_valid就计算）
+    if latest_data["hr_valid"]:
+        hrr_val = engine.calc_hrr(hr_now)
+        slope_val = engine.calc_hr_slope(clean_hr_history)
+        result["physiology"]["hrr_pct"] = round(hrr_val, 1)
+        result["physiology"]["hr_slope"] = round(slope_val, 2)
+        hrr_trend.append(round(hrr_val, 1))
+        hr_slope_trend.append(round(slope_val, 2))
+    else:
+        if hrr_trend:
+            hrr_trend.append(hrr_trend[-1])
+        else:
+            hrr_trend.append(None)
+        if hr_slope_trend:
+            hr_slope_trend.append(hr_slope_trend[-1])
+        else:
+            hr_slope_trend.append(None)
+
+    # 第2层：只依赖BR（br_valid就计算）
+    if latest_data["br_valid"]:
+        br_elev_val = engine.calc_br_elevation(br_now)
+        brv_val = engine.calc_brv(clean_br_history)
+        result["physiology"]["br_elevation"] = round(br_elev_val, 1)
+        result["physiology"]["brv_cv"] = round(brv_val, 2)
+        br_elevation_trend.append(round(br_elev_val, 1))
+        brv_trend.append(round(brv_val, 2))
+    else:
+        if br_elevation_trend:
+            br_elevation_trend.append(br_elevation_trend[-1])
+        else:
+            br_elevation_trend.append(0.0)
+        if brv_trend:
+            brv_trend.append(brv_trend[-1])
+        else:
+            brv_trend.append(0.0)
+
+    trend_signal_state_history.append(latest_data["signal_state"])
+    trend_hr_valid_history.append(latest_data["hr_valid"])
+    trend_br_valid_history.append(latest_data["br_valid"])
+    trend_phase_valid_history.append(latest_data["phase_valid"])
+
+    # 第3层：同时需要HR和BR
+    if latest_data["hr_valid"] and latest_data["br_valid"]:
+        cr_val = engine.calc_cr_ratio(hr_now, br_now)
+        result["physiology"]["cr_ratio"] = round(cr_val, 2)
+        cr_ratio_trend.append(round(cr_val, 2))
+    else:
+        if cr_ratio_trend:
+            cr_ratio_trend.append(cr_ratio_trend[-1])
+        else:
+            cr_ratio_trend.append(None)
+
+    # 第4层：需要相位稳定
     if current_preprocessor_output is not None:
         inst_hr, inst_br, hr_uni, br_uni = current_preprocessor_output
 
@@ -855,67 +1017,62 @@ def get_data():
         result["signals"]["inst_br"] = [round(v, 1) for v in inst_br.tolist()[-100:]]
         result["signals"]["lissajous"] = lissajous_history[-300:]
 
-        # S级指标 (基于相位)
-        rsa_val = engine.calc_rsa(inst_hr, br_uni)
-        rsa_cycles = engine.calc_rsa(inst_hr, br_uni, return_all=True)
-        plv_val = engine.calc_plv(hr_uni, br_uni)
-        phase_diff = engine.calc_mean_phase_diff(hr_uni, br_uni)
+        if latest_data["phase_valid"]:
+            rsa_val = engine.calc_rsa(inst_hr, br_uni)
+            rsa_cycles = engine.calc_rsa(inst_hr, br_uni, return_all=True)
+            plv_val = engine.calc_plv(hr_uni, br_uni)
+            phase_diff = engine.calc_mean_phase_diff(hr_uni, br_uni)
+            hri_val = engine.calc_hri(inst_hr)
 
-        # A级指标
-        # ---- 使用 clean 历史保证统计纯度 ----
-        brv_val = engine.calc_brv(clean_br_history)
-        br_elev_val = engine.calc_br_elevation(br_now)
-        hri_val = engine.calc_hri(inst_hr)
-        hrr_val = engine.calc_hrr(hr_now)
-        cr_val = engine.calc_cr_ratio(hr_now, br_now)
-        slope_val = engine.calc_hr_slope(clean_hr_history)
+            result["physiology"]["rsa_amp"] = round(rsa_val, 2)
+            result["physiology"]["rsa_cycles"] = (rsa_cycles[-15:] if rsa_cycles else [])
+            result["physiology"]["plv_r"] = round(plv_val, 3)
+            result["physiology"]["mean_phase_diff"] = round(phase_diff, 3)
+            result["physiology"]["hri_sd"] = round(hri_val, 2)
 
-        # RSA极坐标包裹
-        rsa_wrapped = []
-        for i in range(len(br_uni)):
-            angle = float((br_uni[i] % (2 * np.pi)) * (180 / np.pi))
-            rsa_wrapped.append([round(angle, 1), round(float(inst_hr[i]), 1)])
+            rsa_wrapped = []
+            for i in range(len(br_uni)):
+                angle = float((br_uni[i] % (2 * np.pi)) * (180 / np.pi))
+                rsa_wrapped.append([round(angle, 1), round(float(inst_hr[i]), 1)])
+            result["signals"]["rsa_wrapped"] = rsa_wrapped[-200:]
 
-        # 相位差圆周
-        phase_diff_circ = []
-        delta_phase = hr_uni - br_uni
-        for dp in delta_phase[-50:]:
-            phase_diff_circ.append([
-                round(float(np.cos(dp)), 3),
-                round(float(np.sin(dp)), 3)
-            ])
+            phase_diff_circ = []
+            delta_phase = hr_uni - br_uni
+            for dp in delta_phase[-50:]:
+                phase_diff_circ.append([
+                    round(float(np.cos(dp)), 3),
+                    round(float(np.sin(dp)), 3)
+                ])
+            result["signals"]["phase_diff_circ"] = phase_diff_circ
 
-        result["physiology"] = {
-            "rsa_amp": round(rsa_val, 2),
-            "rsa_cycles": (rsa_cycles[-15:] if rsa_cycles else []),
-            "plv_r": round(plv_val, 3),
-            "mean_phase_diff": round(phase_diff, 3),
-            "brv_cv": round(brv_val, 2),
-            "br_elevation": round(br_elev_val, 1),
-            "hr_slope": round(slope_val, 2),
-            "hri_sd": round(hri_val, 2),
-            "hrr_pct": round(hrr_val, 1),
-            "cr_ratio": round(cr_val, 2)
-        }
+            rsa_trend.append(round(rsa_val, 2))
+            plv_trend.append(round(plv_val, 3))
+            hri_trend.append(round(hri_val, 2))
+            phase_diff_trend.append(round(phase_diff, 3))
+        else:
+            if rsa_trend:
+                rsa_trend.append(rsa_trend[-1])
+            else:
+                rsa_trend.append(None)
+            if plv_trend:
+                plv_trend.append(plv_trend[-1])
+            else:
+                plv_trend.append(None)
+            if hri_trend:
+                hri_trend.append(hri_trend[-1])
+            else:
+                hri_trend.append(None)
+            if phase_diff_trend:
+                phase_diff_trend.append(phase_diff_trend[-1])
+            else:
+                phase_diff_trend.append(None)
 
-        result["signals"]["rsa_wrapped"] = rsa_wrapped[-200:]
-        result["signals"]["phase_diff_circ"] = phase_diff_circ
-
-        # 历史趋势
-        rsa_trend.append(round(rsa_val, 2))
-        plv_trend.append(round(plv_val, 3))
-        brv_trend.append(round(brv_val, 2))
-        hrr_trend.append(round(hrr_val, 1))
-        hri_trend.append(round(hri_val, 2))
-        cr_ratio_trend.append(round(cr_val, 2))
-        hr_slope_trend.append(round(slope_val, 2))
-        phase_diff_trend.append(round(phase_diff, 3))
-        br_elevation_trend.append(round(br_elev_val, 1))
-
-        for lst in [rsa_trend, plv_trend, brv_trend, hrr_trend, hri_trend,
-                    cr_ratio_trend, hr_slope_trend, phase_diff_trend, br_elevation_trend]:
-            if len(lst) > TREND_LEN:
-                lst.pop(0)
+    for lst in [rsa_trend, plv_trend, brv_trend, hrr_trend, hri_trend,
+                cr_ratio_trend, hr_slope_trend, phase_diff_trend, br_elevation_trend,
+                trend_signal_state_history, trend_hr_valid_history,
+                trend_br_valid_history, trend_phase_valid_history]:
+        if len(lst) > TREND_LEN:
+            lst.pop(0)
 
     result["trends"] = {
         "rsa": list(rsa_trend)[-300:],
@@ -926,7 +1083,11 @@ def get_data():
         "cr_ratio": list(cr_ratio_trend)[-300:],
         "hr_slope": list(hr_slope_trend)[-300:],
         "phase_diff": list(phase_diff_trend)[-300:],
-        "br_elevation": list(br_elevation_trend)[-300:]
+        "br_elevation": list(br_elevation_trend)[-300:],
+        "signal_state": list(trend_signal_state_history)[-300:],
+        "hr_valid": list(trend_hr_valid_history)[-300:],
+        "br_valid": list(trend_br_valid_history)[-300:],
+        "phase_valid": list(trend_phase_valid_history)[-300:]
     }
 
     result["rt"] = {
@@ -934,7 +1095,10 @@ def get_data():
         "breath_phase": [float(x) for x in breath_phase_history[-200:]],
         "heart_rate": [float(x) for x in display_hr_history[-200:]],
         "breath_rate": [float(x) for x in display_br_history[-200:]],
-        "signal_state": signal_state_history[-200:]
+        "signal_state": signal_state_history[-200:],
+        "hr_valid": rt_hr_valid_history[-200:],
+        "br_valid": rt_br_valid_history[-200:],
+        "phase_valid": rt_phase_valid_history[-200:]
     }
 
     return jsonify(result)

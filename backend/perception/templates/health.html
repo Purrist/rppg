@@ -151,6 +151,20 @@ select.gender-select { background: #050a12; border: 1px solid #13203a; border-ra
 </div>
 
 <script>
+function V(id, val, suffix, prec) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    if (val === null || val === undefined || val === '' ||
+        (typeof val === 'number' && isNaN(val))) {
+        el.textContent = '--';
+        el.style.color = '#3a5570';
+    } else {
+        if (prec === undefined) prec = 1;
+        el.textContent = parseFloat(val).toFixed(prec) + (suffix || '');
+        el.style.color = '';
+    }
+}
+
 const charts = {};
 charts.hr = echarts.init(document.getElementById('hr-chart'), null, {renderer: 'canvas'});
 charts.br = echarts.init(document.getElementById('br-chart'), null, {renderer: 'canvas'});
@@ -191,38 +205,52 @@ function update(data) {
     const h = data.physiology || { rsa_amp: 0, plv_r: 0, hrr_pct: 0, cr_ratio: 0, brv_cv: 0, hri_sd: 0, br_elevation: 0, hr_slope: 0, mean_phase_diff: 0 };
 
     const signalState = raw.signal_state || 'INIT';
-    const isNormal = signalState === 'NORMAL';
+    const hrV = raw.hr_valid || false;
+    const brV = raw.br_valid || false;
+    const phV = raw.phase_valid || false;
     
     const statusCard = document.getElementById('status-card');
     const statusValue = document.getElementById('signal-status');
     const statusDetail = document.getElementById('signal-detail');
     
+    const stateMap = {
+        'NORMAL': '● 正常',
+        'BR_UNSTABLE': '◐ 呼吸不稳',
+        'HR_UNSTABLE': '◐ 心率不稳',
+        'THAW': '↻ 恢复中',
+        'BIG_MOVE': '✕ 大幅运动',
+        'NO_TARGET': '○ 无目标',
+        'INIT': '… 等待数据'
+    };
+    
+    const stateText = stateMap[signalState] || signalState;
+    const detail = (hrV ? 'HR✓' : 'HR✗') + ' ' +
+                   (brV ? 'BR✓' : 'BR✗') + ' ' +
+                   (phV ? 'Phase✓' : 'Phase✗');
+    
+    statusValue.textContent = stateText;
+    
     if (signalState === 'NORMAL') {
-        statusValue.textContent = '正常';
         statusValue.style.color = '#64ffda';
-        statusDetail.textContent = `距离: ${raw.distance.toFixed(2)}m`;
         statusCard.style.borderColor = '#10b981';
-    } else if (signalState === 'UNLOCKED') {
-        statusValue.textContent = '失锁';
-        statusValue.style.color = '#ef4444';
-        statusDetail.textContent = raw.is_human ? '距离无效' : '无人';
-        statusCard.style.borderColor = '#ef4444';
-    } else if (signalState === 'BIG_MOVE') {
-        statusValue.textContent = '摆烂';
+    } else if (signalState === 'BR_UNSTABLE' || signalState === 'HR_UNSTABLE') {
         statusValue.style.color = '#f59e0b';
-        statusDetail.textContent = '大动作干扰';
         statusCard.style.borderColor = '#f59e0b';
-    } else if (signalState === 'UNSTABLE') {
-        statusValue.textContent = '跳变';
+    } else if (signalState === 'THAW') {
+        statusValue.style.color = '#3b82f6';
+        statusCard.style.borderColor = '#3b82f6';
+    } else if (signalState === 'BIG_MOVE') {
         statusValue.style.color = '#f97316';
-        statusDetail.textContent = '疑似多人或突变';
         statusCard.style.borderColor = '#f97316';
+    } else if (signalState === 'NO_TARGET') {
+        statusValue.style.color = '#ef4444';
+        statusCard.style.borderColor = '#ef4444';
     } else {
-        statusValue.textContent = '初始化';
         statusValue.style.color = '#6b7280';
-        statusDetail.textContent = '等待数据...';
         statusCard.style.borderColor = '#13203a';
     }
+    
+    statusDetail.textContent = detail + (raw.distance > 0 ? ` | 距离: ${raw.distance.toFixed(2)}m` : '');
 
     document.getElementById('hr-value').textContent = raw.hr.toFixed(0);
     document.getElementById('br-value').textContent = raw.br.toFixed(0);
@@ -231,9 +259,9 @@ function update(data) {
     document.getElementById('br-rest').textContent = pf.br_rest_est;
 
     // HRR
-    if (isNormal) {
-        document.getElementById('hrr-value').textContent = h.hrr_pct.toFixed(1) + '%';
-        const hrrLevel = document.getElementById('hrr-level');
+    V('hrr-value', h.hrr_pct, '%', 1);
+    const hrrLevel = document.getElementById('hrr-level');
+    if (h.hrr_pct !== null && h.hrr_pct !== undefined && !isNaN(h.hrr_pct)) {
         if (h.hrr_pct < 40) {
             hrrLevel.textContent = '低强度';
             hrrLevel.style.background = '#1e3a5f';
@@ -248,15 +276,14 @@ function update(data) {
             hrrLevel.style.color = '#fc8181';
         }
     } else {
-        document.getElementById('hrr-value').textContent = '--';
-        document.getElementById('hrr-level').textContent = '--';
-        document.getElementById('hrr-level').style.background = '#1e3a5f';
-        document.getElementById('hrr-level').style.color = '#6b7280';
+        hrrLevel.textContent = '--';
+        hrrLevel.style.background = '#1e3a5f';
+        hrrLevel.style.color = '#6b7280';
     }
 
     // BRV
-    if (isNormal) {
-        document.getElementById('brv-value').textContent = h.brv_cv.toFixed(1) + '%';
+    if (brV && h.brv_cv !== null && h.brv_cv !== undefined && !isNaN(h.brv_cv)) {
+        V('brv-value', h.brv_cv, '%', 2);
         const brvLevel = document.getElementById('brv-level');
         if (h.brv_cv < 5) {
             brvLevel.textContent = '规律';
@@ -272,15 +299,17 @@ function update(data) {
             brvLevel.style.color = '#fc8181';
         }
     } else {
-        document.getElementById('brv-value').textContent = '--';
-        document.getElementById('brv-level').textContent = '--';
-        document.getElementById('brv-level').style.background = '#1e3a5f';
-        document.getElementById('brv-level').style.color = '#6b7280';
+        const brvEl = document.getElementById('brv-value');
+        if (brvEl) { brvEl.textContent = '--'; brvEl.style.color = '#3a5570'; }
+        const brvLevel = document.getElementById('brv-level');
+        brvLevel.textContent = '--';
+        brvLevel.style.background = '#1e3a5f';
+        brvLevel.style.color = '#6b7280';
     }
 
     // CR
-    if (isNormal) {
-        document.getElementById('cr-value').textContent = h.cr_ratio.toFixed(2);
+    if (hrV && brV && h.cr_ratio !== null && h.cr_ratio !== undefined && !isNaN(h.cr_ratio)) {
+        V('cr-value', h.cr_ratio, '', 2);
         const crLevel = document.getElementById('cr-level');
         if (h.cr_ratio < 3.5) {
             crLevel.textContent = '偏低';
@@ -296,15 +325,17 @@ function update(data) {
             crLevel.style.color = '#fc8181';
         }
     } else {
-        document.getElementById('cr-value').textContent = '--';
-        document.getElementById('cr-level').textContent = '--';
-        document.getElementById('cr-level').style.background = '#1e3a5f';
-        document.getElementById('cr-level').style.color = '#6b7280';
+        const crEl = document.getElementById('cr-value');
+        if (crEl) { crEl.textContent = '--'; crEl.style.color = '#3a5570'; }
+        const crLevel = document.getElementById('cr-level');
+        crLevel.textContent = '--';
+        crLevel.style.background = '#1e3a5f';
+        crLevel.style.color = '#6b7280';
     }
 
     // Slope
-    if (isNormal) {
-        document.getElementById('slope-value').textContent = h.hr_slope.toFixed(2);
+    if (hrV && h.hr_slope !== null && h.hr_slope !== undefined && !isNaN(h.hr_slope)) {
+        V('slope-value', h.hr_slope, '', 2);
         const slopeLevel = document.getElementById('slope-level');
         if (h.hr_slope < -0.5) {
             slopeLevel.textContent = '快速下降';
@@ -324,16 +355,18 @@ function update(data) {
             slopeLevel.style.color = '#ff4757';
         }
     } else {
-        document.getElementById('slope-value').textContent = '--';
-        document.getElementById('slope-level').textContent = '--';
-        document.getElementById('slope-level').style.background = '#1e3a5f';
-        document.getElementById('slope-level').style.color = '#6b7280';
+        const slopeEl = document.getElementById('slope-value');
+        if (slopeEl) { slopeEl.textContent = '--'; slopeEl.style.color = '#3a5570'; }
+        const slopeLevel = document.getElementById('slope-level');
+        slopeLevel.textContent = '--';
+        slopeLevel.style.background = '#1e3a5f';
+        slopeLevel.style.color = '#6b7280';
     }
 
     // PLV
-    if (isNormal) {
-        document.getElementById('plv-value').textContent = h.plv_r.toFixed(2);
-        const plvLevel = document.getElementById('plv-level');
+    V('plv-value', h.plv_r, '', 3);
+    const plvLevel = document.getElementById('plv-level');
+    if (h.plv_r !== null && h.plv_r !== undefined && !isNaN(h.plv_r)) {
         if (h.plv_r < 0.3) {
             plvLevel.textContent = '清醒焦虑';
             plvLevel.style.background = '#4a1a1a';
@@ -348,17 +381,21 @@ function update(data) {
             plvLevel.style.color = '#64ffda';
         }
     } else {
-        document.getElementById('plv-value').textContent = '--';
-        document.getElementById('plv-level').textContent = '--';
-        document.getElementById('plv-level').style.background = '#1e3a5f';
-        document.getElementById('plv-level').style.color = '#6b7280';
+        plvLevel.textContent = '--';
+        plvLevel.style.background = '#1e3a5f';
+        plvLevel.style.color = '#6b7280';
     }
 
     // Phase Diff
-    if (isNormal) {
-        document.getElementById('phase-value').textContent = ((h.mean_phase_diff || 0) * 180 / Math.PI).toFixed(0) + '°';
-        const phaseLevel = document.getElementById('phase-level');
-        const phaseDiffDeg = Math.abs(((h.mean_phase_diff || 0) * 180 / Math.PI) % 360);
+    const phaseVal = h.mean_phase_diff !== null && h.mean_phase_diff !== undefined && !isNaN(h.mean_phase_diff) 
+        ? ((h.mean_phase_diff * 180 / Math.PI) % 360).toFixed(0) + '°' 
+        : '--';
+    document.getElementById('phase-value').textContent = phaseVal;
+    document.getElementById('phase-value').style.color = (phaseVal === '--') ? '#3a5570' : '';
+    
+    const phaseLevel = document.getElementById('phase-level');
+    if (h.mean_phase_diff !== null && h.mean_phase_diff !== undefined && !isNaN(h.mean_phase_diff)) {
+        const phaseDiffDeg = Math.abs(((h.mean_phase_diff) * 180 / Math.PI) % 360);
         if (phaseDiffDeg <= 90 || phaseDiffDeg >= 270) {
             phaseLevel.textContent = '同步良好';
             phaseLevel.style.background = '#1e3a5f';
@@ -373,15 +410,14 @@ function update(data) {
             phaseLevel.style.color = '#fc8181';
         }
     } else {
-        document.getElementById('phase-value').textContent = '--';
-        document.getElementById('phase-level').textContent = '--';
-        document.getElementById('phase-level').style.background = '#1e3a5f';
-        document.getElementById('phase-level').style.color = '#6b7280';
+        phaseLevel.textContent = '--';
+        phaseLevel.style.background = '#1e3a5f';
+        phaseLevel.style.color = '#6b7280';
     }
 
     // BR Elevation
-    if (isNormal) {
-        document.getElementById('br-elev-value').textContent = h.br_elevation.toFixed(1) + '%';
+    if (brV && h.br_elevation !== null && h.br_elevation !== undefined && !isNaN(h.br_elevation)) {
+        V('br-elev-value', h.br_elevation, '%', 1);
         const brElevLevel = document.getElementById('br-elev-level');
         if (h.br_elevation < -20) {
             brElevLevel.textContent = '呼吸过缓';
@@ -405,10 +441,15 @@ function update(data) {
             brElevLevel.style.color = '#fc8181';
         }
     } else {
-        document.getElementById('br-elev-value').textContent = '--';
-        document.getElementById('br-elev-level').textContent = '--';
-        document.getElementById('br-elev-level').style.background = '#1e3a5f';
-        document.getElementById('br-elev-level').style.color = '#6b7280';
+        const el = document.getElementById('br-elev-value');
+        if (el) {
+            el.textContent = '--';
+            el.style.color = '#3a5570';
+        }
+        const brElevLevel = document.getElementById('br-elev-level');
+        brElevLevel.textContent = '--';
+        brElevLevel.style.background = '#1e3a5f';
+        brElevLevel.style.color = '#6b7280';
     }
 
     // 已删除: 瞬时心率/呼吸率显示
@@ -416,29 +457,35 @@ function update(data) {
     const hrData = rt.heart_rate.slice(-200);
     const brData = rt.breath_rate.slice(-200);
     const signalStates = rt.signal_state ? rt.signal_state.slice(-200) : [];
+    const trendHrValid = t.hr_valid ? t.hr_valid.slice(-300) : [];
+    const trendBrValid = t.br_valid ? t.br_valid.slice(-300) : [];
+    const trendPhaseValid = t.phase_valid ? t.phase_valid.slice(-300) : [];
     const xData = hrData.map((_,i) => i);
 
-    const formattedHrData = hrData.map((val, index) => {
-        if (signalStates[index] && signalStates[index] !== 'NORMAL') {
-            return {
-                value: val,
-                itemStyle: { color: '#6b7280' },
-                lineStyle: { type: 'dashed', color: '#6b7280', width: 1 }
-            };
+    function formatLineData(data, validStates) {
+        const result = [];
+        for (let i = 0; i < data.length; i++) {
+            const isValid = i < validStates.length ? validStates[i] : true;
+            result.push(isValid ? data[i] : null);
         }
-        return val;
-    });
+        return result;
+    }
 
-    const formattedBrData = brData.map((val, index) => {
-        if (signalStates[index] && signalStates[index] !== 'NORMAL') {
-            return {
-                value: val,
-                itemStyle: { color: '#6b7280' },
-                lineStyle: { type: 'dashed', color: '#6b7280', width: 1 }
-            };
+    function formatLineDataWithBothValid(data, hrValidStates, brValidStates) {
+        const result = [];
+        for (let i = 0; i < data.length; i++) {
+            const hrValid = i < hrValidStates.length ? hrValidStates[i] : true;
+            const brValid = i < brValidStates.length ? brValidStates[i] : true;
+            result.push(hrValid && brValid ? data[i] : null);
         }
-        return val;
-    });
+        return result;
+    }
+
+    const rtHrValid = rt.hr_valid ? rt.hr_valid : [];
+    const rtBrValid = rt.br_valid ? rt.br_valid : [];
+    const rtPhaseValid = rt.phase_valid ? rt.phase_valid : [];
+    const formattedHrData = formatLineData(hrData, rtHrValid);
+    const formattedBrData = formatLineData(brData, rtBrValid);
 
     charts.hr.setOption({
         ...NA, grid: { top: 4, right: 8, bottom: 10, left: 28 },
@@ -457,6 +504,9 @@ function update(data) {
     const hpData = rt.heart_phase.slice(-200);
     const bpData = rt.breath_phase.slice(-200);
 
+    const formattedHpData = formatLineData(hpData, rtPhaseValid);
+    const formattedBpData = formatLineData(bpData, rtPhaseValid);
+
     // 心率相位图
     const hrPhaseMin = Math.min(...hpData, 0), hrPhaseMax = Math.max(...hpData, 0);
     const hrPhaseSpan = Math.max(hrPhaseMax - hrPhaseMin, 0.1) * 0.6;
@@ -467,7 +517,7 @@ function update(data) {
         xAxis: { type: 'category', data: xData.slice(0, hpData.length), ...AX, axisLabel: { show: false } },
         yAxis: { type: 'value', min: hrPhaseCenter - hrPhaseSpan, max: hrPhaseCenter + hrPhaseSpan, ...AX },
         series: [
-            { type: 'line', data: hpData, smooth: false, symbol: 'none', lineStyle: { color: '#ff4757', width: 0.8 } }
+            { type: 'line', data: formattedHpData, smooth: false, symbol: 'none', lineStyle: { color: '#ff4757', width: 0.8 } }
         ]
     }, true);
 
@@ -481,7 +531,7 @@ function update(data) {
         xAxis: { type: 'category', data: xData.slice(0, bpData.length), ...AX, axisLabel: { show: false } },
         yAxis: { type: 'value', min: brPhaseCenter - brPhaseSpan, max: brPhaseCenter + brPhaseSpan, ...AX },
         series: [
-            { type: 'line', data: bpData, smooth: false, symbol: 'none', lineStyle: { color: '#00e5ff', width: 0.8 } }
+            { type: 'line', data: formattedBpData, smooth: false, symbol: 'none', lineStyle: { color: '#00e5ff', width: 0.8 } }
         ]
     }, true);
 
@@ -490,12 +540,13 @@ function update(data) {
     const hrrMin = hrrData.length ? Math.min(...hrrData) : 0;
     const hrrMax = hrrData.length ? Math.max(...hrrData) : 100;
     const hrrPad = Math.max((hrrMax - hrrMin) * 0.2, 5);
+    const formattedHrrData = formatLineData(hrrData, trendHrValid);
     charts.hrr.setOption({
         ...NA, grid: { top: 4, right: 8, bottom: 10, left: 32 },
         xAxis: { type: 'category', data: hrrX, ...AX, axisLabel: { show: false } },
         yAxis: { type: 'value', min: Math.max(0, hrrMin - hrrPad), max: hrrMax + hrrPad, ...AX },
         series: [
-            { type: 'line', data: hrrData, smooth: true, symbol: 'none', lineStyle: { color: '#ff4757', width: 1.2 }, areaStyle: { color: 'rgba(255,71,87,0.1)' } },
+            { type: 'line', data: formattedHrrData, smooth: true, symbol: 'none', lineStyle: { color: '#ff4757', width: 1.2 }, areaStyle: { color: 'rgba(255,71,87,0.1)' } },
             { type: 'line', markLine: { silent: true, data: [{ yAxis: 60, lineStyle: { color: 'rgba(250,204,21,0.3)', type: 'dashed' } }] }, data: [] }
         ]
     }, true);
@@ -573,11 +624,12 @@ function update(data) {
     const brvMin = brvData.length ? Math.min(...brvData) : 0;
     const brvMax = brvData.length ? Math.max(...brvData) : 20;
     const brvPad = Math.max((brvMax - brvMin) * 0.2, 2);
+    const formattedBrvData = formatLineData(brvData, trendBrValid);
     charts.brv.setOption({
         ...NA, grid: { top: 4, right: 8, bottom: 10, left: 32 },
         xAxis: { type: 'category', data: brvX, ...AX, axisLabel: { show: false } },
         yAxis: { type: 'value', min: Math.max(0, brvMin - brvPad), max: brvMax + brvPad, ...AX },
-        series: [{ type: 'line', data: brvData, smooth: true, symbol: 'none', lineStyle: { color: '#00e5ff', width: 1.2 }, areaStyle: { color: 'rgba(0,229,255,0.1)' } }]
+        series: [{ type: 'line', data: formattedBrvData, smooth: true, symbol: 'none', lineStyle: { color: '#00e5ff', width: 1.2 }, areaStyle: { color: 'rgba(0,229,255,0.1)' } }]
     }, true);
 
     const crData = t.cr_ratio.slice(-300);
@@ -585,17 +637,19 @@ function update(data) {
     const crMin = crData.length ? Math.min(...crData) : 3;
     const crMax = crData.length ? Math.max(...crData) : 6;
     const crPad = Math.max((crMax - crMin) * 0.2, 0.2);
+    const formattedCrData = formatLineDataWithBothValid(crData, trendHrValid, trendBrValid);
     charts.cr.setOption({
         ...NA, grid: { top: 4, right: 8, bottom: 10, left: 32 },
         xAxis: { type: 'category', data: crX, ...AX, axisLabel: { show: false } },
         yAxis: { type: 'value', min: Math.max(0, crMin - crPad), max: crMax + crPad, ...AX },
-        series: [{ type: 'line', data: crData, smooth: true, symbol: 'none', lineStyle: { color: '#f97316', width: 1.2 }, areaStyle: { color: 'rgba(249,115,22,0.1)' } }]
+        series: [{ type: 'line', data: formattedCrData, smooth: true, symbol: 'none', lineStyle: { color: '#f97316', width: 1.2 }, areaStyle: { color: 'rgba(249,115,22,0.1)' } }]
     }, true);
 
     const slopeData = t.hr_slope.slice(-300);
     const slopeMin = slopeData.length ? Math.min(...slopeData) : -5;
     const slopeMax = slopeData.length ? Math.max(...slopeData) : 5;
     const slopePad = Math.max((slopeMax - slopeMin) * 0.2, 0.5);
+    const formattedSlopeData = formatLineData(slopeData, trendHrValid);
     charts.slope.setOption({
         ...NA, grid: { top: 4, right: 8, bottom: 10, left: 32 },
         xAxis: { type: 'category', data: slopeData.map((_,i) => i), ...AX, axisLabel: { show: false } },
@@ -603,7 +657,7 @@ function update(data) {
         series: [
             { 
                 type: 'bar', 
-                data: slopeData, 
+                data: formattedSlopeData, 
                 barMaxWidth: 2, 
                 itemStyle: { color: function(params) { return params.value >= 0 ? '#facc15' : '#00e676'; } }
             }
@@ -614,11 +668,20 @@ function update(data) {
     const plvMin = plvData.length ? Math.min(...plvData) : 0;
     const plvMax = plvData.length ? Math.max(...plvData) : 1;
     const plvPad = (plvMax - plvMin) * 0.15 || 0.05;
+    const formattedPlvData = plvData.map((val, i) => {
+        const isValid = i < trendPhaseValid.length ? trendPhaseValid[i] : true;
+        const pointColor = val > 0.7 ? '#ff4757' : val > 0.4 ? '#f97316' : '#00e5ff';
+        return {
+            value: isValid ? val : null,
+            lineStyle: { type: 'solid', color: '#a855f7', width: 1 },
+            itemStyle: { color: pointColor }
+        };
+    });
     charts.rsaPlv.setOption({
         ...NA, grid: { top: 4, right: 8, bottom: 10, left: 28 },
         xAxis: { type: 'category', data: plvData.map((_,i) => i), ...AX, axisLabel: { show: false } },
         yAxis: { type: 'value', min: Math.max(0, plvMin - plvPad), max: Math.min(1, plvMax + plvPad), ...AX },
-        series: [{ type: 'line', data: plvData, smooth: true, symbol: 'circle', symbolSize: 4, lineStyle: { color: '#a855f7', width: 1 }, itemStyle: { color: function(params) { return params.value > 0.7 ? '#ff4757' : params.value > 0.4 ? '#f97316' : '#00e5ff'; } } }]
+        series: [{ type: 'line', data: formattedPlvData, smooth: true, symbol: 'circle', symbolSize: 4 }]
     }, true);
 
     const phaseDiffCirc = s.phase_diff_circ || [];
@@ -636,6 +699,7 @@ function update(data) {
     }
 
     const brElevData = t.br_elevation.slice(-300);
+    const formattedBrElevData = formatLineData(brElevData, trendBrValid);
     const brElevMin = brElevData.length ? Math.min(...brElevData) : -30;
     const brElevMax = brElevData.length ? Math.max(...brElevData) : 30;
     const brElevPad = Math.max((brElevMax - brElevMin) * 0.2, 5);
@@ -643,7 +707,7 @@ function update(data) {
         ...NA, grid: { top: 4, right: 8, bottom: 10, left: 32 },
         xAxis: { type: 'category', data: brElevData.map((_,i) => i), ...AX, axisLabel: { show: false } },
         yAxis: { type: 'value', min: brElevMin - brElevPad, max: brElevMax + brElevPad, ...AX },
-        series: [{ type: 'line', data: brElevData, smooth: true, symbol: 'none', lineStyle: { color: '#14b8a6', width: 1.2 }, areaStyle: { color: 'rgba(20,184,166,0.1)' } }]
+        series: [{ type: 'line', data: formattedBrElevData, smooth: true, symbol: 'none', lineStyle: { color: '#14b8a6', width: 1.2 }, areaStyle: { color: 'rgba(20,184,166,0.1)' } }]
     }, true);
 }
 
