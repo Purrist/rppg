@@ -74,6 +74,11 @@ select.gender-select { background: #050a12; border: 1px solid #13203a; border-ra
 
     <div class="right-panel">
         <div class="card-row">
+            <div class="card" id="status-card">
+                <div class="card-title">信号状态 <span style="font-size: 8px; color: #4a6a8a;">(Signal)</span></div>
+                <div class="card-value" id="signal-status">--</div>
+                <div class="card-unit" id="signal-detail">初始化...</div>
+            </div>
             <div class="card">
                 <div class="card-title">年龄 <span style="font-size: 8px; color: #4a6a8a;">(Age)</span></div>
                 <input type="number" id="age-input" class="age-input" value="30" min="1" max="120">
@@ -178,12 +183,46 @@ function updateProfile() {
 }
 
 function update(data) {
-    const raw = data.raw || { hr: 72, br: 16 };
+    const raw = data.raw || { hr: 72, br: 16, signal_state: 'INIT', is_human: 0, distance_valid: 0, distance: 0 };
     const rt = data.rt || { heart_rate: [], breath_rate: [], heart_phase: [], breath_phase: [] };
     const s = data.signals || { inst_hr: [], inst_br: [], lissajous: [], phase_diff_circ: [] };
     const t = data.trends || { rsa: [], plv: [], hrr: [], cr_ratio: [], brv: [], hri: [], br_elevation: [] };
     const pf = data.profile || { hr_rest_est: 62, hr_max_est: 166, br_rest_est: 14 };
-    const h = data.physiology || { rsa_amp: 0, plv_r: 0, hrr_pct: 0, cr_ratio: 0, brv_cv: 0, hri_sd: 0, br_elevation: 0 };
+    const h = data.physiology || { rsa_amp: 0, plv_r: 0, hrr_pct: 0, cr_ratio: 0, brv_cv: 0, hri_sd: 0, br_elevation: 0, hr_slope: 0, mean_phase_diff: 0 };
+
+    const signalState = raw.signal_state || 'INIT';
+    const isNormal = signalState === 'NORMAL';
+    
+    const statusCard = document.getElementById('status-card');
+    const statusValue = document.getElementById('signal-status');
+    const statusDetail = document.getElementById('signal-detail');
+    
+    if (signalState === 'NORMAL') {
+        statusValue.textContent = '正常';
+        statusValue.style.color = '#64ffda';
+        statusDetail.textContent = `距离: ${raw.distance.toFixed(2)}m`;
+        statusCard.style.borderColor = '#10b981';
+    } else if (signalState === 'UNLOCKED') {
+        statusValue.textContent = '失锁';
+        statusValue.style.color = '#ef4444';
+        statusDetail.textContent = raw.is_human ? '距离无效' : '无人';
+        statusCard.style.borderColor = '#ef4444';
+    } else if (signalState === 'BIG_MOVE') {
+        statusValue.textContent = '摆烂';
+        statusValue.style.color = '#f59e0b';
+        statusDetail.textContent = '大动作干扰';
+        statusCard.style.borderColor = '#f59e0b';
+    } else if (signalState === 'UNSTABLE') {
+        statusValue.textContent = '跳变';
+        statusValue.style.color = '#f97316';
+        statusDetail.textContent = '疑似多人或突变';
+        statusCard.style.borderColor = '#f97316';
+    } else {
+        statusValue.textContent = '初始化';
+        statusValue.style.color = '#6b7280';
+        statusDetail.textContent = '等待数据...';
+        statusCard.style.borderColor = '#13203a';
+    }
 
     document.getElementById('hr-value').textContent = raw.hr.toFixed(0);
     document.getElementById('br-value').textContent = raw.br.toFixed(0);
@@ -192,135 +231,184 @@ function update(data) {
     document.getElementById('br-rest').textContent = pf.br_rest_est;
 
     // HRR
-    document.getElementById('hrr-value').textContent = h.hrr_pct.toFixed(1);
-    const hrrLevel = document.getElementById('hrr-level');
-    if (h.hrr_pct < 40) {
-        hrrLevel.textContent = '低强度';
-        hrrLevel.style.background = '#1e3a5f';
-        hrrLevel.style.color = '#64ffda';
-    } else if (h.hrr_pct <= 60) {
-        hrrLevel.textContent = '中强度';
-        hrrLevel.style.background = '#2d3748';
-        hrrLevel.style.color = '#f6ad55';
+    if (isNormal) {
+        document.getElementById('hrr-value').textContent = h.hrr_pct.toFixed(1) + '%';
+        const hrrLevel = document.getElementById('hrr-level');
+        if (h.hrr_pct < 40) {
+            hrrLevel.textContent = '低强度';
+            hrrLevel.style.background = '#1e3a5f';
+            hrrLevel.style.color = '#64ffda';
+        } else if (h.hrr_pct <= 60) {
+            hrrLevel.textContent = '中强度';
+            hrrLevel.style.background = '#2d3748';
+            hrrLevel.style.color = '#f6ad55';
+        } else {
+            hrrLevel.textContent = '高强度';
+            hrrLevel.style.background = '#4a1a1a';
+            hrrLevel.style.color = '#fc8181';
+        }
     } else {
-        hrrLevel.textContent = '高强度';
-        hrrLevel.style.background = '#4a1a1a';
-        hrrLevel.style.color = '#fc8181';
+        document.getElementById('hrr-value').textContent = '--';
+        document.getElementById('hrr-level').textContent = '--';
+        document.getElementById('hrr-level').style.background = '#1e3a5f';
+        document.getElementById('hrr-level').style.color = '#6b7280';
     }
 
     // BRV
-    document.getElementById('brv-value').textContent = h.brv_cv.toFixed(1);
-    const brvLevel = document.getElementById('brv-level');
-    if (h.brv_cv < 5) {
-        brvLevel.textContent = '规律';
-        brvLevel.style.background = '#1e3a5f';
-        brvLevel.style.color = '#64ffda';
-    } else if (h.brv_cv <= 15) {
-        brvLevel.textContent = '正常';
-        brvLevel.style.background = '#2d3748';
-        brvLevel.style.color = '#f6ad55';
+    if (isNormal) {
+        document.getElementById('brv-value').textContent = h.brv_cv.toFixed(1) + '%';
+        const brvLevel = document.getElementById('brv-level');
+        if (h.brv_cv < 5) {
+            brvLevel.textContent = '规律';
+            brvLevel.style.background = '#1e3a5f';
+            brvLevel.style.color = '#64ffda';
+        } else if (h.brv_cv <= 15) {
+            brvLevel.textContent = '正常';
+            brvLevel.style.background = '#2d3748';
+            brvLevel.style.color = '#f6ad55';
+        } else {
+            brvLevel.textContent = '不规律';
+            brvLevel.style.background = '#4a1a1a';
+            brvLevel.style.color = '#fc8181';
+        }
     } else {
-        brvLevel.textContent = '不规律';
-        brvLevel.style.background = '#4a1a1a';
-        brvLevel.style.color = '#fc8181';
+        document.getElementById('brv-value').textContent = '--';
+        document.getElementById('brv-level').textContent = '--';
+        document.getElementById('brv-level').style.background = '#1e3a5f';
+        document.getElementById('brv-level').style.color = '#6b7280';
     }
 
     // CR
-    document.getElementById('cr-value').textContent = h.cr_ratio.toFixed(2);
-    const crLevel = document.getElementById('cr-level');
-    if (h.cr_ratio < 3.5) {
-        crLevel.textContent = '偏低';
-        crLevel.style.background = '#1e3a5f';
-        crLevel.style.color = '#64ffda';
-    } else if (h.cr_ratio <= 5.5) {
-        crLevel.textContent = '正常';
-        crLevel.style.background = '#2d3748';
-        crLevel.style.color = '#f6ad55';
+    if (isNormal) {
+        document.getElementById('cr-value').textContent = h.cr_ratio.toFixed(2);
+        const crLevel = document.getElementById('cr-level');
+        if (h.cr_ratio < 3.5) {
+            crLevel.textContent = '偏低';
+            crLevel.style.background = '#1e3a5f';
+            crLevel.style.color = '#64ffda';
+        } else if (h.cr_ratio <= 5.5) {
+            crLevel.textContent = '正常';
+            crLevel.style.background = '#2d3748';
+            crLevel.style.color = '#f6ad55';
+        } else {
+            crLevel.textContent = '偏高';
+            crLevel.style.background = '#4a1a1a';
+            crLevel.style.color = '#fc8181';
+        }
     } else {
-        crLevel.textContent = '偏高';
-        crLevel.style.background = '#4a1a1a';
-        crLevel.style.color = '#fc8181';
+        document.getElementById('cr-value').textContent = '--';
+        document.getElementById('cr-level').textContent = '--';
+        document.getElementById('cr-level').style.background = '#1e3a5f';
+        document.getElementById('cr-level').style.color = '#6b7280';
     }
 
-    // HRI - 修复标签: HRI是心率标准差，不是心率本身
-    document.getElementById('slope-value').textContent = h.hr_slope.toFixed(2);
-    const slopeLevel = document.getElementById('slope-level');
-    if (h.hr_slope < -0.5) {
-        slopeLevel.textContent = '快速下降';
-        slopeLevel.style.background = '#1e3a5f';
-        slopeLevel.style.color = '#00e5ff';
-    } else if (h.hr_slope <= 0.5) {
-        slopeLevel.textContent = '平稳';
-        slopeLevel.style.background = '#2d3748';
-        slopeLevel.style.color = '#64ffda';
-    } else if (h.hr_slope <= 2.0) {
-        slopeLevel.textContent = '缓慢上升';
-        slopeLevel.style.background = '#4a3520';
-        slopeLevel.style.color = '#f97316';
+    // Slope
+    if (isNormal) {
+        document.getElementById('slope-value').textContent = h.hr_slope.toFixed(2);
+        const slopeLevel = document.getElementById('slope-level');
+        if (h.hr_slope < -0.5) {
+            slopeLevel.textContent = '快速下降';
+            slopeLevel.style.background = '#1e3a5f';
+            slopeLevel.style.color = '#00e5ff';
+        } else if (h.hr_slope <= 0.5) {
+            slopeLevel.textContent = '平稳';
+            slopeLevel.style.background = '#2d3748';
+            slopeLevel.style.color = '#64ffda';
+        } else if (h.hr_slope <= 2.0) {
+            slopeLevel.textContent = '缓慢上升';
+            slopeLevel.style.background = '#4a3520';
+            slopeLevel.style.color = '#f97316';
+        } else {
+            slopeLevel.textContent = '快速上升';
+            slopeLevel.style.background = '#4a1a1a';
+            slopeLevel.style.color = '#ff4757';
+        }
     } else {
-        slopeLevel.textContent = '快速上升';
-        slopeLevel.style.background = '#4a1a1a';
-        slopeLevel.style.color = '#ff4757';
+        document.getElementById('slope-value').textContent = '--';
+        document.getElementById('slope-level').textContent = '--';
+        document.getElementById('slope-level').style.background = '#1e3a5f';
+        document.getElementById('slope-level').style.color = '#6b7280';
     }
 
     // PLV
-    document.getElementById('plv-value').textContent = h.plv_r.toFixed(2);
-    const plvLevel = document.getElementById('plv-level');
-    if (h.plv_r < 0.3) {
-        plvLevel.textContent = '清醒焦虑';
-        plvLevel.style.background = '#4a1a1a';
-        plvLevel.style.color = '#fc8181';
-    } else if (h.plv_r <= 0.9) {
-        plvLevel.textContent = '日常活动';
-        plvLevel.style.background = '#2d3748';
-        plvLevel.style.color = '#f6ad55';
+    if (isNormal) {
+        document.getElementById('plv-value').textContent = h.plv_r.toFixed(2);
+        const plvLevel = document.getElementById('plv-level');
+        if (h.plv_r < 0.3) {
+            plvLevel.textContent = '清醒焦虑';
+            plvLevel.style.background = '#4a1a1a';
+            plvLevel.style.color = '#fc8181';
+        } else if (h.plv_r <= 0.9) {
+            plvLevel.textContent = '日常活动';
+            plvLevel.style.background = '#2d3748';
+            plvLevel.style.color = '#f6ad55';
+        } else {
+            plvLevel.textContent = '深度放松';
+            plvLevel.style.background = '#1e3a5f';
+            plvLevel.style.color = '#64ffda';
+        }
     } else {
-        plvLevel.textContent = '深度放松';
-        plvLevel.style.background = '#1e3a5f';
-        plvLevel.style.color = '#64ffda';
+        document.getElementById('plv-value').textContent = '--';
+        document.getElementById('plv-level').textContent = '--';
+        document.getElementById('plv-level').style.background = '#1e3a5f';
+        document.getElementById('plv-level').style.color = '#6b7280';
     }
 
     // Phase Diff
-    document.getElementById('phase-value').textContent = ((h.mean_phase_diff || 0) * 180 / Math.PI).toFixed(0) + '°';
-    const phaseLevel = document.getElementById('phase-level');
-    const phaseDiffDeg = Math.abs(((h.mean_phase_diff || 0) * 180 / Math.PI) % 360);
-    if (phaseDiffDeg <= 90 || phaseDiffDeg >= 270) {
-        phaseLevel.textContent = '同步良好';
-        phaseLevel.style.background = '#1e3a5f';
-        phaseLevel.style.color = '#64ffda';
-    } else if (phaseDiffDeg <= 135 || phaseDiffDeg >= 225) {
-        phaseLevel.textContent = '同步一般';
-        phaseLevel.style.background = '#2d3748';
-        phaseLevel.style.color = '#f6ad55';
+    if (isNormal) {
+        document.getElementById('phase-value').textContent = ((h.mean_phase_diff || 0) * 180 / Math.PI).toFixed(0) + '°';
+        const phaseLevel = document.getElementById('phase-level');
+        const phaseDiffDeg = Math.abs(((h.mean_phase_diff || 0) * 180 / Math.PI) % 360);
+        if (phaseDiffDeg <= 90 || phaseDiffDeg >= 270) {
+            phaseLevel.textContent = '同步良好';
+            phaseLevel.style.background = '#1e3a5f';
+            phaseLevel.style.color = '#64ffda';
+        } else if (phaseDiffDeg <= 135 || phaseDiffDeg >= 225) {
+            phaseLevel.textContent = '同步一般';
+            phaseLevel.style.background = '#2d3748';
+            phaseLevel.style.color = '#f6ad55';
+        } else {
+            phaseLevel.textContent = '同步较弱';
+            phaseLevel.style.background = '#4a1a1a';
+            phaseLevel.style.color = '#fc8181';
+        }
     } else {
-        phaseLevel.textContent = '同步较弱';
-        phaseLevel.style.background = '#4a1a1a';
-        phaseLevel.style.color = '#fc8181';
+        document.getElementById('phase-value').textContent = '--';
+        document.getElementById('phase-level').textContent = '--';
+        document.getElementById('phase-level').style.background = '#1e3a5f';
+        document.getElementById('phase-level').style.color = '#6b7280';
     }
 
-    // BR Elevation - 修复阈值
-    document.getElementById('br-elev-value').textContent = h.br_elevation.toFixed(1);
-    const brElevLevel = document.getElementById('br-elev-level');
-    if (h.br_elevation < -20) {
-        brElevLevel.textContent = '呼吸过缓';     // 修复: 新增过缓判断
-        brElevLevel.style.background = '#1e3a5f';
-        brElevLevel.style.color = '#64ffda';
-    } else if (h.br_elevation < 0) {
-        brElevLevel.textContent = '放松';
-        brElevLevel.style.background = '#1e3a5f';
-        brElevLevel.style.color = '#64ffda';
-    } else if (h.br_elevation <= 30) {
-        brElevLevel.textContent = '正常';
-        brElevLevel.style.background = '#2d3748';
-        brElevLevel.style.color = '#f6ad55';
-    } else if (h.br_elevation <= 60) {
-        brElevLevel.textContent = '急促';
-        brElevLevel.style.background = '#4a3520';
-        brElevLevel.style.color = '#fbd38d';
+    // BR Elevation
+    if (isNormal) {
+        document.getElementById('br-elev-value').textContent = h.br_elevation.toFixed(1) + '%';
+        const brElevLevel = document.getElementById('br-elev-level');
+        if (h.br_elevation < -20) {
+            brElevLevel.textContent = '呼吸过缓';
+            brElevLevel.style.background = '#1e3a5f';
+            brElevLevel.style.color = '#64ffda';
+        } else if (h.br_elevation < 0) {
+            brElevLevel.textContent = '放松';
+            brElevLevel.style.background = '#1e3a5f';
+            brElevLevel.style.color = '#64ffda';
+        } else if (h.br_elevation <= 30) {
+            brElevLevel.textContent = '正常';
+            brElevLevel.style.background = '#2d3748';
+            brElevLevel.style.color = '#f6ad55';
+        } else if (h.br_elevation <= 60) {
+            brElevLevel.textContent = '急促';
+            brElevLevel.style.background = '#4a3520';
+            brElevLevel.style.color = '#fbd38d';
+        } else {
+            brElevLevel.textContent = '异常急促';
+            brElevLevel.style.background = '#4a1a1a';
+            brElevLevel.style.color = '#fc8181';
+        }
     } else {
-        brElevLevel.textContent = '异常急促';
-        brElevLevel.style.background = '#4a1a1a';
-        brElevLevel.style.color = '#fc8181';
+        document.getElementById('br-elev-value').textContent = '--';
+        document.getElementById('br-elev-level').textContent = '--';
+        document.getElementById('br-elev-level').style.background = '#1e3a5f';
+        document.getElementById('br-elev-level').style.color = '#6b7280';
     }
 
     // 已删除: 瞬时心率/呼吸率显示

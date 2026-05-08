@@ -31,7 +31,11 @@ latest_data = {
     "heart_rate": 72.0,
     "breath_rate": 16.0,
     "heart_phase": 0.0,
-    "breath_phase": 0.0
+    "breath_phase": 0.0,
+    "is_human": 0,
+    "distance_valid": 0,
+    "distance": 0.0,
+    "signal_state": "INIT"
 }
 
 MAX_HISTORY = 600
@@ -300,6 +304,56 @@ def get_intensity_label(hrr, br_elev):
         return "极高强度"
 
 
+def validate_and_update(ts):
+    global current_preprocessor_output
+    
+    if latest_data["is_human"] == 0 or latest_data["distance_valid"] == 0:
+        latest_data["signal_state"] = "UNLOCKED"
+        return False
+        
+    raw_hr = latest_data["heart_rate"]
+    raw_br = latest_data["breath_rate"]
+    
+    if raw_hr == 0.0 or raw_br == 0.0:
+        latest_data["signal_state"] = "BIG_MOVE"
+        latest_data["heart_rate"] = heart_rate_history[-1] if heart_rate_history else 72.0
+        latest_data["breath_rate"] = breath_rate_history[-1] if breath_rate_history else 16.0
+        return False
+        
+    last_hr = heart_rate_history[-1] if heart_rate_history else raw_hr
+    last_br = breath_rate_history[-1] if breath_rate_history else raw_br
+    
+    if abs(raw_hr - last_hr) > 20.0 or abs(raw_br - last_br) > 8.0:
+        latest_data["signal_state"] = "UNSTABLE"
+        latest_data["heart_rate"] = last_hr
+        latest_data["breath_rate"] = last_br
+        return False
+        
+    current_preprocessor_output = preprocessor.feed(
+        latest_data["heart_phase"],
+        latest_data["breath_phase"],
+        ts,
+        current_hr=latest_data["heart_rate"],
+        current_br=latest_data["breath_rate"]
+    )
+    
+    lissajous_history.append([float(latest_data["breath_phase"]), float(latest_data["heart_phase"])])
+    if len(lissajous_history) > 500:
+        lissajous_history.pop(0)
+    
+    heart_phase_history.append(latest_data["heart_phase"])
+    breath_phase_history.append(latest_data["breath_phase"])
+    heart_rate_history.append(latest_data["heart_rate"])
+    breath_rate_history.append(latest_data["breath_rate"])
+    
+    for lst in [heart_phase_history, breath_phase_history, heart_rate_history, breath_rate_history]:
+        if len(lst) > MAX_HISTORY:
+            lst.pop(0)
+    
+    latest_data["signal_state"] = "NORMAL"
+    return True
+
+
 def verify_cksum(buf, cksum):
     acc = 0
     for b in buf:
@@ -466,37 +520,27 @@ def serial_thread():
                     fd = frame[8:8 + dlen] if dlen > 0 else b""
                     ts = time.time()
 
-                    if tid == 0x0A13 and len(fd) >= 12:
+                    if tid == 0x0F09 and len(fd) >= 2:
+                        latest_data["is_human"] = fd[0]
+                        
+                    elif tid == 0x0A16 and len(fd) >= 8:
+                        flag = struct.unpack('<I', fd[:4])[0]
+                        dist = float_le(fd[4:8])
+                        latest_data["distance_valid"] = flag
+                        latest_data["distance"] = dist
+                        
+                    elif tid == 0x0A13 and len(fd) >= 12:
                         breath_phase = float_le(fd[4:8])
                         heart_phase = float_le(fd[8:12])
                         latest_data["breath_phase"] = breath_phase
                         latest_data["heart_phase"] = heart_phase
 
-                        # ---- 修复: 传入雷达直出值用于生成正确的 synthetic 波形 ----
-                        current_preprocessor_output = preprocessor.feed(
-                            heart_phase, breath_phase, ts,
-                            current_hr=latest_data.get("heart_rate", 72.0),
-                            current_br=latest_data.get("breath_rate", 16.0)
-                        )
-
-                        lissajous_history.append([float(breath_phase), float(heart_phase)])
-                        if len(lissajous_history) > 500:
-                            lissajous_history.pop(0)
-
-                        heart_phase_history.append(heart_phase)
-                        breath_phase_history.append(breath_phase)
-                        heart_rate_history.append(latest_data["heart_rate"])
-                        breath_rate_history.append(latest_data["breath_rate"])
-
-                        for lst in [heart_phase_history, breath_phase_history,
-                                    heart_rate_history, breath_rate_history]:
-                            if len(lst) > MAX_HISTORY:
-                                lst.pop(0)
-
                     elif tid == 0x0A14 and len(fd) >= 4:
                         latest_data["breath_rate"] = float_le(fd[:4])
                     elif tid == 0x0A15 and len(fd) >= 4:
                         latest_data["heart_rate"] = float_le(fd[:4])
+                        
+                        validate_and_update(ts)
 
                 if ts - last_save_time > 1.0:
                     save_to_json()
@@ -592,7 +636,11 @@ def get_data():
         "raw": {
             "hr": hr_now, "br": br_now,
             "hr_phase": latest_data["heart_phase"],
-            "br_phase": latest_data["breath_phase"]
+            "br_phase": latest_data["breath_phase"],
+            "signal_state": latest_data["signal_state"],
+            "is_human": latest_data["is_human"],
+            "distance_valid": latest_data["distance_valid"],
+            "distance": latest_data["distance"]
         },
         "signals": {
             "inst_hr": [], "inst_br": [],

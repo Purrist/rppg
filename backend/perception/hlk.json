@@ -1,9 +1,13 @@
 {
-  "timestamp": 1778227971.788131,
+  "timestamp": 1778230551.8416872,
   "latest": {
-    "heart_rate": 98.0,
-    "breath_rate": 1.0,
-    "heart_phase": 0.3707710802555084,
-    "breath_phase": 0.06406114995479584
+    "heart_rate": 73.0,
+    "breath_rate": 5.0,
+    "heart_phase": -0.12227156013250351,
+    "breath_phase": 0.054084986448287964,
+    "is_human": 1,
+    "distance_valid": 1,
+    "distance": 34.439998626708984,
+    "signal_state": "NORMAL"
   }
 }
