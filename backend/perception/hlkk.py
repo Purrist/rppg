@@ -11,8 +11,18 @@ from flask import Flask, render_template, jsonify, request
 PORT = "COM9"
 BAUD = 115200
 HTTP_PORT = 5080
+SIMULATE_MODE = False
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 JSON_FILE = os.path.join(SCRIPT_DIR, 'hlk.json')
+HEALTHDATA_DIR = os.path.join(SCRIPT_DIR, 'healthdata')
+os.makedirs(HEALTHDATA_DIR, exist_ok=True)
+
+start_time = time.strftime("%Y%m%d-%H%M%S")
+RAW_LOG_FILE = os.path.join(HEALTHDATA_DIR, f"{start_time}raw.json")
+ANALYSIS_LOG_FILE = os.path.join(HEALTHDATA_DIR, f"{start_time}analysis.json")
+
+raw_log_data = []
+analysis_log_data = []
 
 app = Flask(__name__, template_folder='templates', static_folder='static')
 
@@ -267,6 +277,29 @@ def save_to_json():
         print("保存JSON失败: %s" % str(e))
 
 
+def save_logs():
+    try:
+        with open(RAW_LOG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(raw_log_data, f, ensure_ascii=False, indent=2)
+        with open(ANALYSIS_LOG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(analysis_log_data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print("保存日志失败: %s" % str(e))
+
+
+def get_intensity_label(hrr, br_elev):
+    if hrr < 20 and br_elev < 10:
+        return "静息"
+    elif hrr < 40 and br_elev < 25:
+        return "低强度"
+    elif hrr < 60 and br_elev < 50:
+        return "中强度"
+    elif hrr < 80 and br_elev < 80:
+        return "高强度"
+    else:
+        return "极高强度"
+
+
 def verify_cksum(buf, cksum):
     acc = 0
     for b in buf:
@@ -276,6 +309,118 @@ def verify_cksum(buf, cksum):
 
 def float_le(b):
     return struct.unpack('<f', b)[0]
+
+
+def simulate_thread():
+    global current_preprocessor_output, lissajous_history
+    print("模拟模式: 生成虚拟生理数据...")
+    
+    ts = time.time()
+    hr_phase = 0.0
+    br_phase = 0.0
+    hr = 72.0
+    br = 16.0
+    last_save_time = ts
+    frame_count = 0
+    
+    while True:
+        try:
+            ts = time.time()
+            frame_count += 1
+            
+            hr += np.random.normal(0, 0.3)
+            br += np.random.normal(0, 0.15)
+            hr = max(50, min(100, hr))
+            br = max(10, min(25, br))
+            
+            delta_hr = (hr / 60) * 2 * np.pi * 0.02
+            delta_br = (br / 60) * 2 * np.pi * 0.02
+            
+            hr_phase += delta_hr + np.random.normal(0, 0.02)
+            br_phase += delta_br + np.random.normal(0, 0.015)
+            
+            hr_phase = hr_phase % (2 * np.pi)
+            br_phase = br_phase % (2 * np.pi)
+            
+            if frame_count % 3 == 0:
+                latest_data["heart_rate"] = hr
+                latest_data["breath_rate"] = br
+            
+            latest_data["heart_phase"] = hr_phase
+            latest_data["breath_phase"] = br_phase
+            
+            current_preprocessor_output = preprocessor.feed(
+                hr_phase, br_phase, ts,
+                current_hr=latest_data["heart_rate"],
+                current_br=latest_data["breath_rate"]
+            )
+            
+            lissajous_history.append([float(br_phase), float(hr_phase)])
+            if len(lissajous_history) > 500:
+                lissajous_history.pop(0)
+            
+            heart_phase_history.append(hr_phase)
+            breath_phase_history.append(br_phase)
+            heart_rate_history.append(latest_data["heart_rate"])
+            breath_rate_history.append(latest_data["breath_rate"])
+            
+            for lst in [heart_phase_history, breath_phase_history,
+                        heart_rate_history, breath_rate_history]:
+                if len(lst) > MAX_HISTORY:
+                    lst.pop(0)
+            
+            if ts - last_save_time > 1.0:
+                save_to_json()
+                
+                raw_entry = {
+                    "timestamp": ts,
+                    "heart_rate": float(latest_data["heart_rate"]),
+                    "breath_rate": float(latest_data["breath_rate"]),
+                    "heart_phase": float(latest_data["heart_phase"]),
+                    "breath_phase": float(latest_data["breath_phase"])
+                }
+                raw_log_data.append(raw_entry)
+                
+                hrr_val = 0.0
+                brv_val = 0.0
+                cr_val = 0.0
+                slope_val = 0.0
+                plv_val = 0.0
+                br_elev_val = 0.0
+                
+                if current_preprocessor_output is not None:
+                    inst_hr, inst_br, hr_uni, br_uni = current_preprocessor_output
+                    hr_now = float(latest_data["heart_rate"])
+                    br_now = float(latest_data["breath_rate"]) if latest_data["breath_rate"] > 0 else 16.0
+                    
+                    hrr_val = engine.calc_hrr(hr_now)
+                    brv_val = engine.calc_brv(breath_rate_history)
+                    cr_val = engine.calc_cr_ratio(hr_now, br_now)
+                    slope_val = engine.calc_hr_slope(heart_rate_history)
+                    plv_val = engine.calc_plv(hr_uni, br_uni)
+                    br_elev_val = engine.calc_br_elevation(br_now)
+                
+                intensity_label = get_intensity_label(hrr_val, br_elev_val)
+                
+                analysis_entry = {
+                    "timestamp": ts,
+                    "hrr": round(hrr_val, 1),
+                    "brv": round(brv_val, 2),
+                    "cr": round(cr_val, 2),
+                    "slope": round(slope_val, 2),
+                    "plv": round(plv_val, 3),
+                    "brel": round(br_elev_val, 1),
+                    "label": intensity_label
+                }
+                analysis_log_data.append(analysis_entry)
+                
+                save_logs()
+                last_save_time = ts
+            
+            time.sleep(0.02)
+        except Exception as e:
+            print("模拟数据生成错误: %s" % str(e))
+            time.sleep(0.5)
 
 
 def serial_thread():
@@ -355,6 +500,50 @@ def serial_thread():
 
                 if ts - last_save_time > 1.0:
                     save_to_json()
+                    
+                    raw_entry = {
+                        "timestamp": ts,
+                        "heart_rate": float(latest_data["heart_rate"]),
+                        "breath_rate": float(latest_data["breath_rate"]),
+                        "heart_phase": float(latest_data["heart_phase"]),
+                        "breath_phase": float(latest_data["breath_phase"])
+                    }
+                    raw_log_data.append(raw_entry)
+                    
+                    hrr_val = 0.0
+                    brv_val = 0.0
+                    cr_val = 0.0
+                    slope_val = 0.0
+                    plv_val = 0.0
+                    br_elev_val = 0.0
+                    
+                    if current_preprocessor_output is not None:
+                        inst_hr, inst_br, hr_uni, br_uni = current_preprocessor_output
+                        hr_now = float(latest_data["heart_rate"])
+                        br_now = float(latest_data["breath_rate"]) if latest_data["breath_rate"] > 0 else 16.0
+                        
+                        hrr_val = engine.calc_hrr(hr_now)
+                        brv_val = engine.calc_brv(breath_rate_history)
+                        cr_val = engine.calc_cr_ratio(hr_now, br_now)
+                        slope_val = engine.calc_hr_slope(heart_rate_history)
+                        plv_val = engine.calc_plv(hr_uni, br_uni)
+                        br_elev_val = engine.calc_br_elevation(br_now)
+                    
+                    intensity_label = get_intensity_label(hrr_val, br_elev_val)
+                    
+                    analysis_entry = {
+                        "timestamp": ts,
+                        "hrr": round(hrr_val, 1),
+                        "brv": round(brv_val, 2),
+                        "cr": round(cr_val, 2),
+                        "slope": round(slope_val, 2),
+                        "plv": round(plv_val, 3),
+                        "brel": round(br_elev_val, 1),
+                        "label": intensity_label
+                    }
+                    analysis_log_data.append(analysis_entry)
+                    
+                    save_logs()
                     last_save_time = ts
             time.sleep(0.001)
         except Exception as e:
@@ -529,12 +718,21 @@ def get_data():
 
 if __name__ == '__main__':
     print("=" * 60)
-    print("  生理指标解析引擎 V4.1")
+    print("  生理指标解析引擎 V4.2")
     print("  修复: 瞬时频率改用雷达直出值")
     print("  修复: BR Elevation 改用雷达直出BR")
+    print("  新增: 数据日志功能 (raw.json, analysis.json)")
+    print("  模式: %s" % ("模拟模式" if SIMULATE_MODE else "串口模式"))
     print("  数据保存: %s" % JSON_FILE)
+    print("  日志目录: %s" % HEALTHDATA_DIR)
+    print("  日志文件: %s, %s" % (os.path.basename(RAW_LOG_FILE), os.path.basename(ANALYSIS_LOG_FILE)))
     print("=" * 60)
-    threading.Thread(target=serial_thread, daemon=True).start()
+    
+    if SIMULATE_MODE:
+        threading.Thread(target=simulate_thread, daemon=True).start()
+    else:
+        threading.Thread(target=serial_thread, daemon=True).start()
+    
     print("\nWeb服务器: http://127.0.0.1:%d" % HTTP_PORT)
     print("=" * 60 + "\n")
     app.run(host="127.0.0.1", port=HTTP_PORT, debug=False)
