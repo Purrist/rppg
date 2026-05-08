@@ -19,9 +19,11 @@ os.makedirs(HEALTHDATA_DIR, exist_ok=True)
 
 start_time = time.strftime("%Y%m%d-%H%M%S")
 RAW_LOG_FILE = os.path.join(HEALTHDATA_DIR, f"{start_time}raw.json")
+RAW_RAW_LOG_FILE = os.path.join(HEALTHDATA_DIR, f"{start_time}raw_raw.json")
 ANALYSIS_LOG_FILE = os.path.join(HEALTHDATA_DIR, f"{start_time}analysis.json")
 
 raw_log_data = []
+raw_raw_log_data = []
 analysis_log_data = []
 
 app = Flask(__name__, template_folder='templates', static_folder='static')
@@ -41,9 +43,16 @@ latest_data = {
 MAX_HISTORY = 600
 heart_phase_history = [0.0] * MAX_HISTORY
 breath_phase_history = [0.0] * MAX_HISTORY
-heart_rate_history = [72.0] * MAX_HISTORY
-breath_rate_history = [16.0] * MAX_HISTORY
+
+display_hr_history = [72.0] * MAX_HISTORY
+display_br_history = [16.0] * MAX_HISTORY
 signal_state_history = ["INIT"] * MAX_HISTORY
+
+clean_hr_history = [72.0] * MAX_HISTORY
+clean_br_history = [16.0] * MAX_HISTORY
+
+last_valid_hr = 72.0
+last_valid_br = 16.0
 lissajous_history = []
 current_preprocessor_output = None
 
@@ -294,9 +303,9 @@ def save_to_json():
             br_now = float(latest_data["breath_rate"]) if latest_data["breath_rate"] > 0 else 16.0
             
             hrr_val = engine.calc_hrr(hr_now)
-            brv_val = engine.calc_brv(breath_rate_history)
+            brv_val = engine.calc_brv(clean_br_history)
             cr_val = engine.calc_cr_ratio(hr_now, br_now)
-            slope_val = engine.calc_hr_slope(heart_rate_history)
+            slope_val = engine.calc_hr_slope(clean_hr_history)
             plv_val = engine.calc_plv(hr_uni, br_uni)
             br_elev_val = engine.calc_br_elevation(br_now)
         
@@ -325,6 +334,8 @@ def save_logs():
     try:
         with open(RAW_LOG_FILE, 'w', encoding='utf-8') as f:
             json.dump(raw_log_data, f, ensure_ascii=False, indent=2)
+        with open(RAW_RAW_LOG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(raw_raw_log_data, f, ensure_ascii=False, indent=2)
         with open(ANALYSIS_LOG_FILE, 'w', encoding='utf-8') as f:
             json.dump(analysis_log_data, f, ensure_ascii=False, indent=2)
     except Exception as e:
@@ -392,10 +403,7 @@ def get_brel_label(brel):
 
 
 def validate_and_update(ts):
-    global current_preprocessor_output
-    
-    default_hr = heart_rate_history[-1] if heart_rate_history else 72.0
-    default_br = breath_rate_history[-1] if breath_rate_history else 16.0
+    global current_preprocessor_output, last_valid_hr, last_valid_br
     
     raw_hr = latest_data["heart_rate"]
     raw_br = latest_data["breath_rate"]
@@ -404,39 +412,94 @@ def validate_and_update(ts):
     final_hr = raw_hr
     final_br = raw_br
     
+    hr_valid = (40.0 <= raw_hr <= 180.0) and raw_hr != 0.0
+    br_valid = (6.0 <= raw_br <= 40.0) and raw_br != 0.0
+    
     if latest_data["is_human"] == 0 or latest_data["distance_valid"] == 0:
-        state = "UNLOCKED"
-        final_hr = default_hr
-        final_br = default_br
+        state = "NO_TARGET"
+        final_hr = last_valid_hr if not hr_valid else raw_hr
+        final_br = last_valid_br
         
-    elif raw_hr == 0.0 or raw_br == 0.0:
+    elif raw_hr == 0.0 and raw_br == 0.0:
         state = "BIG_MOVE"
-        final_hr = default_hr
-        final_br = default_br
+        final_hr = last_valid_hr
+        final_br = last_valid_br
         
-    elif raw_hr < 40.0 or raw_hr > 180.0 or raw_br < 6.0 or raw_br > 40.0:
-        state = "UNSTABLE"
-        final_hr = default_hr
-        final_br = default_br
+    elif not hr_valid and not br_valid:
+        state = "BIG_MOVE"
+        final_hr = last_valid_hr
+        final_br = last_valid_br
         
-    elif abs(raw_hr - default_hr) > 15.0 or abs(raw_br - default_br) > 6.0:
-        state = "UNSTABLE"
-        final_hr = default_hr
-        final_br = default_br
+    elif not br_valid:
+        state = "BR_UNSTABLE"
+        final_br = last_valid_br
+        final_hr = raw_hr if hr_valid else last_valid_hr
+        
+    elif not hr_valid:
+        state = "HR_UNSTABLE"
+        final_hr = last_valid_hr
+        final_br = raw_br if br_valid else last_valid_br
+        
+    elif len(display_br_history) >= 5:
+        br_low_count = sum(1 for br in display_br_history[-5:] if br < 6)
+        if br_low_count >= 3:
+            state = "BR_UNSTABLE"
+            final_br = last_valid_br
+            final_hr = raw_hr if hr_valid else last_valid_hr
+            
+    elif abs(raw_hr - last_valid_hr) > 20.0:
+        if hr_valid:
+            state = "THAW"
+            final_hr = raw_hr
+            final_br = last_valid_br if not br_valid else raw_br
+        else:
+            state = "HR_UNSTABLE"
+            final_hr = last_valid_hr
+            final_br = raw_br if br_valid else last_valid_br
+            
+    elif abs(raw_br - last_valid_br) > 8.0:
+        if br_valid:
+            state = "BR_UNSTABLE"
+            final_br = raw_br
+            final_hr = raw_hr if hr_valid else last_valid_hr
+        else:
+            state = "BR_UNSTABLE"
+            final_br = last_valid_br
+            final_hr = raw_hr if hr_valid else last_valid_hr
+    
+    if len(display_hr_history) >= 5:
+        recent = display_hr_history[-5:]
+        if all(h == recent[0] for h in recent) and recent[0] > 0:
+            if abs(raw_hr - recent[0]) > 20 and 40 <= raw_hr <= 180:
+                final_hr = raw_hr
+                state = "THAW"
     
     latest_data["signal_state"] = state
     latest_data["heart_rate"] = final_hr
     latest_data["breath_rate"] = final_br
     
+    display_hr_history.append(final_hr)
+    display_br_history.append(final_br)
+    signal_state_history.append(state)
     heart_phase_history.append(latest_data["heart_phase"])
     breath_phase_history.append(latest_data["breath_phase"])
-    heart_rate_history.append(final_hr)
-    breath_rate_history.append(final_br)
-    signal_state_history.append(state)
-    
     lissajous_history.append([float(latest_data["breath_phase"]), float(latest_data["heart_phase"])])
     
-    for lst in [heart_phase_history, breath_phase_history, heart_rate_history, breath_rate_history, signal_state_history]:
+    if state == "NORMAL":
+        last_valid_hr = raw_hr
+        last_valid_br = raw_br
+        clean_hr_history.append(raw_hr)
+        clean_br_history.append(raw_br)
+    elif state == "THAW":
+        last_valid_hr = final_hr
+        if br_valid:
+            last_valid_br = raw_br
+            clean_br_history.append(raw_br)
+        clean_hr_history.append(final_hr)
+    
+    for lst in [display_hr_history, display_br_history, signal_state_history,
+                heart_phase_history, breath_phase_history,
+                clean_hr_history, clean_br_history]:
         if len(lst) > MAX_HISTORY:
             lst.pop(0)
     if len(lissajous_history) > 500:
@@ -445,7 +508,7 @@ def validate_and_update(ts):
     if state == "NORMAL":
         current_preprocessor_output = preprocessor.feed(
             latest_data["heart_phase"], latest_data["breath_phase"], ts,
-            current_hr=final_hr, current_br=final_br
+            current_hr=raw_hr, current_br=raw_br
         )
         return True
     else:
@@ -537,45 +600,38 @@ def simulate_thread():
                 }
                 raw_log_data.append(raw_entry)
                 
-                hrr_val = 0.0
-                brv_val = 0.0
-                cr_val = 0.0
-                slope_val = 0.0
-                plv_val = 0.0
-                br_elev_val = 0.0
-                
-                if current_preprocessor_output is not None:
+                if latest_data["signal_state"] in ["NORMAL", "THAW"] and current_preprocessor_output is not None:
                     inst_hr, inst_br, hr_uni, br_uni = current_preprocessor_output
                     hr_now = float(latest_data["heart_rate"])
-                    br_now = float(latest_data["breath_rate"]) if latest_data["breath_rate"] > 0 else 16.0
+                    br_now = float(latest_data["breath_rate"])
                     
                     hrr_val = engine.calc_hrr(hr_now)
-                    brv_val = engine.calc_brv(breath_rate_history)
+                    brv_val = engine.calc_brv(clean_br_history)
                     cr_val = engine.calc_cr_ratio(hr_now, br_now)
-                    slope_val = engine.calc_hr_slope(heart_rate_history)
+                    slope_val = engine.calc_hr_slope(clean_hr_history)
                     plv_val = engine.calc_plv(hr_uni, br_uni)
                     br_elev_val = engine.calc_br_elevation(br_now)
-                
-                analysis_entry = {
-                    "timestamp": ts,
-                    "signal_state": latest_data["signal_state"],
-                    "hrr": round(hrr_val, 1),
-                    "hrr_label": get_hrr_label(hrr_val),
-                    "brv": round(brv_val, 2),
-                    "brv_label": get_brv_label(brv_val),
-                    "cr": round(cr_val, 2),
-                    "cr_label": get_cr_label(cr_val),
-                    "slope": round(slope_val, 2),
-                    "slope_label": get_slope_label(slope_val),
-                    "plv": round(plv_val, 3),
-                    "plv_label": get_plv_label(plv_val),
-                    "brel": round(br_elev_val, 1),
-                    "brel_label": get_brel_label(br_elev_val)
-                }
-                analysis_log_data.append(analysis_entry)
-                
-                save_logs()
-                last_save_time = ts
+                    
+                    analysis_entry = {
+                        "timestamp": ts,
+                        "signal_state": "NORMAL",
+                        "hrr": round(hrr_val, 1),
+                        "hrr_label": get_hrr_label(hrr_val),
+                        "brv": round(brv_val, 2),
+                        "brv_label": get_brv_label(brv_val),
+                        "cr": round(cr_val, 2),
+                        "cr_label": get_cr_label(cr_val),
+                        "slope": round(slope_val, 2),
+                        "slope_label": get_slope_label(slope_val),
+                        "plv": round(plv_val, 3),
+                        "plv_label": get_plv_label(plv_val),
+                        "brel": round(br_elev_val, 1),
+                        "brel_label": get_brel_label(br_elev_val)
+                    }
+                    analysis_log_data.append(analysis_entry)
+                    
+                    save_logs()
+                    last_save_time = ts
             
             time.sleep(0.02)
         except Exception as e:
@@ -646,6 +702,18 @@ def serial_thread():
                     elif tid == 0x0A15 and len(fd) >= 4:
                         latest_data["heart_rate"] = float_le(fd[:4])
                         
+                        raw_raw_entry = {
+                            "timestamp": time.time(),
+                            "heart_rate_raw": float(latest_data["heart_rate"]),
+                            "breath_rate_raw": float(latest_data["breath_rate"]),
+                            "heart_phase_raw": float(latest_data["heart_phase"]),
+                            "breath_phase_raw": float(latest_data["breath_phase"]),
+                            "is_human_raw": latest_data["is_human"],
+                            "distance_valid_raw": latest_data["distance_valid"],
+                            "distance_raw": float(latest_data["distance"])
+                        }
+                        raw_raw_log_data.append(raw_raw_entry)
+                        
                         validate_and_update(ts)
 
                 if ts - last_save_time > 1.0:
@@ -664,42 +732,35 @@ def serial_thread():
                     }
                     raw_log_data.append(raw_entry)
                     
-                    hrr_val = 0.0
-                    brv_val = 0.0
-                    cr_val = 0.0
-                    slope_val = 0.0
-                    plv_val = 0.0
-                    br_elev_val = 0.0
-                    
-                    if current_preprocessor_output is not None:
+                    if latest_data["signal_state"] in ["NORMAL", "THAW"] and current_preprocessor_output is not None:
                         inst_hr, inst_br, hr_uni, br_uni = current_preprocessor_output
                         hr_now = float(latest_data["heart_rate"])
-                        br_now = float(latest_data["breath_rate"]) if latest_data["breath_rate"] > 0 else 16.0
+                        br_now = float(latest_data["breath_rate"])
                         
                         hrr_val = engine.calc_hrr(hr_now)
-                        brv_val = engine.calc_brv(breath_rate_history)
+                        brv_val = engine.calc_brv(clean_br_history)
                         cr_val = engine.calc_cr_ratio(hr_now, br_now)
-                        slope_val = engine.calc_hr_slope(heart_rate_history)
+                        slope_val = engine.calc_hr_slope(clean_hr_history)
                         plv_val = engine.calc_plv(hr_uni, br_uni)
                         br_elev_val = engine.calc_br_elevation(br_now)
-                    
-                    analysis_entry = {
-                        "timestamp": ts,
-                        "signal_state": latest_data["signal_state"],
-                        "hrr": round(hrr_val, 1),
-                        "hrr_label": get_hrr_label(hrr_val),
-                        "brv": round(brv_val, 2),
-                        "brv_label": get_brv_label(brv_val),
-                        "cr": round(cr_val, 2),
-                        "cr_label": get_cr_label(cr_val),
-                        "slope": round(slope_val, 2),
-                        "slope_label": get_slope_label(slope_val),
-                        "plv": round(plv_val, 3),
-                        "plv_label": get_plv_label(plv_val),
-                        "brel": round(br_elev_val, 1),
-                        "brel_label": get_brel_label(br_elev_val)
-                    }
-                    analysis_log_data.append(analysis_entry)
+                        
+                        analysis_entry = {
+                            "timestamp": ts,
+                            "signal_state": "NORMAL",
+                            "hrr": round(hrr_val, 1),
+                            "hrr_label": get_hrr_label(hrr_val),
+                            "brv": round(brv_val, 2),
+                            "brv_label": get_brv_label(brv_val),
+                            "cr": round(cr_val, 2),
+                            "cr_label": get_cr_label(cr_val),
+                            "slope": round(slope_val, 2),
+                            "slope_label": get_slope_label(slope_val),
+                            "plv": round(plv_val, 3),
+                            "plv_label": get_plv_label(plv_val),
+                            "brel": round(br_elev_val, 1),
+                            "brel_label": get_brel_label(br_elev_val)
+                        }
+                        analysis_log_data.append(analysis_entry)
                     
                     save_logs()
                     last_save_time = ts
@@ -711,7 +772,15 @@ def serial_thread():
                     ser.close()
             except:
                 pass
-            time.sleep(0.5)
+            print("尝试重新连接串口...")
+            while True:
+                try:
+                    ser = serial.Serial(PORT, BAUD, timeout=0.005)
+                    print("串口重新连接成功！")
+                    break
+                except Exception as re:
+                    print("重新连接失败: %s" % re)
+                    time.sleep(2)
 
 
 @app.route('/')
@@ -793,14 +862,13 @@ def get_data():
         phase_diff = engine.calc_mean_phase_diff(hr_uni, br_uni)
 
         # A级指标
-        # ---- 修复 V4.2: BRV 改用雷达直出BR历史 ----
-        brv_val = engine.calc_brv(breath_rate_history)
-        # ---- 修复 V4.1: BR Elevation 改用雷达直出BR ----
+        # ---- 使用 clean 历史保证统计纯度 ----
+        brv_val = engine.calc_brv(clean_br_history)
         br_elev_val = engine.calc_br_elevation(br_now)
         hri_val = engine.calc_hri(inst_hr)
         hrr_val = engine.calc_hrr(hr_now)
         cr_val = engine.calc_cr_ratio(hr_now, br_now)
-        slope_val = engine.calc_hr_slope(heart_rate_history)
+        slope_val = engine.calc_hr_slope(clean_hr_history)
 
         # RSA极坐标包裹
         rsa_wrapped = []
@@ -861,18 +929,11 @@ def get_data():
         "br_elevation": list(br_elevation_trend)[-300:]
     }
 
-    br_cleaned = []
-    for br_val in breath_rate_history:
-        if br_val <= 0:
-            br_cleaned.append(br_cleaned[-1] if br_cleaned and br_cleaned[-1] > 0 else 16.0)
-        else:
-            br_cleaned.append(float(br_val))
-
     result["rt"] = {
         "heart_phase": [float(x) for x in heart_phase_history[-200:]],
         "breath_phase": [float(x) for x in breath_phase_history[-200:]],
-        "heart_rate": [float(x) for x in heart_rate_history[-200:]],
-        "breath_rate": br_cleaned[-200:],
+        "heart_rate": [float(x) for x in display_hr_history[-200:]],
+        "breath_rate": [float(x) for x in display_br_history[-200:]],
         "signal_state": signal_state_history[-200:]
     }
 

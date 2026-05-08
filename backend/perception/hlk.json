@@ -1,27 +1,27 @@
 {
-  "timestamp": 1778232942.7791483,
+  "timestamp": 1778237670.731445,
   "latest": {
-    "heart_rate": 75.0,
-    "breath_rate": 6.0,
-    "heart_phase": -0.22088058292865753,
-    "breath_phase": 0.014070093631744385,
+    "heart_rate": 104.0,
+    "breath_rate": 15.0,
+    "heart_phase": -0.5326442122459412,
+    "breath_phase": -0.03758341073989868,
     "is_human": 1,
     "distance_valid": 1,
     "distance": 34.439998626708984,
-    "signal_state": "UNSTABLE"
+    "signal_state": "NORMAL"
   },
   "analysis": {
-    "hrr": 9.7,
+    "hrr": 33.1,
     "hrr_label": "低强度",
-    "brv": 58.33,
+    "brv": 20.51,
     "brv_label": "不规律",
-    "cr": 12.5,
+    "cr": 6.93,
     "cr_label": "偏高",
-    "slope": 0.0,
-    "slope_label": "平稳",
-    "plv": 0.982,
+    "slope": 0.57,
+    "slope_label": "缓慢上升",
+    "plv": 0.999,
     "plv_label": "深度放松",
-    "brel": -57.1,
-    "brel_label": "呼吸过缓"
+    "brel": 7.1,
+    "brel_label": "正常"
   }
 }
