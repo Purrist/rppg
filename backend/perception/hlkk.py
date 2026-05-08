@@ -43,6 +43,7 @@ heart_phase_history = [0.0] * MAX_HISTORY
 breath_phase_history = [0.0] * MAX_HISTORY
 heart_rate_history = [72.0] * MAX_HISTORY
 breath_rate_history = [16.0] * MAX_HISTORY
+signal_state_history = ["INIT"] * MAX_HISTORY
 lissajous_history = []
 current_preprocessor_output = None
 
@@ -393,51 +394,62 @@ def get_brel_label(brel):
 def validate_and_update(ts):
     global current_preprocessor_output
     
-    if latest_data["is_human"] == 0 or latest_data["distance_valid"] == 0:
-        latest_data["signal_state"] = "UNLOCKED"
-        return False
-        
+    default_hr = heart_rate_history[-1] if heart_rate_history else 72.0
+    default_br = breath_rate_history[-1] if breath_rate_history else 16.0
+    
     raw_hr = latest_data["heart_rate"]
     raw_br = latest_data["breath_rate"]
     
-    if raw_hr == 0.0 or raw_br == 0.0:
-        latest_data["signal_state"] = "BIG_MOVE"
-        latest_data["heart_rate"] = heart_rate_history[-1] if heart_rate_history else 72.0
-        latest_data["breath_rate"] = breath_rate_history[-1] if breath_rate_history else 16.0
-        return False
-        
-    last_hr = heart_rate_history[-1] if heart_rate_history else raw_hr
-    last_br = breath_rate_history[-1] if breath_rate_history else raw_br
+    state = "NORMAL"
+    final_hr = raw_hr
+    final_br = raw_br
     
-    if abs(raw_hr - last_hr) > 20.0 or abs(raw_br - last_br) > 8.0:
-        latest_data["signal_state"] = "UNSTABLE"
-        latest_data["heart_rate"] = last_hr
-        latest_data["breath_rate"] = last_br
-        return False
+    if latest_data["is_human"] == 0 or latest_data["distance_valid"] == 0:
+        state = "UNLOCKED"
+        final_hr = default_hr
+        final_br = default_br
         
-    current_preprocessor_output = preprocessor.feed(
-        latest_data["heart_phase"],
-        latest_data["breath_phase"],
-        ts,
-        current_hr=latest_data["heart_rate"],
-        current_br=latest_data["breath_rate"]
-    )
+    elif raw_hr == 0.0 or raw_br == 0.0:
+        state = "BIG_MOVE"
+        final_hr = default_hr
+        final_br = default_br
+        
+    elif raw_hr < 40.0 or raw_hr > 180.0 or raw_br < 6.0 or raw_br > 40.0:
+        state = "UNSTABLE"
+        final_hr = default_hr
+        final_br = default_br
+        
+    elif abs(raw_hr - default_hr) > 15.0 or abs(raw_br - default_br) > 6.0:
+        state = "UNSTABLE"
+        final_hr = default_hr
+        final_br = default_br
     
-    lissajous_history.append([float(latest_data["breath_phase"]), float(latest_data["heart_phase"])])
-    if len(lissajous_history) > 500:
-        lissajous_history.pop(0)
+    latest_data["signal_state"] = state
+    latest_data["heart_rate"] = final_hr
+    latest_data["breath_rate"] = final_br
     
     heart_phase_history.append(latest_data["heart_phase"])
     breath_phase_history.append(latest_data["breath_phase"])
-    heart_rate_history.append(latest_data["heart_rate"])
-    breath_rate_history.append(latest_data["breath_rate"])
+    heart_rate_history.append(final_hr)
+    breath_rate_history.append(final_br)
+    signal_state_history.append(state)
     
-    for lst in [heart_phase_history, breath_phase_history, heart_rate_history, breath_rate_history]:
+    lissajous_history.append([float(latest_data["breath_phase"]), float(latest_data["heart_phase"])])
+    
+    for lst in [heart_phase_history, breath_phase_history, heart_rate_history, breath_rate_history, signal_state_history]:
         if len(lst) > MAX_HISTORY:
             lst.pop(0)
+    if len(lissajous_history) > 500:
+        lissajous_history.pop(0)
     
-    latest_data["signal_state"] = "NORMAL"
-    return True
+    if state == "NORMAL":
+        current_preprocessor_output = preprocessor.feed(
+            latest_data["heart_phase"], latest_data["breath_phase"], ts,
+            current_hr=final_hr, current_br=final_br
+        )
+        return True
+    else:
+        return False
 
 
 def verify_cksum(buf, cksum):
@@ -860,7 +872,8 @@ def get_data():
         "heart_phase": [float(x) for x in heart_phase_history[-200:]],
         "breath_phase": [float(x) for x in breath_phase_history[-200:]],
         "heart_rate": [float(x) for x in heart_rate_history[-200:]],
-        "breath_rate": br_cleaned[-200:]
+        "breath_rate": br_cleaned[-200:],
+        "signal_state": signal_state_history[-200:]
     }
 
     return jsonify(result)

@@ -415,20 +415,43 @@ function update(data) {
 
     const hrData = rt.heart_rate.slice(-200);
     const brData = rt.breath_rate.slice(-200);
+    const signalStates = rt.signal_state ? rt.signal_state.slice(-200) : [];
     const xData = hrData.map((_,i) => i);
+
+    const formattedHrData = hrData.map((val, index) => {
+        if (signalStates[index] && signalStates[index] !== 'NORMAL') {
+            return {
+                value: val,
+                itemStyle: { color: '#6b7280' },
+                lineStyle: { type: 'dashed', color: '#6b7280', width: 1 }
+            };
+        }
+        return val;
+    });
+
+    const formattedBrData = brData.map((val, index) => {
+        if (signalStates[index] && signalStates[index] !== 'NORMAL') {
+            return {
+                value: val,
+                itemStyle: { color: '#6b7280' },
+                lineStyle: { type: 'dashed', color: '#6b7280', width: 1 }
+            };
+        }
+        return val;
+    });
 
     charts.hr.setOption({
         ...NA, grid: { top: 4, right: 8, bottom: 10, left: 28 },
         xAxis: { type: 'category', data: xData, ...AX, axisLabel: { show: false } },
         yAxis: { type: 'value', ...AX },
-        series: [{ type: 'line', data: hrData, smooth: true, symbol: 'none', lineStyle: { color: '#ff4757', width: 1.2 } }]
+        series: [{ type: 'line', data: formattedHrData, smooth: true, symbol: 'none', lineStyle: { color: '#ff4757', width: 1.2 } }]
     }, true);
 
     charts.br.setOption({
         ...NA, grid: { top: 4, right: 8, bottom: 10, left: 28 },
         xAxis: { type: 'category', data: xData, ...AX, axisLabel: { show: false } },
         yAxis: { type: 'value', ...AX },
-        series: [{ type: 'line', data: brData, smooth: true, symbol: 'none', lineStyle: { color: '#00e5ff', width: 1.2 } }]
+        series: [{ type: 'line', data: formattedBrData, smooth: true, symbol: 'none', lineStyle: { color: '#00e5ff', width: 1.2 } }]
     }, true);
 
     const hpData = rt.heart_phase.slice(-200);
