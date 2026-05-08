@@ -274,7 +274,46 @@ engine = PhysioEngine(age=current_age, gender=current_gender)
 
 def save_to_json():
     try:
-        data = {"timestamp": time.time(), "latest": latest_data.copy()}
+        data = {
+            "timestamp": time.time(),
+            "latest": latest_data.copy(),
+            "analysis": {}
+        }
+        
+        hrr_val = 0.0
+        brv_val = 0.0
+        cr_val = 0.0
+        slope_val = 0.0
+        plv_val = 0.0
+        br_elev_val = 0.0
+        
+        if current_preprocessor_output is not None:
+            inst_hr, inst_br, hr_uni, br_uni = current_preprocessor_output
+            hr_now = float(latest_data["heart_rate"])
+            br_now = float(latest_data["breath_rate"]) if latest_data["breath_rate"] > 0 else 16.0
+            
+            hrr_val = engine.calc_hrr(hr_now)
+            brv_val = engine.calc_brv(breath_rate_history)
+            cr_val = engine.calc_cr_ratio(hr_now, br_now)
+            slope_val = engine.calc_hr_slope(heart_rate_history)
+            plv_val = engine.calc_plv(hr_uni, br_uni)
+            br_elev_val = engine.calc_br_elevation(br_now)
+        
+        data["analysis"] = {
+            "hrr": round(hrr_val, 1),
+            "hrr_label": get_hrr_label(hrr_val),
+            "brv": round(brv_val, 2),
+            "brv_label": get_brv_label(brv_val),
+            "cr": round(cr_val, 2),
+            "cr_label": get_cr_label(cr_val),
+            "slope": round(slope_val, 2),
+            "slope_label": get_slope_label(slope_val),
+            "plv": round(plv_val, 3),
+            "plv_label": get_plv_label(plv_val),
+            "brel": round(br_elev_val, 1),
+            "brel_label": get_brel_label(br_elev_val)
+        }
+        
         with open(JSON_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception as e:
@@ -291,17 +330,64 @@ def save_logs():
         print("保存日志失败: %s" % str(e))
 
 
-def get_intensity_label(hrr, br_elev):
-    if hrr < 20 and br_elev < 10:
-        return "静息"
-    elif hrr < 40 and br_elev < 25:
+def get_hrr_label(hrr):
+    if hrr < 40:
         return "低强度"
-    elif hrr < 60 and br_elev < 50:
+    elif hrr <= 60:
         return "中强度"
-    elif hrr < 80 and br_elev < 80:
-        return "高强度"
     else:
-        return "极高强度"
+        return "高强度"
+
+
+def get_brv_label(brv):
+    if brv < 5:
+        return "规律"
+    elif brv <= 15:
+        return "正常"
+    else:
+        return "不规律"
+
+
+def get_cr_label(cr):
+    if cr < 3.5:
+        return "偏低"
+    elif cr <= 5.5:
+        return "正常"
+    else:
+        return "偏高"
+
+
+def get_slope_label(slope):
+    if slope < -0.5:
+        return "快速下降"
+    elif slope <= 0.5:
+        return "平稳"
+    elif slope <= 2.0:
+        return "缓慢上升"
+    else:
+        return "快速上升"
+
+
+def get_plv_label(plv):
+    if plv < 0.3:
+        return "清醒焦虑"
+    elif plv <= 0.9:
+        return "日常活动"
+    else:
+        return "深度放松"
+
+
+def get_brel_label(brel):
+    if brel < -20:
+        return "呼吸过缓"
+    elif brel < 0:
+        return "放松"
+    elif brel <= 30:
+        return "正常"
+    elif brel <= 60:
+        return "急促"
+    else:
+        return "异常急促"
 
 
 def validate_and_update(ts):
@@ -431,7 +517,11 @@ def simulate_thread():
                     "heart_rate": float(latest_data["heart_rate"]),
                     "breath_rate": float(latest_data["breath_rate"]),
                     "heart_phase": float(latest_data["heart_phase"]),
-                    "breath_phase": float(latest_data["breath_phase"])
+                    "breath_phase": float(latest_data["breath_phase"]),
+                    "is_human": latest_data["is_human"],
+                    "distance_valid": latest_data["distance_valid"],
+                    "distance": float(latest_data["distance"]),
+                    "signal_state": latest_data["signal_state"]
                 }
                 raw_log_data.append(raw_entry)
                 
@@ -454,17 +544,21 @@ def simulate_thread():
                     plv_val = engine.calc_plv(hr_uni, br_uni)
                     br_elev_val = engine.calc_br_elevation(br_now)
                 
-                intensity_label = get_intensity_label(hrr_val, br_elev_val)
-                
                 analysis_entry = {
                     "timestamp": ts,
+                    "signal_state": latest_data["signal_state"],
                     "hrr": round(hrr_val, 1),
+                    "hrr_label": get_hrr_label(hrr_val),
                     "brv": round(brv_val, 2),
+                    "brv_label": get_brv_label(brv_val),
                     "cr": round(cr_val, 2),
+                    "cr_label": get_cr_label(cr_val),
                     "slope": round(slope_val, 2),
+                    "slope_label": get_slope_label(slope_val),
                     "plv": round(plv_val, 3),
+                    "plv_label": get_plv_label(plv_val),
                     "brel": round(br_elev_val, 1),
-                    "label": intensity_label
+                    "brel_label": get_brel_label(br_elev_val)
                 }
                 analysis_log_data.append(analysis_entry)
                 
@@ -550,7 +644,11 @@ def serial_thread():
                         "heart_rate": float(latest_data["heart_rate"]),
                         "breath_rate": float(latest_data["breath_rate"]),
                         "heart_phase": float(latest_data["heart_phase"]),
-                        "breath_phase": float(latest_data["breath_phase"])
+                        "breath_phase": float(latest_data["breath_phase"]),
+                        "is_human": latest_data["is_human"],
+                        "distance_valid": latest_data["distance_valid"],
+                        "distance": float(latest_data["distance"]),
+                        "signal_state": latest_data["signal_state"]
                     }
                     raw_log_data.append(raw_entry)
                     
@@ -573,17 +671,21 @@ def serial_thread():
                         plv_val = engine.calc_plv(hr_uni, br_uni)
                         br_elev_val = engine.calc_br_elevation(br_now)
                     
-                    intensity_label = get_intensity_label(hrr_val, br_elev_val)
-                    
                     analysis_entry = {
                         "timestamp": ts,
+                        "signal_state": latest_data["signal_state"],
                         "hrr": round(hrr_val, 1),
+                        "hrr_label": get_hrr_label(hrr_val),
                         "brv": round(brv_val, 2),
+                        "brv_label": get_brv_label(brv_val),
                         "cr": round(cr_val, 2),
+                        "cr_label": get_cr_label(cr_val),
                         "slope": round(slope_val, 2),
+                        "slope_label": get_slope_label(slope_val),
                         "plv": round(plv_val, 3),
+                        "plv_label": get_plv_label(plv_val),
                         "brel": round(br_elev_val, 1),
-                        "label": intensity_label
+                        "brel_label": get_brel_label(br_elev_val)
                     }
                     analysis_log_data.append(analysis_entry)
                     

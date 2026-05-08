@@ -52,3 +52,4 @@ backend/perception/au/config.json
 backend/perception/mode_history/
 backend/perception/healthdata/
 mmw_history/
+backend/perception/hlk.json
