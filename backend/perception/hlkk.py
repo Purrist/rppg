@@ -10,10 +10,9 @@ from flask import Flask, render_template, jsonify, request
 
 PORT = "COM9"
 BAUD = 115200
-HTTP_PORT = 5080
+HTTP_PORT = 5020
 SIMULATE_MODE = False
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-JSON_FILE = os.path.join(SCRIPT_DIR, 'hlk.json')
 HEALTHDATA_DIR = os.path.join(SCRIPT_DIR, 'healthdata')
 os.makedirs(HEALTHDATA_DIR, exist_ok=True)
 
@@ -82,17 +81,6 @@ trend_phase_valid_history = []
 
 # ========== PhasePreprocessor ==========
 class PhasePreprocessor:
-    """相位预处理器 V2.0
-
-    修复说明: 不再对相位求导计算频率。
-    相位是位移表示 (φ = 4πd/λ)，不是角频率。
-    雷达已提供稳定的心率(0x0A15)和呼吸率(0x0A14)。
-
-    本类仅用于:
-    1. 相位解卷绕和重采样
-    2. 生成 synthetic 瞬时波形（用于RSA/PLV等相位耦合分析）
-    3. 保留相位波形用于可视化
-    """
 
     def __init__(self, window_size=100, target_fs=10.0):
         self.window = window_size
@@ -334,9 +322,6 @@ def save_to_json():
             "brel": round(br_elev_val, 1),
             "brel_label": get_brel_label(br_elev_val)
         }
-        
-        with open(JSON_FILE, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print("保存JSON失败: %s" % str(e))
 
@@ -887,7 +872,7 @@ def serial_thread():
 
 @app.route('/')
 def index():
-    return render_template('hlkk.html')
+    return render_template('health.html')
 
 
 @app.route('/health')
@@ -1105,17 +1090,7 @@ def get_data():
 
 
 if __name__ == '__main__':
-    print("=" * 60)
-    print("  生理指标解析引擎 V4.2")
-    print("  修复: 瞬时频率改用雷达直出值")
-    print("  修复: BR Elevation 改用雷达直出BR")
-    print("  新增: 数据日志功能 (raw.json, analysis.json)")
-    print("  模式: %s" % ("模拟模式" if SIMULATE_MODE else "串口模式"))
-    print("  数据保存: %s" % JSON_FILE)
-    print("  日志目录: %s" % HEALTHDATA_DIR)
-    print("  日志文件: %s, %s" % (os.path.basename(RAW_LOG_FILE), os.path.basename(ANALYSIS_LOG_FILE)))
-    print("=" * 60)
-    
+    print("  模式: %s" % ("模拟模式" if SIMULATE_MODE else "串口模式"))    
     if SIMULATE_MODE:
         threading.Thread(target=simulate_thread, daemon=True).start()
     else:

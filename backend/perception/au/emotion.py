@@ -646,7 +646,7 @@ class FERSmoother:
 # ── 核心引擎 ──────────────────────────────────────────
 class EmotionEngine:
     def __init__(self):
-        self.cap = cv2.VideoCapture("http://10.158.6.244:8080/video")
+        self.cap = cv2.VideoCapture("http://10.158.7.180:8080/video")
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)

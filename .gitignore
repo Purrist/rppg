@@ -53,3 +53,4 @@ backend/perception/mode_history/
 backend/perception/healthdata/
 mmw_history/
 backend/perception/hlk.json
+backend/perception/face_database/

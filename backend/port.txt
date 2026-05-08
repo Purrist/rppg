@@ -5,26 +5,17 @@ RPPG Backend 端口分配表
 端口：自动查找可用端口，从 5000 开始
 c:\Users\purriste\Desktop\PYProject\rppg\backend\app.py
 
-二、平板摄像头：情绪识别、身份识别、专注度
-端口：5010
+二、平板摄像头：情绪识别、专注度-----端口：5010
 c:\Users\purriste\Desktop\PYProject\rppg\backend\perception\au\emotion.py
 
-三、毫米波雷达5模式滤波demo
-端口：5020
-c:\Users\purriste\Desktop\PYProject\rppg\backend\perception\com.py
+三、毫米波雷达-----端口：5020
+c:\Users\purriste\Desktop\PYProject\rppg\backend\perception\hlkk.py
 
-四、双通道HRV、生理负荷、认知负荷
-端口：5030
-c:\Users\purriste\Desktop\PYProject\rppg\backend\perception\mmw.py
+四、平板摄像头：身份识别-----端口：5030
+c:\Users\purriste\Desktop\PYProject\rppg\backend\perception\person.py
 
-五、外接摄像头：位置、活动量、人数
-端口：未定义
+五、外接摄像头：位置、活动量、人数-----端口：未定义
 c:\Users\purriste\Desktop\PYProject\rppg\backend\perception\未定义.py
 
-六、数据集成运算中心：参与度、难度建议
-端口：6002
+六、数据集成运算中心：参与度、难度建议-----端口：5090
 c:\Users\purriste\Desktop\PYProject\rppg\backend\perception\perception.py
-
-七、海凌科毫米波雷达完整数据
-端口：5080
-C:\Users\purriste\Desktop\PYProject\rppg\backend\perception\hlk.py

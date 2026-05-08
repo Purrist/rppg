@@ -2,8 +2,12 @@
 """
 Perception - 情绪与生理数据综合展示模块
 整合 AU+FER 情绪数据与心率呼吸率数据，提供进一步的情感分析
+同时整合人脸年龄和性别分析功能
 """
 import os
+import cv2
+import numpy as np
+import onnxruntime as ort
 import json
 import time
 import threading
@@ -11,15 +15,321 @@ import requests
 import subprocess
 import atexit
 import sys
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, Response
 
 app = Flask(__name__)
 
-AU_EMOTION_API = "http://127.0.0.1:5000/api/fusion"
-COM_DATA_API = "http://127.0.0.1:5001/data"
+AU_EMOTION_API = "http://127.0.0.1:5010/api/fusion"
+HLKK_DATA_API = "http://127.0.0.1:5020/data"
+
+PERSON_HTTP_PORT = 5030
+IP_CAMERA_URL = "http://10.158.7.180:8080/video"
+
+MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "core", "models")
+AGE_MODEL_PATH = os.path.join(MODEL_DIR, "age_googlenet.onnx")
+GENDER_MODEL_PATH = os.path.join(MODEL_DIR, "gender_googlenet.onnx")
+
+AGE_RANGES = ['0-2', '4-6', '8-12', '15-20', '25-32', '38-43', '48-53', '60-100']
 
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "au", "config.json")
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "emodata")
+
+class PersonAnalyzer:
+    def __init__(self):
+        self.video_stream_url = "http://127.0.0.1:5010/video_feed"
+        self.cap = None
+        self._reconnect_attempts = 0
+        
+        self.age_session = None
+        self.gender_session = None
+        self.load_models()
+        
+        self.face_detector = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+        
+        self.lock = threading.Lock()
+        self.running = False
+        self.raw_frame = None
+        self.last_encoded_frame = None
+        
+        self.result = {
+            "age": 0,
+            "age_range": "--",
+            "age_confidence": 0.0,
+            "gender": "--",
+            "gender_confidence": 0.0,
+            "face_detected": False,
+            "face_count": 0,
+            "timestamp": time.time(),
+            "age_model": {"available": False},
+            "gender_model": {"available": False}
+        }
+        
+        self.age_buffer = []
+        self.gender_buffer = []
+        self.buffer_size = 5
+        
+        self.last_detection_time = 0
+        self.detection_interval = 0.3
+        
+        self.max_reconnect_attempts = 10
+    
+    def _connect(self):
+        """尝试连接到视频流"""
+        if self.cap and self.cap.isOpened():
+            self.cap.release()
+        
+        self.cap = cv2.VideoCapture(self.video_stream_url)
+        if self.cap.isOpened():
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            self._reconnect_attempts = 0
+            return True
+        return False
+
+    def load_models(self):
+        try:
+            if os.path.exists(AGE_MODEL_PATH):
+                self.age_session = ort.InferenceSession(AGE_MODEL_PATH, providers=['CPUExecutionProvider'])
+                print(f"✓ 年龄模型加载成功: {AGE_MODEL_PATH}")
+            else:
+                print(f"✗ 年龄模型未找到: {AGE_MODEL_PATH}")
+            
+            if os.path.exists(GENDER_MODEL_PATH):
+                self.gender_session = ort.InferenceSession(GENDER_MODEL_PATH, providers=['CPUExecutionProvider'])
+                print(f"✓ 性别模型加载成功: {GENDER_MODEL_PATH}")
+            else:
+                print(f"✗ 性别模型未找到: {GENDER_MODEL_PATH}")
+        except Exception as e:
+            print(f"模型加载失败: {e}")
+
+    def preprocess_face(self, face_img):
+        if len(face_img.shape) == 2:
+            face_img = cv2.cvtColor(face_img, cv2.COLOR_GRAY2RGB)
+        elif face_img.shape[2] == 4:
+            face_img = cv2.cvtColor(face_img, cv2.COLOR_BGRA2RGB)
+        
+        face_img = cv2.resize(face_img, (224, 224))
+        
+        mean = np.array([123.68, 116.779, 103.939])
+        std = np.array([58.395, 57.12, 57.375])
+        face_img = (face_img - mean) / std
+        
+        face_img = np.transpose(face_img, (2, 0, 1))
+        face_img = np.expand_dims(face_img, axis=0).astype(np.float32)
+        
+        return face_img
+
+    def analyze_face(self, frame):
+        small_frame = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
+        gray = cv2.cvtColor(small_frame, cv2.COLOR_BGR2GRAY)
+        faces = self.face_detector.detectMultiScale(
+            gray, 
+            scaleFactor=1.2, 
+            minNeighbors=4, 
+            minSize=(30, 30)
+        )
+        
+        if len(faces) == 0:
+            return None
+        
+        max_area = 0
+        best_face = None
+        for (x, y, w, h) in faces:
+            area = w * h
+            if area > max_area:
+                max_area = area
+                best_face = (x, y, w, h)
+        
+        if best_face is None:
+            return None
+        
+        x, y, w, h = best_face
+        x = int(x * 2)
+        y = int(y * 2)
+        w = int(w * 2)
+        h = int(h * 2)
+        
+        padding = int(w * 0.2)
+        x = max(0, x - padding)
+        y = max(0, y - padding)
+        w = min(frame.shape[1] - x, w + 2 * padding)
+        h = min(frame.shape[0] - y, h + 2 * padding)
+        
+        face_img = frame[y:y+h, x:x+w]
+        
+        age_model_result = {"available": False}
+        gender_model_result = {"available": False}
+        
+        try:
+            input_tensor = self.preprocess_face(face_img)
+            
+            age_pred = None
+            age_conf = 0.0
+            age_scores = []
+            if self.age_session:
+                age_output = self.age_session.run(None, {self.age_session.get_inputs()[0].name: input_tensor})[0]
+                age_pred = np.argmax(age_output[0])
+                age_conf = float(age_output[0][age_pred])
+                age_scores = [float(x) for x in age_output[0]]
+                age_model_result = {
+                    "available": True,
+                    "prediction": int(age_pred),
+                    "confidence": age_conf,
+                    "scores": age_scores,
+                    "ranges": AGE_RANGES
+                }
+            
+            gender_pred = None
+            gender_conf = 0.0
+            gender_scores = []
+            if self.gender_session:
+                gender_output = self.gender_session.run(None, {self.gender_session.get_inputs()[0].name: input_tensor})[0]
+                gender_pred = np.argmax(gender_output[0])
+                gender_conf = float(gender_output[0][gender_pred])
+                gender_scores = [float(x) for x in gender_output[0]]
+                gender_model_result = {
+                    "available": True,
+                    "prediction": int(gender_pred),
+                    "confidence": gender_conf,
+                    "scores": gender_scores,
+                    "labels": ["男", "女"]
+                }
+            
+            return {
+                "age": age_pred,
+                "age_range": AGE_RANGES[age_pred] if age_pred is not None else "--",
+                "age_confidence": age_conf if age_pred is not None else 0.0,
+                "gender": "男" if gender_pred == 0 else "女" if gender_pred == 1 else "--",
+                "gender_confidence": gender_conf if gender_pred is not None else 0.0,
+                "face_count": len(faces),
+                "age_model": age_model_result,
+                "gender_model": gender_model_result
+            }
+        except Exception as e:
+            print(f"人脸分析失败: {e}")
+            return None
+
+    def smooth_result(self, result):
+        if result["age"] is not None:
+            self.age_buffer.append(result["age"])
+            if len(self.age_buffer) > self.buffer_size:
+                self.age_buffer.pop(0)
+            result["age"] = int(np.mean(self.age_buffer))
+        
+        if result["gender"] in ["男", "女"]:
+            self.gender_buffer.append(result["gender"])
+            if len(self.gender_buffer) > self.buffer_size:
+                self.gender_buffer.pop(0)
+            from collections import Counter
+            counter = Counter(self.gender_buffer)
+            result["gender"] = counter.most_common(1)[0][0]
+        
+        return result
+
+    def update(self):
+        current_time = time.time()
+        
+        # 确保视频流已连接
+        if self.cap is None or not self.cap.isOpened():
+            if self._reconnect_attempts % self.max_reconnect_attempts == 0:
+                print(f"[PersonAnalyzer] 尝试连接视频流: {self.video_stream_url}")
+            self._connect()
+            self._reconnect_attempts += 1
+            with self.lock:
+                self.result = {
+                    "age": 0,
+                    "age_range": "--",
+                    "age_confidence": 0.0,
+                    "gender": "--",
+                    "gender_confidence": 0.0,
+                    "face_detected": False,
+                    "face_count": 0,
+                    "timestamp": time.time(),
+                    "age_model": {"available": False},
+                    "gender_model": {"available": False}
+                }
+            return
+        
+        ret, frame = self.cap.read()
+        if not ret:
+            self._reconnect_attempts += 1
+            with self.lock:
+                self.result = {
+                    "age": 0,
+                    "age_range": "--",
+                    "age_confidence": 0.0,
+                    "gender": "--",
+                    "gender_confidence": 0.0,
+                    "face_detected": False,
+                    "face_count": 0,
+                    "timestamp": time.time(),
+                    "age_model": {"available": False},
+                    "gender_model": {"available": False}
+                }
+            return
+        
+        self._reconnect_attempts = 0
+        self.raw_frame = frame
+        
+        # 只在需要时编码帧
+        try:
+            _, encoded = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+            self.last_encoded_frame = encoded
+        except:
+            pass
+        
+        if current_time - self.last_detection_time >= self.detection_interval:
+            self.last_detection_time = current_time
+            
+            analysis = self.analyze_face(frame)
+            with self.lock:
+                if analysis:
+                    analysis = self.smooth_result(analysis)
+                    self.result = {
+                        "age": analysis["age"],
+                        "age_range": analysis["age_range"],
+                        "age_confidence": analysis["age_confidence"],
+                        "gender": analysis["gender"],
+                        "gender_confidence": analysis["gender_confidence"],
+                        "face_detected": True,
+                        "face_count": analysis["face_count"],
+                        "timestamp": time.time(),
+                        "age_model": analysis["age_model"],
+                        "gender_model": analysis["gender_model"]
+                    }
+                else:
+                    self.result = {
+                        "age": 0,
+                        "age_range": "--",
+                        "age_confidence": 0.0,
+                        "gender": "--",
+                        "gender_confidence": 0.0,
+                        "face_detected": False,
+                        "face_count": 0,
+                        "timestamp": time.time(),
+                        "age_model": {"available": False},
+                        "gender_model": {"available": False}
+                    }
+
+    def get_result(self):
+        with self.lock:
+            return self.result.copy()
+
+    def generate_frame(self):
+        while self.running:
+            if self.last_encoded_frame is not None:
+                yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + 
+                       self.last_encoded_frame.tobytes() + b'\r\n')
+            time.sleep(0.033)
+
+    def start(self):
+        self.running = True
+        thread = threading.Thread(target=self._run_loop, daemon=True)
+        thread.start()
+
+    def _run_loop(self):
+        while self.running:
+            self.update()
+            time.sleep(0.033)
 
 class EmotionProcessor:
     def __init__(self):
@@ -55,32 +365,34 @@ class EmotionProcessor:
             resp = requests.get(AU_EMOTION_API, timeout=0.5)
             if resp.status_code == 200:
                 d = resp.json()
+                scores = d.get("scores", {})
                 return {
-                    "neutral": d.get("scores", {}).get("neutral", 0),
-                    "positive": d.get("scores", {}).get("positive", 0),
-                    "negative": d.get("scores", {}).get("negative", 0),
+                    "neutral": scores.get("neutral", 0),
+                    "positive": scores.get("positive", 0),
+                    "negative": scores.get("negative", 0),
                     "confidence": d.get("confidence", 0),
                     "emotion": d.get("emotion", "neutral"),
-                    "engagement": d.get("engagement", "None"),
+                    "engagement": d.get("tag", "None"),
                     "timestamp": time.time()
                 }
-        except:
-            pass
+        except Exception as e:
+            print(f"获取情绪数据失败: {e}")
         return None
 
     def fetch_physio_data(self):
         try:
-            resp = requests.get(COM_DATA_API, timeout=0.5)
+            resp = requests.get(HLKK_DATA_API, timeout=0.5)
             if resp.status_code == 200:
                 d = resp.json()
+                raw = d.get("raw", {})
                 return {
-                    "heart": d.get("heart", 0),
-                    "breath": d.get("breath", 0),
-                    "human": d.get("human", False),
+                    "heart": raw.get("hr", 0),
+                    "breath": raw.get("br", 0),
+                    "human": raw.get("is_human", 0) == 1,
                     "timestamp": time.time()
                 }
-        except:
-            pass
+        except Exception as e:
+            print(f"获取生理数据失败: {e}")
         return None
 
     def apply_gate(self, emotion_data):
@@ -226,6 +538,7 @@ class EmotionProcessor:
             }
 
 processor = EmotionProcessor()
+person_analyzer = PersonAnalyzer()
 
 child_processes = []
 
@@ -241,14 +554,14 @@ def start_child_processes():
     else:
         print(f"警告: AU 情绪模块未找到: {au_emotion_script}")
     
-    com_script = os.path.join(script_dir, "com.py")
-    if os.path.exists(com_script):
-        print(f"启动 COM 生理模块: {com_script}")
-        com_proc = subprocess.Popen([sys.executable, com_script], 
-                                  cwd=script_dir)
-        child_processes.append(com_proc)
+    hlkk_script = os.path.join(script_dir, "hlkk.py")
+    if os.path.exists(hlkk_script):
+        print(f"启动 HLKK 生理模块: {hlkk_script}")
+        hlkk_proc = subprocess.Popen([sys.executable, hlkk_script], 
+                                    cwd=script_dir)
+        child_processes.append(hlkk_proc)
     else:
-        print(f"警告: COM 生理模块未找到: {com_script}")
+        print(f"警告: HLKK 生理模块未找到: {hlkk_script}")
 
 def cleanup():
     print("正在停止子进程...")
@@ -283,12 +596,24 @@ def api_gate():
     processor.gate_enabled = enabled
     return jsonify({"ok": True, "gate_enabled": enabled})
 
+@app.route("/person")
+def person_index():
+    return render_template("person.html")
+
+@app.route("/api/data")
+def api_data():
+    return jsonify(person_analyzer.get_result())
+
+@app.route("/video_feed")
+def video_feed():
+    return Response(person_analyzer.generate_frame(),
+                    mimetype='multipart/x-mixed-replace; boundary=frame')
+
 if __name__ == "__main__":
     start_child_processes()
-    time.sleep(2)  # 等待子进程启动
+    time.sleep(3)
+    person_analyzer.start()
     threading.Thread(target=update_loop, daemon=True).start()
-    print("\n================================================")
     print("Perception 服务已启动!")
-    print("访问: http://127.0.0.1:6002")
-    print("================================================")
-    app.run(host="127.0.0.1", port=6002, debug=False, use_reloader=False)
+    print("访问: http://127.0.0.1:5090")
+    app.run(host="127.0.0.1", port=5090, debug=False, use_reloader=False)
