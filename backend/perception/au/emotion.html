@@ -9,9 +9,15 @@
         body { background: var(--bg); color: var(--text); display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
         
         /* Header */
-        .header { padding: 12px 24px; background: #161b22; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+        .header { padding: 12px 24px; background: #161b22; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; gap: 20px; }
         .header h1 { font-size: 1.2rem; font-weight: 600; letter-spacing: 0.5px; }
         .header-sub { font-size: 0.85rem; color: var(--muted); }
+        
+        /* Camera switch buttons */
+        .camera-switch { display: flex; gap: 6px; }
+        .camera-btn { padding: 6px 14px; border: 1px solid var(--border); border-radius: 4px; background: transparent; color: var(--muted); font-size: 0.8rem; cursor: pointer; transition: all 0.15s; }
+        .camera-btn:hover { border-color: var(--accent); color: var(--text); }
+        .camera-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
         
         /* Main container */
         .main-container { display: flex; flex: 1; overflow: hidden; gap: 12px; padding: 12px; min-width: 0; }
@@ -179,6 +185,10 @@
 <div class="header">
     <h1>双通道情绪融合系统</h1>
     <div class="header-sub">AU (Z-Score) + FER+ (Deep Learning)</div>
+    <div class="camera-switch">
+        <button class="camera-btn" id="btn-ip-cam" onclick="switchCamera('ip')">IP摄像头</button>
+        <button class="camera-btn active" id="btn-local-cam" onclick="switchCamera('local')">本地摄像头</button>
+    </div>
 </div>
 
 <div class="main-container">
@@ -351,6 +361,26 @@
 const EMOTIONS = ['neutral', 'positive', 'negative'];
 const COLORS = { neutral:'#8b949e', positive:'#238636', negative:'#58a6ff', no_face:'#f85149', uncalibrated:'#d29922', out_of_range:'#e3722b', speaking:'#00c8ff' };
 const EMO_CN = { neutral:'中性', positive:'积极', negative:'消极', no_face:'无人脸', uncalibrated:'未校准', out_of_range:'超出角度', speaking:'说话中' };
+
+function switchCamera(cameraType) {
+    document.getElementById('btn-ip-cam').classList.toggle('active', cameraType === 'ip');
+    document.getElementById('btn-local-cam').classList.toggle('active', cameraType === 'local');
+    
+    fetch('/api/switch_camera', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ camera: cameraType })
+    })
+    .then(response => response.json())
+    .then(data => {
+        console.log('摄像头切换:', data);
+        const img = document.querySelector('.video-wrapper img');
+        img.src = '/video_feed?t=' + Date.now();
+    })
+    .catch(error => {
+        console.error('切换摄像头失败:', error);
+    });
+}
 const POSES = ['front','up','down','side_left','side_right'];
 const POSE_CN = { front:'平视', up:'抬头', down:'低头', side_left:'左侧脸', side_right:'右侧脸' };
 

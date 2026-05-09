@@ -646,11 +646,19 @@ class FERSmoother:
 # ── 核心引擎 ──────────────────────────────────────────
 class EmotionEngine:
     def __init__(self):
-        self.cap = cv2.VideoCapture("http://10.158.7.180:8080/video")
+        self.camera_url = "http://192.168.137.25:8080/video"
+        self.cap = cv2.VideoCapture(self.camera_url)
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         self.cap.set(cv2.CAP_PROP_FPS, 30)
+        
+        # 重连机制相关
+        self.reconnect_count = 0
+        self.max_retry_count = 300  # 连续失败300次后尝试重连（约3秒）
+        self.last_reconnect_time = 0
+        self.reconnect_delay = 5.0  # 重连间隔至少5秒
+        self.camera_status = "connecting"  # connecting / connected / disconnected
         
         # AU 组件
         self.det = FaceDetector()
@@ -718,16 +726,59 @@ class EmotionEngine:
         
         return final_eng
 
+    def _reconnect(self):
+        """尝试重新连接摄像头"""
+        now = time.time()
+        if now - self.last_reconnect_time < self.reconnect_delay:
+            return False
+        
+        print(f"[EmotionEngine] 尝试重新连接摄像头...")
+        self.last_reconnect_time = now
+        
+        # 释放旧连接
+        if self.cap is not None:
+            self.cap.release()
+        
+        # 创建新连接
+        self.cap = cv2.VideoCapture(self.camera_url)
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        self.cap.set(cv2.CAP_PROP_FPS, 30)
+        
+        if self.cap.isOpened():
+            print(f"[EmotionEngine] 摄像头重连成功！")
+            self.camera_status = "connected"
+            self.reconnect_count = 0
+            return True
+        else:
+            print(f"[EmotionEngine] 摄像头重连失败，稍后重试...")
+            self.camera_status = "disconnected"
+            return False
+
     def grab_loop(self):
-        if not self.cap.isOpened(): return
+        if not self.cap.isOpened():
+            self.camera_status = "disconnected"
+        
         self.running = True
         
         while self.running:
             try:
                 ret, frame = self.cap.read()
                 if not ret:
+                    self.reconnect_count += 1
+                    self.camera_status = "disconnected"
+                    
+                    # 连续失败超过阈值时尝试重连
+                    if self.reconnect_count >= self.max_retry_count:
+                        self._reconnect()
+                    
                     time.sleep(0.01)
                     continue
+                
+                # 读取成功，重置计数和状态
+                self.reconnect_count = 0
+                self.camera_status = "connected"
                 
                 # 直接保存原始帧，不做任何绘制
                 self.raw_frame = frame
@@ -992,6 +1043,36 @@ class EmotionEngine:
         self.cap.release(); 
         self.det.release()
 
+    def switch_camera(self, camera_type):
+        """切换摄像头类型"""
+        print(f"[EmotionEngine] 切换摄像头: {camera_type}")
+        
+        if camera_type == 'local':
+            new_url = 0
+        else:
+            new_url = "http://192.168.137.25:8080/video"
+        
+        # 释放旧连接
+        if self.cap is not None:
+            self.cap.release()
+        
+        # 创建新连接
+        self.camera_url = new_url
+        self.cap = cv2.VideoCapture(new_url)
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        self.cap.set(cv2.CAP_PROP_FPS, 30)
+        
+        if self.cap.isOpened():
+            self.camera_status = "connected"
+            print(f"[EmotionEngine] 摄像头切换成功: {camera_type}")
+        else:
+            self.camera_status = "disconnected"
+            print(f"[EmotionEngine] 摄像头切换失败: {camera_type}")
+        
+        return self.cap.isOpened()
+
 # ── Flask ────────────────────────────────────────────
 app = Flask(__name__)
 engine = EmotionEngine()
@@ -1071,6 +1152,13 @@ def api_config():
     if request.method == "POST":
         engine.update_config(request.get_json() or {}); return jsonify({"ok": True})
     return jsonify(engine.mapper.config)
+
+@app.route("/api/switch_camera", methods=["POST"])
+def api_switch_camera():
+    data = request.get_json() or {}
+    camera_type = data.get("camera", "ip")
+    success = engine.switch_camera(camera_type)
+    return jsonify({"status": "success" if success else "failed", "camera": camera_type})
 
 @app.route("/api/calibrate/delete", methods=["POST"])
 def calib_delete():
