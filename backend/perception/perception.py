@@ -15,11 +15,40 @@ import requests
 import subprocess
 import atexit
 import sys
+from collections import deque, Counter
 from flask import Flask, render_template, jsonify, request, Response
+
+# 关键！先导入关键第三方库，然后临时移除当前目录，导入sixdrepnet！
+try:
+    import mediapipe as mp
+    from deepface import DeepFace
+    
+    # 保存当前sys.path
+    original_sys_path = sys.path.copy()
+    # 移除当前目录，防止sixdrepnet导入错误的utils.py
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    sys.path = [p for p in sys.path if p != current_dir and p != '']
+    
+    try:
+        from sixdrepnet import SixDRepNet
+    except Exception:
+        SixDRepNet = None
+    finally:
+        # 恢复原始sys.path
+        sys.path = original_sys_path
+    
+    # 关键！设置DeepFace去正确的父目录，因为它会自动加一层.deepface！
+    os.environ['DEEPFACE_HOME'] = "C:\\Users\\purriste"
+except Exception as e:
+    print(f"警告: 无法导入人脸分析相关库: {e}")
+    mp = None
+    DeepFace = None
+    SixDRepNet = None
 
 app = Flask(__name__)
 
 AU_EMOTION_API = "http://127.0.0.1:5010/api/fusion"
+AU_STATUS_API = "http://127.0.0.1:5010/api/status"
 HLKK_DATA_API = "http://127.0.0.1:5020/data"
 
 PERSON_HTTP_PORT = 5030
@@ -28,11 +57,158 @@ IP_CAMERA_URL = "http://10.158.7.180:8080/video"
 MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "core", "models")
 AGE_MODEL_PATH = os.path.join(MODEL_DIR, "age_googlenet.onnx")
 GENDER_MODEL_PATH = os.path.join(MODEL_DIR, "gender_googlenet.onnx")
+FACE_DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'face_database')
 
-AGE_RANGES = ['0-2', '4-6', '8-12', '15-20', '25-32', '38-43', '48-53', '60-100']
+os.makedirs(FACE_DB_DIR, exist_ok=True)
 
-CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "au", "config.json")
-DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "emodata")
+AGE_RANGES = ['0-20', '20-40', '40-60', '60-80', '80-100']
+RECOGNITION_THRESHOLD = 0.3  # 人脸匹配阈值
+
+# ── 人脸识别组件 ──
+class FaceDatabase:
+    """人脸数据库管理类"""
+    
+    def __init__(self, db_dir):
+        self.db_dir = db_dir
+        self.db_file = os.path.join(db_dir, "face_db.json")
+        self.face_embeddings_dir = os.path.join(db_dir, "embeddings")
+        os.makedirs(self.face_embeddings_dir, exist_ok=True)
+        self.db = self._load_db()
+    
+    def _load_db(self):
+        if os.path.exists(self.db_file):
+            try:
+                with open(self.db_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return {"users": [], "next_id": 1}
+    
+    def _save_db(self):
+        with open(self.db_file, 'w', encoding='utf-8') as f:
+            json.dump(self.db, f, ensure_ascii=False, indent=2)
+    
+    def _generate_user_id(self):
+        user_id = self.db["next_id"]
+        self.db["next_id"] += 1
+        return user_id
+    
+    def get_all_embeddings(self):
+        all_embeddings = []
+        all_user_ids = []
+        for user in self.db["users"]:
+            user_id = user["id"]
+            emb_file = os.path.join(self.face_embeddings_dir, f"{user_id}_embedding.npy")
+            if os.path.exists(emb_file):
+                embedding = np.load(emb_file)
+                all_embeddings.append(embedding)
+                all_user_ids.append(user_id)
+        return np.array(all_embeddings), all_user_ids
+    
+    def add_new_user(self, embedding):
+        user_id = self._generate_user_id()
+        user_name = f"用户{user_id:04d}"
+        user = {
+            "id": user_id,
+            "name": user_name,
+            "created_at": time.time()
+        }
+        self.db["users"].append(user)
+        self._save_db()
+        
+        emb_file = os.path.join(self.face_embeddings_dir, f"{user_id}_embedding.npy")
+        np.save(emb_file, embedding)
+        
+        return user
+    
+    def find_user(self, user_id):
+        for user in self.db["users"]:
+            if user["id"] == user_id:
+                return user
+        return None
+
+
+class FaceRecognizer:
+    """人脸识别类"""
+    
+    def __init__(self, db_dir):
+        self.db = FaceDatabase(db_dir)
+        self.face_buffer = []
+        self.buffer_size = 8
+    
+    def get_embedding(self, frame):
+        if DeepFace is None:
+            return None
+        try:
+            result = DeepFace.represent(
+                frame,
+                model_name="VGG-Face",
+                enforce_detection=False,
+                detector_backend="opencv"
+            )
+            if isinstance(result, list) and len(result) > 0:
+                embedding = result[0]["embedding"]
+                return np.array(embedding)
+        except Exception:
+            pass
+        return None
+    
+    def cosine_similarity(self, emb1, emb2):
+        dot = np.dot(emb1, emb2)
+        norm1 = np.linalg.norm(emb1)
+        norm2 = np.linalg.norm(emb2)
+        return dot / (norm1 * norm2) if norm1 > 0 and norm2 > 0 else 0
+    
+    def recognize(self, frame):
+        embedding = self.get_embedding(frame)
+        if embedding is None:
+            return None
+        
+        all_embeddings, all_user_ids = self.db.get_all_embeddings()
+        
+        if len(all_embeddings) == 0:
+            user = self.db.add_new_user(embedding)
+            return {
+                "user_id": user["id"],
+                "user_name": user["name"],
+                "confidence": 1.0,
+                "is_new": True
+            }
+        
+        similarities = [self.cosine_similarity(embedding, e) for e in all_embeddings]
+        best_idx = np.argmax(similarities)
+        best_similarity = similarities[best_idx]
+        
+        if best_similarity >= RECOGNITION_THRESHOLD:
+            user_id = all_user_ids[best_idx]
+            user = self.db.find_user(user_id)
+            if user:
+                self.face_buffer.append(user_id)
+                if len(self.face_buffer) > self.buffer_size:
+                    self.face_buffer.pop(0)
+                
+                counter = Counter(self.face_buffer)
+                most_common_id = counter.most_common(1)[0][0]
+                final_user = self.db.find_user(most_common_id)
+                
+                return {
+                    "user_id": final_user["id"],
+                    "user_name": final_user["name"],
+                    "confidence": float(best_similarity),
+                    "is_new": False
+                }
+        else:
+            user = self.db.add_new_user(embedding)
+            self.face_buffer = [user["id"]]
+            return {
+                "user_id": user["id"],
+                "user_name": user["name"],
+                "confidence": 1.0,
+                "is_new": True
+            }
+        
+        return None
+
 
 class PersonAnalyzer:
     def __init__(self):
@@ -45,6 +221,9 @@ class PersonAnalyzer:
         self.load_models()
         
         self.face_detector = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+        
+        # 人脸识别组件
+        self.face_rec = FaceRecognizer(FACE_DB_DIR)
         
         self.lock = threading.Lock()
         self.running = False
@@ -61,7 +240,16 @@ class PersonAnalyzer:
             "face_count": 0,
             "timestamp": time.time(),
             "age_model": {"available": False},
-            "gender_model": {"available": False}
+            "gender_model": {"available": False},
+            "user_id": None,
+            "user_name": "--",
+            "user_confidence": 0.0,
+            "is_new_user": False,
+            "pitch": 0.0,
+            "yaw": 0.0,
+            "roll": 0.0,
+            "pose": "-",
+            "is_front_face": False
         }
         
         self.age_buffer = []
@@ -72,9 +260,11 @@ class PersonAnalyzer:
         self.detection_interval = 0.3
         
         self.max_reconnect_attempts = 10
+        
+        # 帧计数
+        self._fc = 0
     
     def _connect(self):
-        """尝试连接到视频流"""
         if self.cap and self.cap.isOpened():
             self.cap.release()
         
@@ -118,7 +308,70 @@ class PersonAnalyzer:
         
         return face_img
 
-    def analyze_face(self, frame):
+    def fetch_emotion_status(self):
+        """从emotion模块获取人脸和姿态信息"""
+        try:
+            resp = requests.get(AU_STATUS_API, timeout=0.5)
+            if resp.status_code == 200:
+                d = resp.json()
+                return {
+                    "face_detected": d.get('face_detected', False),
+                    "pitch": d.get('pitch', 0),
+                    "yaw": d.get('yaw', 0),
+                    "roll": d.get('roll', 0),
+                    "pose": d.get('pose', '-'),
+                    "is_front_face": abs(d.get('yaw', 0)) < 35 and abs(d.get('pitch', 0)) < 25
+                }
+        except Exception as e:
+            print(f"获取情绪状态失败: {e}")
+        return None
+
+    def _age_to_range(self, age):
+        age = int(age)
+        if age < 20:
+            return '0-20'
+        elif age < 40:
+            return '20-40'
+        elif age < 60:
+            return '40-60'
+        elif age < 80:
+            return '60-80'
+        else:
+            return '80-100'
+
+    def analyze_face_deepface(self, frame):
+        """使用DeepFace分析人脸年龄和性别"""
+        if DeepFace is None:
+            return None
+        try:
+            result = DeepFace.analyze(
+                frame,
+                actions=['age', 'gender'],
+                enforce_detection=False,
+                silent=True
+            )
+            if isinstance(result, list):
+                result = result[0]
+            
+            age = result.get('age', 0)
+            gender = result.get('dominant_gender', '--')
+            gender_conf = result.get('gender', {}).get('Man', 0.5) if isinstance(result.get('gender'), dict) else 0.7
+            
+            return {
+                "age": int(age),
+                "age_range": self._age_to_range(age),
+                "age_confidence": 0.7,
+                "gender": gender,
+                "gender_confidence": gender_conf,
+                "face_count": 1,
+                "age_model": {"available": True},
+                "gender_model": {"available": True}
+            }
+        except Exception:
+            return None
+
+    def analyze_face_onnx(self, frame):
+        """使用ONNX模型分析人脸年龄和性别"""
         small_frame = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
         gray = cv2.cvtColor(small_frame, cv2.COLOR_BGR2GRAY)
         faces = self.face_detector.detectMultiScale(
@@ -209,17 +462,17 @@ class PersonAnalyzer:
             return None
 
     def smooth_result(self, result):
-        if result["age"] is not None:
+        if result["age"] is not None and result["age"] > 0:
             self.age_buffer.append(result["age"])
             if len(self.age_buffer) > self.buffer_size:
                 self.age_buffer.pop(0)
             result["age"] = int(np.mean(self.age_buffer))
         
-        if result["gender"] in ["男", "女"]:
-            self.gender_buffer.append(result["gender"])
+        gender_val = result.get("gender", "")
+        if gender_val in ["Man", "Woman", "男", "女"]:
+            self.gender_buffer.append(gender_val)
             if len(self.gender_buffer) > self.buffer_size:
                 self.gender_buffer.pop(0)
-            from collections import Counter
             counter = Counter(self.gender_buffer)
             result["gender"] = counter.most_common(1)[0][0]
         
@@ -245,7 +498,16 @@ class PersonAnalyzer:
                     "face_count": 0,
                     "timestamp": time.time(),
                     "age_model": {"available": False},
-                    "gender_model": {"available": False}
+                    "gender_model": {"available": False},
+                    "user_id": None,
+                    "user_name": "--",
+                    "user_confidence": 0.0,
+                    "is_new_user": False,
+                    "pitch": 0.0,
+                    "yaw": 0.0,
+                    "roll": 0.0,
+                    "pose": "-",
+                    "is_front_face": False
                 }
             return
         
@@ -263,52 +525,70 @@ class PersonAnalyzer:
                     "face_count": 0,
                     "timestamp": time.time(),
                     "age_model": {"available": False},
-                    "gender_model": {"available": False}
+                    "gender_model": {"available": False},
+                    "user_id": None,
+                    "user_name": "--",
+                    "user_confidence": 0.0,
+                    "is_new_user": False,
+                    "pitch": 0.0,
+                    "yaw": 0.0,
+                    "roll": 0.0,
+                    "pose": "-",
+                    "is_front_face": False
                 }
             return
         
         self._reconnect_attempts = 0
         self.raw_frame = frame
         
-        # 只在需要时编码帧
         try:
             _, encoded = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
             self.last_encoded_frame = encoded
         except:
             pass
         
-        if current_time - self.last_detection_time >= self.detection_interval:
-            self.last_detection_time = current_time
+        self._fc += 1
+        
+        # 获取emotion模块的人脸和姿态信息
+        emotion_status = self.fetch_emotion_status()
+        
+        with self.lock:
+            res = dict(self.result)
             
-            analysis = self.analyze_face(frame)
-            with self.lock:
-                if analysis:
-                    analysis = self.smooth_result(analysis)
-                    self.result = {
-                        "age": analysis["age"],
-                        "age_range": analysis["age_range"],
-                        "age_confidence": analysis["age_confidence"],
-                        "gender": analysis["gender"],
-                        "gender_confidence": analysis["gender_confidence"],
-                        "face_detected": True,
-                        "face_count": analysis["face_count"],
-                        "timestamp": time.time(),
-                        "age_model": analysis["age_model"],
-                        "gender_model": analysis["gender_model"]
-                    }
-                else:
-                    self.result = {
-                        "age": 0,
-                        "age_range": "--",
-                        "age_confidence": 0.0,
-                        "gender": "--",
-                        "gender_confidence": 0.0,
-                        "face_detected": False,
-                        "face_count": 0,
-                        "timestamp": time.time(),
-                        "age_model": {"available": False},
-                        "gender_model": {"available": False}
-                    }
+            if emotion_status:
+                res.update({
+                    "face_detected": emotion_status["face_detected"],
+                    "pitch": round(emotion_status["pitch"], 1),
+                    "yaw": round(emotion_status["yaw"], 1),
+                    "roll": round(emotion_status["roll"], 1),
+                    "pose": emotion_status["pose"],
+                    "is_front_face": emotion_status["is_front_face"],
+                    "timestamp": time.time()
+                })
+                
+                # 只在正脸且有帧时进行年龄性别和人脸识别
+                if emotion_status["is_front_face"] and frame is not None:
+                    # 使用DeepFace进行分析
+                    analysis = self.analyze_face_deepface(frame)
+                    face_recognition = self.face_rec.recognize(frame)
+                    
+                    if analysis:
+                        analysis = self.smooth_result(analysis)
+                        res.update({
+                            "age": analysis["age"],
+                            "age_range": analysis["age_range"],
+                            "age_confidence": analysis["age_confidence"],
+                            "gender": analysis["gender"],
+                            "gender_confidence": analysis["gender_confidence"],
+                            "age_model": analysis["age_model"],
+                            "gender_model": analysis["gender_model"],
+                            "user_id": face_recognition["user_id"] if face_recognition else None,
+                            "user_name": face_recognition["user_name"] if face_recognition else "--",
+                            "user_confidence": face_recognition["confidence"] if face_recognition else 0.0,
+                            "is_new_user": face_recognition["is_new"] if face_recognition else False,
+                        })
+            
+            self.result = res
 
     def get_result(self):
         with self.lock:
@@ -331,6 +611,7 @@ class PersonAnalyzer:
             self.update()
             time.sleep(0.033)
 
+
 class EmotionProcessor:
     def __init__(self):
         self.emotion_data = {
@@ -346,7 +627,19 @@ class EmotionProcessor:
             "heart": 0,
             "breath": 0,
             "human": False,
-            "timestamp": 0
+            "timestamp": 0,
+            "hr_valid": False,
+            "hrr_pct": 0,
+            "hr_slope": 0
+        }
+        self.face_data = {
+            "face_detected": False,
+            "face_count": 0,
+            "pitch": 0.0,
+            "yaw": 0.0,
+            "roll": 0.0,
+            "pose": "-",
+            "is_front_face": False
         }
         self.processed_emotion = {
             "label": "neutral",
@@ -379,17 +672,39 @@ class EmotionProcessor:
             print(f"获取情绪数据失败: {e}")
         return None
 
+    def fetch_face_status(self):
+        try:
+            resp = requests.get(AU_STATUS_API, timeout=0.5)
+            if resp.status_code == 200:
+                d = resp.json()
+                return {
+                    "face_detected": d.get("face_detected", False),
+                    "face_count": d.get("face_count", 0),
+                    "pitch": d.get("pitch", 0.0),
+                    "yaw": d.get("yaw", 0.0),
+                    "roll": d.get("roll", 0.0),
+                    "pose": d.get("pose", "-"),
+                    "is_front_face": abs(d.get("yaw", 0)) < 35 and abs(d.get("pitch", 0)) < 25
+                }
+        except Exception as e:
+            print(f"获取人脸状态失败: {e}")
+        return None
+
     def fetch_physio_data(self):
         try:
             resp = requests.get(HLKK_DATA_API, timeout=0.5)
             if resp.status_code == 200:
                 d = resp.json()
                 raw = d.get("raw", {})
+                physiology = d.get("physiology", {})
                 return {
                     "heart": raw.get("hr", 0),
                     "breath": raw.get("br", 0),
                     "human": raw.get("is_human", 0) == 1,
-                    "timestamp": time.time()
+                    "timestamp": time.time(),
+                    "hr_valid": raw.get("hr_valid", False),
+                    "hrr_pct": physiology.get("hrr_pct", 0),
+                    "hr_slope": physiology.get("hr_slope", 0)
                 }
         except Exception as e:
             print(f"获取生理数据失败: {e}")
@@ -426,7 +741,6 @@ class EmotionProcessor:
         label = self.cn_label_to_en(label_cn)
         value = self.emotion_to_value(label)
         
-        # 基于势场深度计算置信度
         p1 = max(scores.values())
         confidence = min(p1 * conf * 1.5, 1.0)
         
@@ -438,10 +752,6 @@ class EmotionProcessor:
         }
 
     def classify_confidence(self, scores):
-        """
-        基于多稳态势场理论的实时情绪状态分类器。
-        核心思想：分类不取决于单一概率的最大值，而取决于该状态在势场中形成的“势阱深度”是否足以抵抗帧间噪声扰动。
-        """
         p_pos = scores['positive']
         p_neu = scores['neutral']
         p_neg = scores['negative']
@@ -512,6 +822,7 @@ class EmotionProcessor:
     def update(self):
         au_data = self.fetch_au_emotion()
         physio = self.fetch_physio_data()
+        face = self.fetch_face_status()
 
         with self.lock:
             if au_data:
@@ -528,14 +839,19 @@ class EmotionProcessor:
             if physio:
                 self.physio_data = physio
 
+            if face:
+                self.face_data = face
+
     def get_current(self):
         with self.lock:
             return {
                 "emotion": self.emotion_data.copy(),
                 "processed": self.processed_emotion.copy(),
                 "physio": self.physio_data.copy(),
+                "face": self.face_data.copy(),
                 "history": list(self.history)
             }
+
 
 processor = EmotionProcessor()
 person_analyzer = PersonAnalyzer()
@@ -563,6 +879,7 @@ def start_child_processes():
     else:
         print(f"警告: HLKK 生理模块未找到: {hlkk_script}")
 
+
 def cleanup():
     print("正在停止子进程...")
     for proc in child_processes:
@@ -575,20 +892,25 @@ def cleanup():
             proc.kill()
     print("所有子进程已停止")
 
+
 atexit.register(cleanup)
+
 
 def update_loop():
     while True:
         processor.update()
         time.sleep(0.1)
 
+
 @app.route("/")
 def index():
     return render_template("perception.html")
 
+
 @app.route("/api/current")
 def api_current():
     return jsonify(processor.get_current())
+
 
 @app.route("/api/gate", methods=["POST"])
 def api_gate():
@@ -596,18 +918,22 @@ def api_gate():
     processor.gate_enabled = enabled
     return jsonify({"ok": True, "gate_enabled": enabled})
 
+
 @app.route("/person")
 def person_index():
     return render_template("person.html")
+
 
 @app.route("/api/data")
 def api_data():
     return jsonify(person_analyzer.get_result())
 
+
 @app.route("/video_feed")
 def video_feed():
     return Response(person_analyzer.generate_frame(),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
+
 
 if __name__ == "__main__":
     start_child_processes()

@@ -39,7 +39,10 @@ latest_data = {
     "is_human": 0,
     "distance_valid": 0,
     "distance": 0.0,
-    "signal_state": "INIT"
+    "signal_state": "INIT",
+    "hr_valid": False,
+    "br_valid": False,
+    "phase_valid": False
 }
 
 MAX_HISTORY = 600
@@ -64,11 +67,9 @@ current_preprocessor_output = None
 
 # 指标历史趋势
 TREND_LEN = 600
-rsa_trend = []
 plv_trend = []
 brv_trend = []
 hrr_trend = []
-hri_trend = []
 cr_ratio_trend = []
 hr_slope_trend = []
 phase_diff_trend = []
@@ -141,10 +142,8 @@ class PhasePreprocessor:
         instant_br = np.zeros(self.window, dtype=np.float64)
 
         for i in range(self.window):
-            # RSA 调制: 呼吸相位峰值时心率最高，谷值时心率最低
-            # 调制幅度约 ±5 bpm（正常 RSA 范围）
-            rsa_mod = 5.0 * np.sin(hr_uni[i] * 2.0)
-            instant_hr[i] = hr_base + rsa_mod + np.random.normal(0, 0.3)
+            # 心率微小波动
+            instant_hr[i] = hr_base + np.random.normal(0, 0.3)
 
             # 呼吸率微小波动
             br_mod = 1.0 * np.sin(br_uni[i])
@@ -175,30 +174,7 @@ class PhysioEngine:
         self.hr_rest_est = round(62 + (age - 20) * 0.1 + (3 if gender == 'female' else 0), 1)
         self.br_rest_est = round(14 + max(0, (age - 50) * 0.03), 1)
         self.hr_max = round(208 - 0.7 * age, 1)
-        self.rsa_baseline = round(
-            max(3.0, 15.0 - (age - 20) * 0.2 + (2 if gender == 'female' else 0)), 1
-        )
         self.plv_baseline = round(max(0.15, 0.65 - (age - 20) * 0.008), 3)
-
-    def calc_rsa(self, inst_hr, br_phase, return_all=False):
-        """[01] RSA幅度 bpm - 呼吸性窦性心律不齐"""
-        cycles_max = []
-        cycles_min = []
-        for i in range(1, len(br_phase)):
-            diff = br_phase[i] - br_phase[i-1]
-            if diff < -np.pi:
-                start = max(0, i - 5)
-                end = min(len(inst_hr), i + 10)
-                if end > start + 5:
-                    cycle = inst_hr[start:end]
-                    cycles_max.append(float(np.max(cycle)))
-                    cycles_min.append(float(np.min(cycle)))
-        if len(cycles_max) >= 2:
-            amps = [m - n for m, n in zip(cycles_max, cycles_min)]
-            if return_all:
-                return amps
-            return float(np.mean(amps[-5:]))
-        return [] if return_all else 0.0
 
     def calc_plv(self, hr_phase, br_phase):
         """[02] PLV R - 心肺耦合强度"""
@@ -883,7 +859,7 @@ def health():
 @app.route('/data')
 def get_data():
     global current_age, current_gender, engine
-    global rsa_trend, plv_trend, brv_trend, hrr_trend, hri_trend
+    global plv_trend, brv_trend, hrr_trend
     global cr_ratio_trend, hr_slope_trend, phase_diff_trend, br_elevation_trend
     global trend_signal_state_history, trend_hr_valid_history
     global trend_br_valid_history, trend_phase_valid_history
@@ -919,14 +895,12 @@ def get_data():
         },
         "signals": {
             "inst_hr": [], "inst_br": [],
-            "lissajous": [], "phase_diff_circ": [],
-            "rsa_wrapped": []
+            "lissajous": [], "phase_diff_circ": []
         },
         "physiology": {
-            "rsa_amp": None, "rsa_cycles": [],
             "plv_r": None, "mean_phase_diff": None,
             "brv_cv": None, "br_elevation": None,
-            "hr_slope": None, "hri_sd": None,
+            "hr_slope": None,
             "hrr_pct": None, "cr_ratio": None
         },
         "profile": {
@@ -934,7 +908,6 @@ def get_data():
             "hr_rest_est": engine.hr_rest_est,
             "br_rest_est": engine.br_rest_est,
             "hr_max_est": engine.hr_max,
-            "rsa_baseline": engine.rsa_baseline,
             "plv_baseline": engine.plv_baseline
         },
         "trends": {}
@@ -943,7 +916,7 @@ def get_data():
     # === 原子化计算：按依赖关系分层 ===
 
     # 第1层：只依赖HR（hr_valid就计算）
-    if latest_data["hr_valid"]:
+    if latest_data.get("hr_valid", False):
         hrr_val = engine.calc_hrr(hr_now)
         slope_val = engine.calc_hr_slope(clean_hr_history)
         result["physiology"]["hrr_pct"] = round(hrr_val, 1)
@@ -1003,23 +976,11 @@ def get_data():
         result["signals"]["lissajous"] = lissajous_history[-300:]
 
         if latest_data["phase_valid"]:
-            rsa_val = engine.calc_rsa(inst_hr, br_uni)
-            rsa_cycles = engine.calc_rsa(inst_hr, br_uni, return_all=True)
             plv_val = engine.calc_plv(hr_uni, br_uni)
             phase_diff = engine.calc_mean_phase_diff(hr_uni, br_uni)
-            hri_val = engine.calc_hri(inst_hr)
 
-            result["physiology"]["rsa_amp"] = round(rsa_val, 2)
-            result["physiology"]["rsa_cycles"] = (rsa_cycles[-15:] if rsa_cycles else [])
             result["physiology"]["plv_r"] = round(plv_val, 3)
             result["physiology"]["mean_phase_diff"] = round(phase_diff, 3)
-            result["physiology"]["hri_sd"] = round(hri_val, 2)
-
-            rsa_wrapped = []
-            for i in range(len(br_uni)):
-                angle = float((br_uni[i] % (2 * np.pi)) * (180 / np.pi))
-                rsa_wrapped.append([round(angle, 1), round(float(inst_hr[i]), 1)])
-            result["signals"]["rsa_wrapped"] = rsa_wrapped[-200:]
 
             phase_diff_circ = []
             delta_phase = hr_uni - br_uni
@@ -1030,29 +991,19 @@ def get_data():
                 ])
             result["signals"]["phase_diff_circ"] = phase_diff_circ
 
-            rsa_trend.append(round(rsa_val, 2))
             plv_trend.append(round(plv_val, 3))
-            hri_trend.append(round(hri_val, 2))
             phase_diff_trend.append(round(phase_diff, 3))
         else:
-            if rsa_trend:
-                rsa_trend.append(rsa_trend[-1])
-            else:
-                rsa_trend.append(None)
             if plv_trend:
                 plv_trend.append(plv_trend[-1])
             else:
                 plv_trend.append(None)
-            if hri_trend:
-                hri_trend.append(hri_trend[-1])
-            else:
-                hri_trend.append(None)
             if phase_diff_trend:
                 phase_diff_trend.append(phase_diff_trend[-1])
             else:
                 phase_diff_trend.append(None)
 
-    for lst in [rsa_trend, plv_trend, brv_trend, hrr_trend, hri_trend,
+    for lst in [plv_trend, brv_trend, hrr_trend,
                 cr_ratio_trend, hr_slope_trend, phase_diff_trend, br_elevation_trend,
                 trend_signal_state_history, trend_hr_valid_history,
                 trend_br_valid_history, trend_phase_valid_history]:
@@ -1060,19 +1011,16 @@ def get_data():
             lst.pop(0)
 
     result["trends"] = {
-        "rsa": list(rsa_trend)[-300:],
-        "plv": list(plv_trend)[-300:],
-        "brv": list(brv_trend)[-300:],
-        "hrr": list(hrr_trend)[-300:],
-        "hri": list(hri_trend)[-300:],
-        "cr_ratio": list(cr_ratio_trend)[-300:],
-        "hr_slope": list(hr_slope_trend)[-300:],
-        "phase_diff": list(phase_diff_trend)[-300:],
-        "br_elevation": list(br_elevation_trend)[-300:],
-        "signal_state": list(trend_signal_state_history)[-300:],
-        "hr_valid": list(trend_hr_valid_history)[-300:],
-        "br_valid": list(trend_br_valid_history)[-300:],
-        "phase_valid": list(trend_phase_valid_history)[-300:]
+        "plv": list(plv_trend)[-TREND_LEN:],
+        "brv": list(brv_trend)[-TREND_LEN:],
+        "hrr": list(hrr_trend)[-TREND_LEN:],
+        "cr_ratio": list(cr_ratio_trend)[-TREND_LEN:],
+        "hr_slope": list(hr_slope_trend)[-TREND_LEN:],
+        "br_elevation": list(br_elevation_trend)[-TREND_LEN:],
+        "signal_state": list(trend_signal_state_history)[-TREND_LEN:],
+        "hr_valid": list(trend_hr_valid_history)[-TREND_LEN:],
+        "br_valid": list(trend_br_valid_history)[-TREND_LEN:],
+        "phase_valid": list(trend_phase_valid_history)[-TREND_LEN:]
     }
 
     result["rt"] = {

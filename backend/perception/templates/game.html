@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>打地鼠游戏</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; background: #f8fafc; font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; overflow: hidden; }
+
+.container { display: flex; flex-direction: column; width: 100%; height: 100%; padding: 12px; gap: 12px; }
+
+.header { display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; background: #ffffff; border-radius: 10px; border: 1px solid #e2e8f0; }
+.header-item { display: flex; align-items: center; gap: 8px; }
+.header-label { font-size: 13px; color: #64748b; font-weight: 500; }
+.header-value { font-size: 22px; font-weight: 700; color: #1e293b; }
+.header-value.time { color: #dc3545; }
+.header-value.score { color: #22c55e; }
+.header-value.difficulty { color: #3b82f6; }
+.header-value.accuracy { color: #8b5cf6; }
+.header-value.reaction { color: #06b6d4; }
+.mood-indicator { width: 20px; height: 20px; border-radius: 50%; }
+.mood-indicator.flow { background: #22c55e; box-shadow: 0 0 10px #22c55e; }
+.mood-indicator.easy { background: #f59e0b; }
+.mood-indicator.hard { background: #ef4444; }
+
+.main-content { display: flex; flex: 1; gap: 12px; min-height: 0; }
+
+.game-area { flex: 4; background: #ffffff; border-radius: 10px; border: 1px solid #e2e8f0; padding: 16px; display: flex; flex-direction: column; }
+.game-title { font-size: 18px; color: #1e293b; margin-bottom: 8px; text-align: center; font-weight: 600; }
+.game-mood { font-size: 12px; color: #64748b; text-align: center; margin-bottom: 12px; }
+
+.moles-grid { display: grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(2, 1fr); gap: 14px; flex: 1; }
+.mole-hole { background: linear-gradient(180deg, #4b5563 0%, #374151 50%, #1f2937 100%); border-radius: 50%; cursor: pointer; position: relative; overflow: hidden; transition: all 0.15s; box-shadow: inset 0 8px 20px rgba(0,0,0,0.5), 0 4px 8px rgba(0,0,0,0.3); }
+.mole-hole:hover { transform: scale(1.02); box-shadow: inset 0 8px 20px rgba(0,0,0,0.5), 0 6px 12px rgba(0,0,0,0.4); }
+.mole-hole:active { transform: scale(0.98); }
+.mole-hole.hit { background: linear-gradient(180deg, #f87171 0%, #ef4444 100%); }
+.mole-hole.success { background: linear-gradient(180deg, #6ee7b7 0%, #34d399 100%); }
+
+.mole-container { position: absolute; bottom: -70%; left: 50%; transform: translateX(-50%); width: 65%; height: 65%; display: flex; align-items: center; justify-content: center; transition: bottom 0.25s ease; }
+.mole-container.visible { bottom: 10%; }
+
+.mole { font-size: 56px; text-align: center; }
+.mole.bomb-mole { font-size: 48px; }
+
+.bomb-indicator { position: absolute; top: 10%; right: 10%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-size: 18px; animation: bombPulse 1s ease-in-out infinite; }
+.bomb-indicator.hidden { display: none; }
+
+@keyframes bombPulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.2); }
+}
+
+.game-controls { display: flex; gap: 10px; margin-top: 16px; }
+.btn { flex: 1; padding: 12px; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+.btn-start { background: #22c55e; color: #fff; }
+.btn-start:hover { background: #16a34a; }
+.btn-pause { background: #f59e0b; color: #fff; }
+.btn-pause:hover { background: #d97706; }
+.btn-stop { background: #ef4444; color: #fff; }
+.btn-stop:hover { background: #dc2626; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.results-area { flex: 1; background: #ffffff; border-radius: 10px; border: 1px solid #e2e8f0; padding: 12px; display: flex; flex-direction: column; }
+.results-title { font-size: 14px; color: #475569; margin-bottom: 10px; font-weight: 600; }
+.results-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+.results-list::-webkit-scrollbar { width: 4px; }
+.results-list::-webkit-scrollbar-track { background: #f1f5f9; }
+.results-list::-webkit-scrollbar-thumb { background: #cbd5e1; }
+
+.result-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; background: #f8fafc; border-radius: 6px; font-size: 12px; }
+.result-hit { color: #22c55e; font-weight: 600; }
+.result-miss { color: #f59e0b; font-weight: 600; }
+.result-error { color: #ef4444; font-weight: 600; }
+.result-bomb { color: #ef4444; font-weight: 600; }
+.result-time { color: #64748b; }
+.result-diff { color: #3b82f6; }
+.result-score { color: #f59e0b; font-weight: 700; }
+
+.game-over-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 1000; }
+.game-over-card { background: #ffffff; border-radius: 16px; padding: 32px; text-align: center; }
+.game-over-title { font-size: 28px; font-weight: 700; color: #1e293b; margin-bottom: 16px; }
+.game-over-score { font-size: 20px; color: #f59e0b; margin-bottom: 16px; }
+.game-over-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px; padding: 12px; background: #f8fafc; border-radius: 8px; }
+.stat-item { text-align: center; }
+.stat-label { font-size: 11px; color: #64748b; }
+.stat-value { font-size: 16px; font-weight: 700; color: #1e293b; }
+</style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <div class="header-item">
+            <span class="header-label">⏱️ 时间</span>
+            <span class="header-value time" id="time">3:00</span>
+        </div>
+        <div class="header-item">
+            <span class="header-label">🏆 得分</span>
+            <span class="header-value score" id="score">0</span>
+        </div>
+        <div class="header-item">
+            <span class="header-label">⚡ 难度</span>
+            <span class="header-value difficulty" id="difficulty">1</span>
+            <span id="difficulty-name">简单</span>
+        </div>
+        <div class="header-item">
+            <span class="header-label">🎯 准确率</span>
+            <span class="header-value accuracy" id="accuracy">--</span>
+        </div>
+        <div class="header-item">
+            <span class="header-label">🎮 状态</span>
+            <div class="mood-indicator" id="mood-indicator"></div>
+            <span id="mood-text">准备</span>
+        </div>
+    </div>
+    
+    <div class="main-content">
+        <div class="game-area">
+            <div class="game-title">🐹 打地鼠游戏</div>
+            <div class="game-mood" id="flow-message">找到你的心流状态！</div>
+            
+            <div class="moles-grid" id="moles-grid">
+                <div class="mole-hole" data-hole="0">
+                    <div class="mole-container">
+                        <div class="mole">🐹</div>
+                        <div class="bomb-indicator hidden">💣</div>
+                    </div>
+                </div>
+                <div class="mole-hole" data-hole="1">
+                    <div class="mole-container">
+                        <div class="mole">🐹</div>
+                        <div class="bomb-indicator hidden">💣</div>
+                    </div>
+                </div>
+                <div class="mole-hole" data-hole="2">
+                    <div class="mole-container">
+                        <div class="mole">🐹</div>
+                        <div class="bomb-indicator hidden">💣</div>
+                    </div>
+                </div>
+                <div class="mole-hole" data-hole="3">
+                    <div class="mole-container">
+                        <div class="mole">🐹</div>
+                        <div class="bomb-indicator hidden">💣</div>
+                    </div>
+                </div>
+                <div class="mole-hole" data-hole="4">
+                    <div class="mole-container">
+                        <div class="mole">🐹</div>
+                        <div class="bomb-indicator hidden">💣</div>
+                    </div>
+                </div>
+                <div class="mole-hole" data-hole="5">
+                    <div class="mole-container">
+                        <div class="mole">🐹</div>
+                        <div class="bomb-indicator hidden">💣</div>
+                    </div>
+                </div>
+                <div class="mole-hole" data-hole="6">
+                    <div class="mole-container">
+                        <div class="mole">🐹</div>
+                        <div class="bomb-indicator hidden">💣</div>
+                    </div>
+                </div>
+                <div class="mole-hole" data-hole="7">
+                    <div class="mole-container">
+                        <div class="mole">🐹</div>
+                        <div class="bomb-indicator hidden">💣</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="game-controls">
+                <button class="btn btn-start" id="btn-start">开始游戏</button>
+                <button class="btn btn-pause" id="btn-pause" disabled>暂停</button>
+                <button class="btn btn-stop" id="btn-stop" disabled>结束游戏</button>
+            </div>
+        </div>
+        
+        <div class="results-area">
+            <div class="results-title">📊 游戏记录</div>
+            <div class="results-list" id="results-list"></div>
+        </div>
+    </div>
+</div>
+
+<div class="game-over-overlay" id="game-over" style="display: none;">
+    <div class="game-over-card">
+        <div class="game-over-title">游戏结束!</div>
+        <div class="game-over-score">最终得分: <span id="final-score">0</span></div>
+        <div class="game-over-stats">
+            <div class="stat-item">
+                <div class="stat-label">准确率</div>
+                <div class="stat-value" id="final-accuracy">0%</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">反应时间</div>
+                <div class="stat-value" id="final-reaction">0ms</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">最佳难度</div>
+                <div class="stat-value" id="final-difficulty">1</div>
+            </div>
+        </div>
+        <button class="btn btn-start" onclick="resetGame()">再来一局</button>
+    </div>
+</div>
+
+<script>
+const difficultyConfig = [
+    { name: '简单', showTime: 2500, interval: 1800, bombChance: 0, maxMoles: 1 },
+    { name: '普通', showTime: 2100, interval: 1500, bombChance: 0.08, maxMoles: 1 },
+    { name: '困难', showTime: 1800, interval: 1300, bombChance: 0.12, maxMoles: 2 },
+    { name: '专家', showTime: 1500, interval: 1100, bombChance: 0.16, maxMoles: 2 },
+    { name: '大师', showTime: 1300, interval: 950, bombChance: 0.20, maxMoles: 2 },
+    { name: '传奇', showTime: 1100, interval: 800, bombChance: 0.25, maxMoles: 3 },
+    { name: '地狱', showTime: 900, interval: 700, bombChance: 0.30, maxMoles: 3 },
+    { name: '噩梦', showTime: 750, interval: 600, bombChance: 0.35, maxMoles: 3 }
+];
+
+const FLOW_ACCURACY_MIN = 65;
+const FLOW_ACCURACY_MAX = 85;
+
+let gameState = {
+    running: false,
+    paused: false,
+    timeLeft: 180,
+    score: 0,
+    difficulty: 0,
+    targetDifficulty: 0,
+    currentMoles: [],
+    moleShowTimes: {},
+    isBomb: {},
+    hitCount: 0,
+    missCount: 0,
+    errorCount: 0,
+    reactionTimes: [],
+    results: [],
+    recentAccuracies: [],
+    difficultyChanges: 0,
+    timer: null,
+    hideTimers: {}
+};
+
+function updateUI() {
+    const mins = Math.floor(gameState.timeLeft / 60);
+    const secs = gameState.timeLeft % 60;
+    document.getElementById('time').textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+    document.getElementById('score').textContent = gameState.score;
+    document.getElementById('difficulty').textContent = gameState.difficulty + 1;
+    document.getElementById('difficulty-name').textContent = difficultyConfig[gameState.difficulty].name;
+    
+    const total = gameState.hitCount + gameState.missCount;
+    const accuracy = total > 0 ? (gameState.hitCount / total * 100).toFixed(1) : '--';
+    document.getElementById('accuracy').textContent = accuracy + '%';
+    
+    const avgReaction = gameState.reactionTimes.length > 0 
+        ? Math.round(gameState.reactionTimes.reduce((a,b) => a+b, 0) / gameState.reactionTimes.length) 
+        : '--';
+    
+    updateMoodIndicator();
+}
+
+function updateMoodIndicator() {
+    const indicator = document.getElementById('mood-indicator');
+    const text = document.getElementById('mood-text');
+    const flowMsg = document.getElementById('flow-message');
+    
+    const total = gameState.hitCount + gameState.missCount;
+    if (total < 5) {
+        indicator.className = 'mood-indicator';
+        text.textContent = '准备';
+        flowMsg.textContent = '找到你的心流状态！';
+        return;
+    }
+    
+    const accuracy = (gameState.hitCount / total * 100);
+    
+    if (accuracy >= FLOW_ACCURACY_MIN && accuracy <= FLOW_ACCURACY_MAX) {
+        indicator.className = 'mood-indicator flow';
+        text.textContent = '心流';
+        flowMsg.textContent = '✨ 太棒了！保持这个状态！';
+    } else if (accuracy > FLOW_ACCURACY_MAX) {
+        indicator.className = 'mood-indicator easy';
+        text.textContent = '轻松';
+        flowMsg.textContent = '🎯 太简单了，准备提高难度...';
+    } else {
+        indicator.className = 'mood-indicator hard';
+        text.textContent = '挑战';
+        flowMsg.textContent = '💪 有点难，准备降低难度...';
+    }
+}
+
+function showResults() {
+    const list = document.getElementById('results-list');
+    list.innerHTML = '';
+    
+    gameState.results.forEach((r, i) => {
+        const item = document.createElement('div');
+        item.className = 'result-item';
+        let typeClass = 'result-hit';
+        let typeText = '✓ 打中';
+        if (r.type === 'miss') {
+            typeClass = 'result-miss';
+            typeText = '○ 漏打';
+        } else if (r.type === 'error') {
+            typeClass = 'result-error';
+            typeText = '✗ 打错';
+        } else if (r.type === 'bomb') {
+            typeClass = 'result-bomb';
+            typeText = '💣 炸弹';
+        }
+        
+        item.innerHTML = `
+            <span class="${typeClass}">${typeText}</span>
+            <span class="result-time">${r.time === '--' ? '--' : r.time + 'ms'}</span>
+            <span class="result-diff">Lv.${r.difficulty}</span>
+            <span class="result-score">${r.score > 0 ? '+' : ''}${r.score}</span>
+        `;
+        list.appendChild(item);
+    });
+    
+    list.scrollTop = list.scrollHeight;
+}
+
+function adjustDifficulty() {
+    const total = gameState.hitCount + gameState.missCount;
+    if (total < 8) return;
+    
+    const accuracy = (gameState.hitCount / total * 100);
+    
+    gameState.recentAccuracies.push(accuracy);
+    if (gameState.recentAccuracies.length > 5) {
+        gameState.recentAccuracies.shift();
+    }
+    
+    const avgRecentAccuracy = gameState.recentAccuracies.reduce((a, b) => a + b, 0) / gameState.recentAccuracies.length;
+    
+    if (avgRecentAccuracy > FLOW_ACCURACY_MAX + 5 && gameState.difficulty < 7) {
+        gameState.difficulty++;
+        gameState.difficultyChanges++;
+        gameState.recentAccuracies = [];
+    } else if (avgRecentAccuracy < FLOW_ACCURACY_MIN - 5 && gameState.difficulty > 0) {
+        gameState.difficulty--;
+        gameState.difficultyChanges++;
+        gameState.recentAccuracies = [];
+    }
+}
+
+function showMoles() {
+    if (!gameState.running || gameState.paused) return;
+    
+    const config = difficultyConfig[gameState.difficulty];
+    const holes = document.querySelectorAll('.mole-hole');
+    
+    holes.forEach((hole, i) => {
+        const moleContainer = hole.querySelector('.mole-container');
+        const mole = hole.querySelector('.mole');
+        const bombIndicator = hole.querySelector('.bomb-indicator');
+        
+        moleContainer.classList.remove('visible');
+        mole.classList.remove('bomb-mole');
+        bombIndicator.classList.add('hidden');
+        
+        clearTimeout(gameState.hideTimers[i]);
+    });
+    
+    gameState.currentMoles = [];
+    gameState.moleShowTimes = {};
+    gameState.isBomb = {};
+    
+    const availableHoles = [0, 1, 2, 3, 4, 5, 6, 7];
+    const selectedHoles = [];
+    
+    const idx = Math.floor(Math.random() * availableHoles.length);
+    selectedHoles.push(availableHoles[idx]);
+    availableHoles.splice(idx, 1);
+    
+    const bombCount = Math.random() < config.bombChance ? (Math.random() < 0.5 ? 1 : 2) : 0;
+    for (let i = 0; i < bombCount && availableHoles.length > 0; i++) {
+        const bombIdx = Math.floor(Math.random() * availableHoles.length);
+        selectedHoles.push(availableHoles[bombIdx]);
+        availableHoles.splice(bombIdx, 1);
+    }
+    
+    selectedHoles.forEach((holeIndex, i) => {
+        const hole = holes[holeIndex];
+        const moleContainer = hole.querySelector('.mole-container');
+        const mole = hole.querySelector('.mole');
+        const bombIndicator = hole.querySelector('.bomb-indicator');
+        
+        const isBomb = i > 0;
+        
+        moleContainer.classList.add('visible');
+        gameState.currentMoles.push(holeIndex);
+        gameState.moleShowTimes[holeIndex] = Date.now();
+        gameState.isBomb[holeIndex] = isBomb;
+        
+        if (isBomb) {
+            mole.textContent = '💣';
+            bombIndicator.classList.remove('hidden');
+        } else {
+            mole.textContent = '🐹';
+        }
+        
+        gameState.hideTimers[holeIndex] = setTimeout(() => {
+            if (gameState.running && !gameState.paused && gameState.currentMoles.includes(holeIndex)) {
+                moleContainer.classList.remove('visible');
+                
+                if (!gameState.isBomb[holeIndex]) {
+                    gameState.missCount++;
+                    gameState.score -= 5;
+                    gameState.results.push({
+                        type: 'miss',
+                        time: '--',
+                        difficulty: gameState.difficulty + 1,
+                        score: -5
+                    });
+                }
+                
+                const idx = gameState.currentMoles.indexOf(holeIndex);
+                if (idx > -1) gameState.currentMoles.splice(idx, 1);
+                
+                showResults();
+                adjustDifficulty();
+                updateUI();
+                
+                if (gameState.currentMoles.length === 0) {
+                    setTimeout(showMoles, config.interval);
+                }
+            }
+        }, config.showTime);
+    });
+}
+
+function handleHit(event) {
+    if (!gameState.running || gameState.paused) return;
+    
+    const hole = event.currentTarget;
+    const holeIndex = parseInt(hole.dataset.hole);
+    
+    if (!gameState.currentMoles.includes(holeIndex)) {
+        gameState.errorCount++;
+        gameState.score -= 5;
+        gameState.results.push({
+            type: 'error',
+            time: '--',
+            difficulty: gameState.difficulty + 1,
+            score: -5
+        });
+        hole.classList.add('hit');
+        setTimeout(() => hole.classList.remove('hit'), 200);
+        showResults();
+        return;
+    }
+    
+    const reactionTime = Date.now() - gameState.moleShowTimes[holeIndex];
+    
+    if (gameState.isBomb[holeIndex]) {
+        gameState.score -= 10;
+        gameState.results.push({
+            type: 'bomb',
+            time: reactionTime,
+            difficulty: gameState.difficulty + 1,
+            score: -10
+        });
+    } else {
+        gameState.hitCount++;
+        gameState.score += 5;
+        gameState.reactionTimes.push(reactionTime);
+        gameState.results.push({
+            type: 'hit',
+            time: reactionTime,
+            difficulty: gameState.difficulty + 1,
+            score: +5
+        });
+    }
+    
+    const moleContainer = hole.querySelector('.mole-container');
+    moleContainer.classList.remove('visible');
+    hole.classList.add('success');
+    setTimeout(() => hole.classList.remove('success'), 200);
+    
+    clearTimeout(gameState.hideTimers[holeIndex]);
+    const idx = gameState.currentMoles.indexOf(holeIndex);
+    if (idx > -1) gameState.currentMoles.splice(idx, 1);
+    
+    adjustDifficulty();
+    showResults();
+    updateUI();
+    
+    const config = difficultyConfig[gameState.difficulty];
+    if (gameState.currentMoles.length === 0) {
+        setTimeout(showMoles, config.interval);
+    }
+}
+
+function startGame() {
+    gameState = {
+        running: true,
+        paused: false,
+        timeLeft: 180,
+        score: 0,
+        difficulty: 0,
+        targetDifficulty: 0,
+        currentMoles: [],
+        moleShowTimes: {},
+        isBomb: {},
+        hitCount: 0,
+        missCount: 0,
+        errorCount: 0,
+        reactionTimes: [],
+        results: [],
+        recentAccuracies: [],
+        difficultyChanges: 0,
+        timer: null,
+        hideTimers: {}
+    };
+    
+    document.getElementById('btn-start').disabled = true;
+    document.getElementById('btn-pause').disabled = false;
+    document.getElementById('btn-stop').disabled = false;
+    document.getElementById('btn-pause').textContent = '暂停';
+    document.getElementById('game-over').style.display = 'none';
+    
+    updateUI();
+    showResults();
+    
+    gameState.timer = setInterval(() => {
+        if (!gameState.paused) {
+            gameState.timeLeft--;
+            updateUI();
+            
+            if (gameState.timeLeft <= 0) {
+                endGame();
+            }
+        }
+    }, 1000);
+    
+    showMoles();
+}
+
+function togglePause() {
+    gameState.paused = !gameState.paused;
+    
+    if (gameState.paused) {
+        document.getElementById('btn-pause').textContent = '继续';
+        const holes = document.querySelectorAll('.mole-hole');
+        holes.forEach(hole => {
+            const moleContainer = hole.querySelector('.mole-container');
+            moleContainer.classList.remove('visible');
+        });
+        Object.values(gameState.hideTimers).forEach(clearTimeout);
+    } else {
+        document.getElementById('btn-pause').textContent = '暂停';
+        showMoles();
+    }
+}
+
+function endGame() {
+    gameState.running = false;
+    clearInterval(gameState.timer);
+    Object.values(gameState.hideTimers).forEach(clearTimeout);
+    
+    document.getElementById('btn-start').disabled = false;
+    document.getElementById('btn-pause').disabled = true;
+    document.getElementById('btn-stop').disabled = true;
+    
+    const holes = document.querySelectorAll('.mole-hole');
+    holes.forEach(hole => {
+        const moleContainer = hole.querySelector('.mole-container');
+        moleContainer.classList.remove('visible');
+    });
+    
+    document.getElementById('final-score').textContent = gameState.score;
+    const total = gameState.hitCount + gameState.missCount;
+    const accuracy = total > 0 ? (gameState.hitCount / total * 100).toFixed(1) : '0';
+    document.getElementById('final-accuracy').textContent = accuracy + '%';
+    const avgReaction = gameState.reactionTimes.length > 0 
+        ? Math.round(gameState.reactionTimes.reduce((a,b) => a+b, 0) / gameState.reactionTimes.length) 
+        : '0';
+    document.getElementById('final-reaction').textContent = avgReaction + 'ms';
+    document.getElementById('final-difficulty').textContent = `${gameState.difficulty + 1} (${difficultyConfig[gameState.difficulty].name})`;
+    
+    document.getElementById('game-over').style.display = 'flex';
+}
+
+function resetGame() {
+    gameState = {
+        running: false,
+        paused: false,
+        timeLeft: 180,
+        score: 0,
+        difficulty: 0,
+        targetDifficulty: 0,
+        currentMoles: [],
+        moleShowTimes: {},
+        isBomb: {},
+        hitCount: 0,
+        missCount: 0,
+        errorCount: 0,
+        reactionTimes: [],
+        results: [],
+        recentAccuracies: [],
+        difficultyChanges: 0,
+        timer: null,
+        hideTimers: {}
+    };
+    
+    document.getElementById('btn-start').disabled = false;
+    document.getElementById('btn-pause').disabled = true;
+    document.getElementById('btn-stop').disabled = true;
+    document.getElementById('btn-pause').textContent = '暂停';
+    document.getElementById('game-over').style.display = 'none';
+    
+    updateUI();
+    showResults();
+    
+    const holes = document.querySelectorAll('.mole-hole');
+    holes.forEach(hole => {
+        const moleContainer = hole.querySelector('.mole-container');
+        moleContainer.classList.remove('visible');
+    });
+}
+
+document.getElementById('btn-start').addEventListener('click', startGame);
+document.getElementById('btn-pause').addEventListener('click', togglePause);
+document.getElementById('btn-stop').addEventListener('click', endGame);
+
+document.querySelectorAll('.mole-hole').forEach(hole => {
+    hole.addEventListener('click', handleHit);
+});
+
+updateUI();
+</script>
+</body>
+</html>

@@ -129,11 +129,11 @@ select.gender-select { background: #050a12; border: 1px solid #13203a; border-ra
                 </div>
                 <div class="chart-container">
                     <div class="chart-title">相位锁定值 <span style="font-size: 8px; color: #4a6a8a;">(PLV)</span> <span id="plv-value" style="font-size: 14px; font-weight: 700; color: #a855f7;">--</span> <span id="plv-level" style="font-size: 10px; padding: 1px 4px; border-radius: 3px; background: #1e3a5f; color: #64ffda;">--</span></div>
-                    <div class="chart-body" id="rsa-plv-chart"></div>
+                    <div class="chart-body" id="plv-chart"></div>
                 </div>
                 <div class="chart-container">
                     <div class="chart-title">呼吸急促度 <span style="font-size: 8px; color: #4a6a8a;">(BR Elevation)</span> <span id="br-elev-value" style="font-size: 14px; font-weight: 700; color: #14b8a6;">--%</span> <span id="br-elev-level" style="font-size: 10px; padding: 1px 4px; border-radius: 3px; background: #1e3a5f; color: #64ffda;">--</span></div>
-                    <div class="chart-body" id="brv-hri-chart"></div>
+                    <div class="chart-body" id="br-elevation-chart"></div>
                 </div>
             </div>
             <div style="display: flex; flex-direction: column; gap: 6px; flex: 1.5;">
@@ -174,9 +174,9 @@ charts.hrr = echarts.init(document.getElementById('hrr-chart'), null, {renderer:
 charts.brv = echarts.init(document.getElementById('brv-chart'), null, {renderer: 'canvas'});
 charts.cr = echarts.init(document.getElementById('cr-chart'), null, {renderer: 'canvas'});
 charts.slope = echarts.init(document.getElementById('slope-chart'), null, {renderer: 'canvas'});
-charts.rsaPlv = echarts.init(document.getElementById('rsa-plv-chart'), null, {renderer: 'canvas'});
+charts.plv = echarts.init(document.getElementById('plv-chart'), null, {renderer: 'canvas'});
 charts.composite = echarts.init(document.getElementById('composite-chart'), null, {renderer: 'canvas'});
-charts.brvHri = echarts.init(document.getElementById('brv-hri-chart'), null, {renderer: 'canvas'});
+charts.brElevation = echarts.init(document.getElementById('br-elevation-chart'), null, {renderer: 'canvas'});
 charts.lissajous = echarts.init(document.getElementById('lissajous-chart'), null, {renderer: 'canvas'});
 
 window.addEventListener('resize', () => { Object.values(charts).forEach(c => c && c.resize()); });
@@ -200,9 +200,9 @@ function update(data) {
     const raw = data.raw || { hr: 72, br: 16, signal_state: 'INIT', is_human: 0, distance_valid: 0, distance: 0 };
     const rt = data.rt || { heart_rate: [], breath_rate: [], heart_phase: [], breath_phase: [] };
     const s = data.signals || { inst_hr: [], inst_br: [], lissajous: [], phase_diff_circ: [] };
-    const t = data.trends || { rsa: [], plv: [], hrr: [], cr_ratio: [], brv: [], hri: [], br_elevation: [] };
+    const t = data.trends || { plv: [], hrr: [], cr_ratio: [], brv: [], br_elevation: [] };
     const pf = data.profile || { hr_rest_est: 62, hr_max_est: 166, br_rest_est: 14 };
-    const h = data.physiology || { rsa_amp: 0, plv_r: 0, hrr_pct: 0, cr_ratio: 0, brv_cv: 0, hri_sd: 0, br_elevation: 0, hr_slope: 0, mean_phase_diff: 0 };
+    const h = data.physiology || { plv_r: 0, hrr_pct: 0, cr_ratio: 0, brv_cv: 0, br_elevation: 0, hr_slope: 0, mean_phase_diff: 0 };
 
     const signalState = raw.signal_state || 'INIT';
     const hrV = raw.hr_valid || false;
@@ -677,7 +677,7 @@ function update(data) {
             itemStyle: { color: pointColor }
         };
     });
-    charts.rsaPlv.setOption({
+    charts.plv.setOption({
         ...NA, grid: { top: 4, right: 8, bottom: 10, left: 28 },
         xAxis: { type: 'category', data: plvData.map((_,i) => i), ...AX, axisLabel: { show: false } },
         yAxis: { type: 'value', min: Math.max(0, plvMin - plvPad), max: Math.min(1, plvMax + plvPad), ...AX },
@@ -703,7 +703,7 @@ function update(data) {
     const brElevMin = brElevData.length ? Math.min(...brElevData) : -30;
     const brElevMax = brElevData.length ? Math.max(...brElevData) : 30;
     const brElevPad = Math.max((brElevMax - brElevMin) * 0.2, 5);
-    charts.brvHri.setOption({
+    charts.brElevation.setOption({
         ...NA, grid: { top: 4, right: 8, bottom: 10, left: 32 },
         xAxis: { type: 'category', data: brElevData.map((_,i) => i), ...AX, axisLabel: { show: false } },
         yAxis: { type: 'value', min: brElevMin - brElevPad, max: brElevMax + brElevPad, ...AX },

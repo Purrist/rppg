@@ -8,456 +8,398 @@
 <style>
 *{margin:0;padding:0;box-sizing:border-box;font-family:'Segoe UI',system-ui,sans-serif}
 html,body{width:100%;height:100%;background:#0c1018;color:#c8cee0;overflow:hidden}
-.wrapper{display:grid;grid-template-rows:auto 1fr 1fr;height:100vh;gap:10px;padding:14px 16px}
-.header{display:flex;align-items:center;justify-content:space-between}
-.cards{display:grid;grid-template-columns:repeat(8,1fr);gap:10px}
-.card{background:linear-gradient(135deg,#151c2c,#1a2236);border-radius:10px;padding:14px 18px;position:relative;overflow:hidden;border:1px solid #232e44}
-.card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:3px 0 0 3px}
-.card.positive::before{background:#34A853}.card.negative::before{background:#EA4335}
-.card.neutral::before{background:#6b7a94}.card.physio::before{background:#4285F4}
-.card.high-eng::before{background:#34A853}.card.low-eng::before{background:#FBBC05}.card.no-eng::before{background:#6b7a94}
-.card.person::before{background:#a855f7}
-.card .label{font-size:12px;color:#6b7a94;margin-bottom:6px;letter-spacing:.5px}
-.card .val{font-size:24px;font-weight:700;line-height:1.1}
-.card .sub{font-size:11px;color:#4a5570;margin-top:4px}
-.gate-toggle{display:flex;align-items:center;gap:8px;font-size:13px;color:#6b7a94}
-.gate-toggle input{width:18px;height:18px;cursor:pointer}
-.charts-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;min-height:0}
-.chart-panel{background:#111827;border-radius:10px;border:1px solid #1e2a3e;display:flex;flex-direction:column;overflow:hidden}
-.chart-header{display:flex;align-items:center;justify-content:space-between;padding:8px 14px;border-bottom:1px solid #1a2438;flex-shrink:0}
-.chart-title{font-size:12px;color:#6b7a94;font-weight:600;letter-spacing:.3px}
-.chart-body{flex:1;position:relative;min-height:0;padding:4px 8px 8px}
-.chart-body canvas{width:100%!important;height:100%!important}
-.video-panel{background:#111827;border-radius:10px;border:1px solid #1e2a3e;display:flex;flex-direction:column;overflow:hidden}
-.video-body{flex:1;display:flex;align-items:center;justify-content:center;background:#050a12;overflow:hidden}
-.video-body img{max-width:100%;max-height:100%;object-fit:contain}
-.status-bar{display:flex;align-items:center;gap:20px;padding:8px 14px;background:#151c2c;border-radius:8px;border:1px solid #232e44;font-size:12px;color:#6b7a94}
-.status-dot{width:8px;height:8px;border-radius:50%;display:inline-block}
-.status-dot.on{background:#34A853;box-shadow:0 0 6px rgba(52,168,83,.6)}
+.main-container{display:flex;height:100vh;padding:12px;gap:12px}
+.left-panel{flex:0 0 70%;display:flex;flex-direction:column;gap:12px}
+.right-panel{flex:1;display:flex;flex-direction:column;gap:12px}
+.panel-card{background:linear-gradient(135deg,#151c2c,#1a2236);border-radius:12px;border:1px solid #232e44;overflow:hidden;display:flex;flex-direction:column}
+.panel-header{padding:10px 16px;background:rgba(0,0,0,0.2);border-bottom:1px solid #232e44;display:flex;align-items:center;justify-content:space-between}
+.panel-title{font-size:13px;font-weight:600;color:#64ffda;letter-spacing:0.5px}
+.panel-body{flex:1;padding:12px;display:flex;flex-direction:column;gap:10px}
+.mini-card{background:rgba(0,0,0,0.3);border-radius:8px;padding:10px 12px;border:1px solid #232e44;display:flex;align-items:center;gap:8px}
+.mini-card-title{font-size:10px;color:#6b7a94;text-transform:uppercase;letter-spacing:0.5px}
+.mini-card-value{font-size:20px;font-weight:700;color:#fff}
+.mini-card-value.heart{color:#EA4335}
+.mini-card-value.hrr{color:#34A853}
+.mini-card-value.slope{color:#4285F4}
+.mini-card-sub{font-size:10px;color:#4a5570}
+.row-3cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.person-info{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.info-item{background:rgba(0,0,0,0.3);border-radius:8px;padding:8px 10px;border:1px solid #232e44;display:flex;align-items:center;gap:6px}
+.info-label{font-size:10px;color:#6b7a94;text-transform:uppercase}
+.info-value{font-size:16px;font-weight:600;color:#fff}
+.info-conf{font-size:11px;color:#4a5570}
+.info-sub{font-size:10px;color:#4a5570;margin-top:2px}
+.psychology-layout{display:flex;flex:1;gap:12px;min-height:0}
+.psych-left{flex:0 0 45%;display:flex;flex-direction:column;gap:8px;min-height:0;max-height:260px}
+.psych-right{flex:1;display:flex;flex-direction:column;gap:8px;min-height:0;max-height:260px}
+.video-box{flex:1;background:#050a12;border-radius:8px;overflow:hidden;display:flex;align-items:center;justify-content:center;border:1px solid #232e44}
+.video-box img{max-width:100%;max-height:100%;object-fit:contain}
+.emotion-chart-box{height:180px;background:#050a12;border-radius:8px;overflow:hidden;border:1px solid #232e44;padding:8px}
+.emotion-chart-box canvas{width:100%!important;height:100%!important}
+.status-mini{display:flex;justify-content:space-between;gap:10px}
+.status-mini-item{background:rgba(0,0,0,0.3);border-radius:8px;padding:8px;border:1px solid #232e44;flex:1}
+.status-mini-label{font-size:10px;color:#6b7a94;text-transform:uppercase;margin-bottom:4px}
+.status-mini-value{font-size:14px;font-weight:600;color:#fff}
+.emotion-3cards{display:flex;gap:8px}
+.emotion-item{flex:1;padding:8px 10px;border-radius:8px;border:1px solid #232e44;display:flex;align-items:center;gap:6px}
+.emotion-item.positive{background:rgba(52,168,83,0.15);border-color:#34A853}
+.emotion-item.neutral{background:rgba(107,122,148,0.15);border-color:#6b7a94}
+.emotion-item.negative{background:rgba(234,67,53,0.15);border-color:#EA4335}
+.emotion-item-label{font-size:10px;color:#6b7a94;text-transform:uppercase}
+.emotion-item-value{font-size:24px;font-weight:700}
+.emotion-item.positive .emotion-item-value{color:#34A853}
+.emotion-item.neutral .emotion-item-value{color:#6b7a94}
+.emotion-item.negative .emotion-item-value{color:#EA4335}
+.psych-bottom{display:flex;gap:10px;height:80px}
+.gate-button{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px 20px;background:rgba(0,0,0,0.3);border:1px solid #374151;border-radius:10px;color:#6b7a94;font-size:12px;font-weight:500;cursor:pointer;transition:all 0.2s ease}
+.gate-button:hover{background:rgba(55,65,81,0.5);border-color:#4b5563}
+.gate-button.disabled{background:rgba(0,0,0,0.2);border-color:#1f2937;color:#374151}
+.gate-label{font-size:11px;color:#6b7a94;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px}
+.gate-status{display:flex;align-items:center;gap:6px}
+.gate-dot{width:10px;height:10px;border-radius:50%}
+.gate-dot-on{background:#34A853;box-shadow:0 0 8px rgba(52,168,83,0.5)}
+.gate-dot-off{background:#4b5563}
+.gate-status-text{font-size:12px;color:#6b7a94}
+.gate-button.disabled .gate-status-text{color:#374151}
+.emotion-card{flex:1;background:linear-gradient(135deg,#1a1f35,#252b42);border-radius:10px;border:1px solid #3b82f6;padding:12px;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.emotion-card-label{font-size:10px;color:#6b7a94;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px}
+.emotion-card-value{font-size:24px;font-weight:700;color:#fff}
+.emotion-card.positive{border-color:#34A853;background:linear-gradient(135deg,rgba(52,168,83,0.15),rgba(52,168,83,0.05))}
+.emotion-card.positive .emotion-card-value{color:#34A853}
+.emotion-card.negative{border-color:#EA4335;background:linear-gradient(135deg,rgba(234,67,53,0.15),rgba(234,67,53,0.05))}
+.emotion-card.negative .emotion-card-value{color:#EA4335}
+.emotion-card.neutral{border-color:#6b7a94;background:linear-gradient(135deg,rgba(107,122,148,0.15),rgba(107,122,148,0.05))}
+.emotion-card.neutral .emotion-card-value{color:#6b7a94}
+.emotion-display{font-size:18px;font-weight:600;padding:6px 14px;border-radius:6px}
+.emotion-display.positive{background:rgba(52,168,83,0.2);color:#34A853}
+.emotion-display.negative{background:rgba(234,67,53,0.2);color:#EA4335}
+.emotion-display.neutral{background:rgba(107,122,148,0.2);color:#6b7a94}
+.chart-mini{height:80px;min-height:0;background:#050a12;border-radius:6px;border:1px solid #232e44}
+.chart-mini canvas{width:100%!important;height:100%!important}
+.cognitive-panel{flex:1;display:flex;align-items:center;justify-content:center;border:1px dashed #232e44}
+.cognitive-placeholder{color:#4a5570;font-size:13px}
+.dda-panel{flex:1;display:flex;align-items:center;justify-content:center;border:1px dashed #232e44}
+.dda-placeholder{color:#4a5570;font-size:13px}
+.status-bar{display:flex;align-items:center;gap:16px;padding:8px 12px;background:rgba(0,0,0,0.3);border-radius:8px;font-size:11px;color:#6b7a94}
+.status-dot{width:6px;height:6px;border-radius:50%;display:inline-block}
+.status-dot.on{background:#34A853}
 .status-dot.off{background:#555}
-.emotion-display{font-size:16px;font-weight:600;padding:4px 12px;border-radius:6px}
-.emotion-display.positive{background:rgba(52,168,83,.2);color:#34A853}
-.emotion-display.negative{background:rgba(234,67,53,.2);color:#EA4335}
-.emotion-display.neutral{background:rgba(107,122,148,.2);color:#6b7a94}
-.confidence-bar{width:100%;height:6px;background:#1a2236;border-radius:3px;overflow:hidden;margin-top:6px}
-.confidence-fill{height:100%;border-radius:3px;transition:width .3s}
-.confidence-fill.high{background:#34A853}.confidence-fill.medium{background:#FBBC05}.confidence-fill.low{background:#EA4335}
-.person-details{display:flex;flex-direction:column;height:100%}
-.person-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;font-size:13px}
-.person-bar{width:100%;height:8px;background:#050a12;border-radius:4px;margin-top:10px;overflow:hidden}
-.person-bar-fill{height:100%;transition:width 0.3s ease}
-.person-bar-age{background:linear-gradient(90deg,#f97316,#fb923c)}
-.person-bar-gender{background:linear-gradient(90deg,#00e5ff,#06b6d4)}
 </style>
 </head>
 <body>
-<div class="wrapper">
-  <div class="header">
-    <div class="cards">
-      <div class="card positive">
-        <div class="label">积极</div>
-        <div class="val" id="vPositive">0%</div>
-        <div class="sub" id="vPositiveRaw">原始: 0%</div>
+<div class="main-container">
+  <div class="left-panel">
+    <!-- 生理卡片 -->
+    <div class="panel-card" style="flex:0 0 auto">
+      <div class="panel-header">
+        <span class="panel-title">生理监测</span>
+        <div class="status-bar">
+          <span><span class="status-dot" id="comStatus"></span> 心率呼吸率</span>
+          <span>最后更新: <span id="lastUpdate">--</span></span>
+        </div>
       </div>
-      <div class="card neutral">
-        <div class="label">中性</div>
-        <div class="val" id="vNeutral">0%</div>
-        <div class="sub" id="vNeutralRaw">原始: 0%</div>
-      </div>
-      <div class="card negative">
-        <div class="label">消极</div>
-        <div class="val" id="vNegative">0%</div>
-        <div class="sub" id="vNegativeRaw">原始: 0%</div>
-      </div>
-      <div class="card physio">
-        <div class="label">心率</div>
-        <div class="val"><span id="vHeart">-</span> <span style="font-size:14px">bpm</span></div>
-        <div class="sub" id="vHumanStatus">等待</div>
-      </div>
-      <div class="card physio">
-        <div class="label">呼吸率</div>
-        <div class="val"><span id="vBreath">-</span> <span style="font-size:14px">bpm</span></div>
-        <div class="sub" id="vTimestamp">-</div>
-      </div>
-      <div class="card neutral">
-        <div class="label">专注度</div>
-        <div class="val" id="vEngagement">-</div>
-        <div class="sub" id="vEngagementStatus">无数据</div>
-      </div>
-      <div class="card person">
-        <div class="label">性别</div>
-        <div class="val" id="vGender">--</div>
-        <div class="sub" id="vGenderConf">置信度: --%</div>
-      </div>
-      <div class="card person">
-        <div class="label">年龄</div>
-        <div class="val" id="vAge">--</div>
-        <div class="sub" id="vAgeConf">置信度: --%</div>
-      </div>
-    </div>
-    <div class="gate-toggle">
-      <input type="checkbox" id="gateEnabled" checked>
-      <label for="gateEnabled">启用情绪势场</label>
-    </div>
-  </div>
-
-  <div class="charts-row">
-    <div class="video-panel">
-      <div class="chart-header"><span class="chart-title">视频流</span></div>
-      <div class="video-body">
-        <img src="http://127.0.0.1:5010/video_feed" alt="视频流" id="videoFeed">
-      </div>
-    </div>
-    <div class="chart-panel">
-      <div class="chart-header"><span class="chart-title">情绪曲线 (+1 / +0.5 / 0 / -0.5 / -1)</span></div>
-      <div class="chart-body"><canvas id="emotionChart"></canvas></div>
-    </div>
-    <div class="chart-panel">
-      <div class="chart-header"><span class="chart-title">处理后情绪分类</span></div>
-      <div class="chart-body">
-        <div id="processedEmotion" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:12px">
-          <div class="emotion-display neutral" id="emotionLabel" style="font-size:28px">中性</div>
-          <div style="text-align:center">
-            <div style="font-size:14px;color:#6b7a94">信度</div>
-            <div class="confidence-bar" style="width:200px">
-              <div class="confidence-fill medium" id="confidenceFill" style="width:50%"></div>
-            </div>
-            <div style="font-size:12px;color:#4a5570;margin-top:4px" id="confidenceText">50%</div>
+      <div class="panel-body">
+        <div class="row-3cards">
+          <div class="mini-card">
+            <span class="mini-card-title">心率</span>
+            <span class="mini-card-value heart"><span id="vHeart">--</span> <span style="font-size:12px">bpm</span></span>
+            <span class="mini-card-sub"><span id="vHRValid">--</span></span>
+          </div>
+          <div class="mini-card">
+            <span class="mini-card-title">HRR</span>
+            <span class="mini-card-value hrr"><span id="vHRR">--</span><span style="font-size:12px">%</span></span>
+            <span class="mini-card-sub"><span id="vHRRStatus">储备</span></span>
+          </div>
+          <div class="mini-card">
+            <span class="mini-card-title">斜率</span>
+            <span class="mini-card-value slope" id="vHRSlope">--</span>
+            <span class="mini-card-sub"><span id="vHRSlopeStatus">趋势</span></span>
+          </div>
+        </div>
+        <div class="person-info">
+          <div class="info-item">
+            <div class="info-label">是否有人</div>
+            <div class="info-value" id="vHuman">--</div>
+          </div>
+          <div class="info-item">
+            <span class="info-label">性别</span>
+            <span class="info-value" id="vGender">--</span>
+            <span class="info-conf" id="vGenderConf">--%</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">年龄</span>
+            <span class="info-value" id="vAge">--</span>
+            <span class="info-conf" id="vAgeConf">--%</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">身份</span>
+            <span class="info-value" id="vUserName">--</span>
+            <span class="info-conf" id="vUserConf">--%</span>
           </div>
         </div>
       </div>
     </div>
-  </div>
 
-  <div class="charts-row">
-    <div class="chart-panel">
-      <div class="chart-header"><span class="chart-title">心率波形</span></div>
-      <div class="chart-body"><canvas id="heartChart"></canvas></div>
-    </div>
-    <div class="chart-panel">
-      <div class="chart-header"><span class="chart-title">呼吸率波形</span></div>
-      <div class="chart-body"><canvas id="breathChart"></canvas></div>
-    </div>
-    <div class="chart-panel">
-      <div class="chart-header"><span class="chart-title">人脸分析详情</span></div>
-      <div class="chart-body" style="padding:14px">
-        <div class="person-details">
-          <div class="person-row">
-            <span>人脸检测</span>
-            <span id="personFaceStatus">--</span>
-          </div>
-          <div class="person-row">
-            <span>检测到人脸数</span>
-            <span id="personFaceCount">--</span>
-          </div>
-          <div style="margin-top:15px">
-            <div class="person-row">
-              <span>性别</span>
-              <span id="personGender">--</span>
-            </div>
-            <div class="person-bar">
-              <div class="person-bar-fill person-bar-gender" id="personGenderBar" style="width:0%"></div>
+    <!-- 心理卡片 -->
+    <div class="panel-card" style="flex:1">
+      <div class="panel-header">
+        <span class="panel-title">心理监测</span>
+        <div class="status-bar">
+          <span><span class="status-dot" id="auStatus"></span> AU情绪</span>
+        </div>
+      </div>
+      <div class="panel-body" style="flex:1">
+        <div class="psychology-layout">
+          <div class="psych-left">
+            <div class="emotion-chart-box">
+              <canvas id="mainEmotionChart"></canvas>
             </div>
           </div>
-          <div style="margin-top:20px">
-            <div class="person-row">
-              <span>年龄</span>
-              <span id="personAge">--</span>
+          <div class="psych-right">
+            <div class="emotion-3cards">
+              <div class="emotion-item positive">
+                <span class="emotion-item-label">积极</span>
+                <span class="emotion-item-value" id="vPositive">0%</span>
+              </div>
+              <div class="emotion-item neutral">
+                <span class="emotion-item-label">中性</span>
+                <span class="emotion-item-value" id="vNeutral">0%</span>
+              </div>
+              <div class="emotion-item negative">
+                <span class="emotion-item-label">消极</span>
+                <span class="emotion-item-value" id="vNegative">0%</span>
+              </div>
             </div>
-            <div class="person-bar">
-              <div class="person-bar-fill person-bar-age" id="personAgeBar" style="width:0%"></div>
+            <div class="psych-bottom">
+              <button class="gate-button" id="gateButton" onclick="toggleGate()">
+                <div class="gate-label">情绪势场</div>
+                <div class="gate-status">
+                  <span class="gate-dot gate-dot-on"></span>
+                  <span class="gate-status-text">已开启</span>
+                </div>
+              </button>
+              <div class="emotion-card" id="emotionCard">
+                <div class="emotion-card-label">情绪状态</div>
+                <div class="emotion-card-value" id="emotionLabel">中性</div>
+              </div>
             </div>
           </div>
         </div>
       </div>
     </div>
+
+    <!-- 认知卡片 -->
+    <div class="panel-card cognitive-panel">
+      <span class="cognitive-placeholder">认知监测 - 待开发</span>
+    </div>
   </div>
 
-  <div class="status-bar">
-    <span><span class="status-dot" id="auStatus"></span> AU情绪</span>
-    <span><span class="status-dot" id="comStatus"></span> 心率呼吸率</span>
-    <span><span class="status-dot" id="personStatus"></span> 人脸分析</span>
-    <span style="margin-left:auto">最后更新: <span id="lastUpdate">-</span></span>
+  <div class="right-panel">
+    <!-- DDA难度调整中枢 -->
+    <div class="panel-card" style="flex:1">
+      <div class="panel-header">
+        <span class="panel-title">DDA难度调整中枢</span>
+      </div>
+      <div class="panel-body dda-panel">
+        <span class="dda-placeholder">待开发</span>
+      </div>
+    </div>
   </div>
 </div>
 
 <script>
-const EMOTION_COLORS = {
-    'positive_high': '#34A853',
-    'positive_low': '#81C784',
-    'neutral': '#6b7a94',
-    'neutral_high': '#94A3B8',
-    'negative_low': '#E57373',
-    'negative_high': '#EA4335'
-};
-
-const LABEL_CN = {
-    'positive_high': '积极 高信度',
-    'positive_low': '积极 低信度',
-    'neutral': '中性',
-    'neutral_high': '中性 高信度',
-    'negative_low': '消极 低信度',
-    'negative_high': '消极 高信度',
-    'no_face': '无人脸',
-    'out_of_range': '超出范围',
-    'speaking': '说话中',
-    'uncalibrated': '未校准'
-};
-
-const VALUE_MAP = {
-    'positive_high': 1,
-    'positive_low': 0.5,
-    'neutral': 0,
-    'neutral_high': 0,
-    'negative_low': -0.5,
-    'negative_high': -1
-};
-
-const emotionChart = new Chart(document.getElementById('emotionChart'), {
-    type: 'line',
-    data: {
-        labels: [],
-        datasets: [{
-            label: '情绪值',
-            data: [],
-            borderColor: '#4285F4',
-            backgroundColor: 'rgba(66,133,244,0.1)',
-            fill: true,
-            tension: 0.3,
-            borderWidth: 2,
-            pointRadius: 0
-        }]
-    },
-    options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        animation: {
-            duration: 0
-        },
-        scales: {
-            x: { 
-                display: false,
-                type: 'linear'
-            },
-            y: {
-                min: -1.2, max: 1.2,
-                ticks: {
-                    color: '#3a4a64',
-                    stepSize: 0.5,
-                    callback: v => v === 1 ? '+1' : v === 0.5 ? '+0.5' : v === 0 ? '0' : v === -0.5 ? '-0.5' : v === -1 ? '-1' : ''
-                },
-                grid: { color: '#1a2236' }
-            }
-        },
-        plugins: {
-            legend: { display: false },
-            tooltip: {
-                backgroundColor: '#1a2236',
-                callbacks: {
-                    label: ctx => `情绪值: ${ctx.parsed.y > 0 ? '+' : ''}${ctx.parsed.y.toFixed(2)}`
-                }
-            }
-        }
-    }
-});
-
-const heartChart = new Chart(document.getElementById('heartChart'), {
-    type: 'line',
-    data: {
-        labels: [],
-        datasets: [{
-            label: '心率',
-            data: [],
-            borderColor: '#EA4335',
-            backgroundColor: 'rgba(234,67,53,0.1)',
-            fill: true,
-            tension: 0.3,
-            borderWidth: 1.5,
-            pointRadius: 0
-        }]
-    },
-    options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        animation: {
-            duration: 0
-        },
-        scales: {
-            x: { 
-                display: false,
-                type: 'linear'
-            },
-            y: { min: 40, max: 120, grid: { color: '#1a2236' }, ticks: { color: '#3a4a64' } }
-        },
-        plugins: { legend: { display: false } }
-    }
-});
-
-const breathChart = new Chart(document.getElementById('breathChart'), {
-    type: 'line',
-    data: {
-        labels: [],
-        datasets: [{
-            label: '呼吸率',
-            data: [],
-            borderColor: '#4285F4',
-            backgroundColor: 'rgba(66,133,244,0.1)',
-            fill: true,
-            tension: 0.3,
-            borderWidth: 1.5,
-            pointRadius: 0
-        }]
-    },
-    options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        animation: {
-            duration: 0
-        },
-        scales: {
-            x: { 
-                display: false,
-                type: 'linear'
-            },
-            y: { min: 0, max: 40, grid: { color: '#1a2236' }, ticks: { color: '#3a4a64' } }
-        },
-        plugins: { legend: { display: false } }
-    }
-});
-
+let mainEmotionChart = null;
 let emotionHistory = [];
-let heartHistory = [];
-let breathHistory = [];
-let lastAUData = null;
-let lastComData = null;
 
-function updateEmotionDisplay(data) {
-    const emo = data.emotion || {};
-    const proc = data.processed || {};
-
-    document.getElementById('vPositive').textContent = Math.round((emo.positive || 0) * 100) + '%';
-    document.getElementById('vNeutral').textContent = Math.round((emo.neutral || 0) * 100) + '%';
-    document.getElementById('vNegative').textContent = Math.round((emo.negative || 0) * 100) + '%';
+function initChart() {
+    const ctx = document.getElementById('mainEmotionChart');
+    if (!ctx) return;
     
-    // 更新专注度显示
-    const engagement = emo.engagement || 'None';
-    const engLabel = document.getElementById('vEngagement');
-    const engStatus = document.getElementById('vEngagementStatus');
-    const engCard = engLabel.closest('.card');
-    
-    const ENG_LABELS = {
-        'High': '高专注',
-        'Low': '低专注',
-        'None': '无专注'
-    };
-    
-    const ENG_STATUS = {
-        'High': '正在低头',
-        'Low': '部分低头',
-        'None': '没有低头'
-    };
-    
-    engLabel.textContent = ENG_LABELS[engagement] || '无专注';
-    engStatus.textContent = ENG_STATUS[engagement] || '无数据';
-    
-    // 更新卡片样式
-    engCard.className = 'card';
-    if (engagement === 'High') {
-        engCard.classList.add('high-eng');
-    } else if (engagement === 'Low') {
-        engCard.classList.add('low-eng');
-    } else {
-        engCard.classList.add('no-eng');
-    }
-
-    const label = proc.label || 'neutral';
-    const confidence = proc.confidence || 0;
-    const value = proc.value || 0;
-
-    const labelCn = LABEL_CN[label] || '中性';
-    const labelEl = document.getElementById('emotionLabel');
-    labelEl.textContent = labelCn;
-
-    const specialStates = ['no_face', 'out_of_range', 'speaking', 'uncalibrated'];
-    if (specialStates.includes(label)) {
-        labelEl.className = 'emotion-display neutral';
-    } else {
-        labelEl.className = 'emotion-display ' + (label.startsWith('positive') ? 'positive' : label.startsWith('negative') ? 'negative' : 'neutral');
-    }
-
-    const confEl = document.getElementById('confidenceFill');
-    confEl.style.width = (confidence * 100) + '%';
-    confEl.className = 'confidence-fill ' + (confidence > 0.6 ? 'high' : confidence > 0.3 ? 'medium' : 'low');
-    document.getElementById('confidenceText').textContent = Math.round(confidence * 100) + '%';
-
-    emotionHistory.push(value);
-    if (emotionHistory.length > 300) emotionHistory.shift();
-
-    emotionChart.data.datasets[0].data = emotionHistory;
-    emotionChart.data.labels = Array.from({length: emotionHistory.length}, (_, i) => i);
-    emotionChart.update('none');
-
-    document.getElementById('auStatus').className = 'status-dot on';
+    mainEmotionChart = new Chart(ctx.getContext('2d'), {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [{
+                label: '情绪值',
+                data: [],
+                borderColor: '#4285F4',
+                backgroundColor: 'rgba(66,133,244,0.1)',
+                fill: true,
+                tension: 0.3,
+                borderWidth: 2,
+                pointRadius: 0
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: { duration: 0 },
+            scales: {
+                x: { display: false, type: 'linear' },
+                y: { min: -1.2, max: 1.2, ticks: { display: false }, grid: { color: '#1a2236' } }
+            },
+            plugins: { legend: { display: false } }
+        }
+    });
 }
 
 function updatePhysioDisplay(data) {
     const physio = data.physio || {};
-
-    document.getElementById('vHeart').textContent = physio.heart || '-';
-    document.getElementById('vBreath').textContent = physio.breath || '-';
-    document.getElementById('vHumanStatus').textContent = physio.human ? '有人' : '无人';
-
-    heartHistory.push(physio.heart || 0);
-    if (heartHistory.length > 120) heartHistory.shift();
-    breathHistory.push(physio.breath || 0);
-    if (breathHistory.length > 120) breathHistory.shift();
-
-    heartChart.data.datasets[0].data = heartHistory;
-    heartChart.data.labels = Array.from({length: heartHistory.length}, (_, i) => i);
-    heartChart.update('none');
     
-    breathChart.data.datasets[0].data = breathHistory;
-    breathChart.data.labels = Array.from({length: breathHistory.length}, (_, i) => i);
-    breathChart.update('none');
-
-    document.getElementById('comStatus').className = 'status-dot on';
+    const vHeart = document.getElementById('vHeart');
+    const vHRR = document.getElementById('vHRR');
+    const vHRRStatus = document.getElementById('vHRRStatus');
+    const vHRSlope = document.getElementById('vHRSlope');
+    const vHRSlopeStatus = document.getElementById('vHRSlopeStatus');
+    const vHRValid = document.getElementById('vHRValid');
+    const comStatus = document.getElementById('comStatus');
+    
+    if (vHeart) vHeart.textContent = physio.heart || '--';
+    
+    const hrr = physio.hrr_pct || 0;
+    if (vHRR) vHRR.textContent = hrr.toFixed(1);
+    
+    let hrrStatus = '储备';
+    if (hrr < 20) hrrStatus = '低强度';
+    else if (hrr < 40) hrrStatus = '中等强度';
+    else if (hrr < 60) hrrStatus = '高强度';
+    else hrrStatus = '极限强度';
+    if (vHRRStatus) vHRRStatus.textContent = hrrStatus;
+    
+    const hrSlope = physio.hr_slope || 0;
+    if (vHRSlope) {
+        vHRSlope.textContent = hrSlope.toFixed(2);
+        
+        let slopeStatus = '趋势';
+        if (hrSlope > 1.0) {
+            vHRSlope.style.color = '#EA4335';
+            slopeStatus = '快速上升';
+        } else if (hrSlope > 0.3) {
+            vHRSlope.style.color = '#f59e0b';
+            slopeStatus = '缓慢上升';
+        } else if (hrSlope < -1.0) {
+            vHRSlope.style.color = '#34A853';
+            slopeStatus = '快速下降';
+        } else if (hrSlope < -0.3) {
+            vHRSlope.style.color = '#60a5fa';
+            slopeStatus = '缓慢下降';
+        } else {
+            vHRSlope.style.color = '#4285F4';
+            slopeStatus = '稳定';
+        }
+        if (vHRSlopeStatus) vHRSlopeStatus.textContent = slopeStatus;
+    }
+    
+    const hrValid = physio.hr_valid;
+    if (vHRValid) {
+        vHRValid.textContent = hrValid ? 'HR信号: 正常' : 'HR信号: 异常';
+        vHRValid.style.color = hrValid ? '#34A853' : '#EA4335';
+    }
+    
+    if (comStatus) comStatus.className = 'status-dot on';
 }
 
+
+
 function updatePersonDisplay(data) {
-    document.getElementById('vGender').textContent = data.gender || '--';
-    document.getElementById('vGenderConf').textContent = '置信度: ' + (data.gender_confidence * 100).toFixed(1) + '%';
-    document.getElementById('vAge').textContent = data.age_range || '--';
-    document.getElementById('vAgeConf').textContent = '置信度: ' + (data.age_confidence * 100).toFixed(1) + '%';
+    const faceCount = data.face_count !== undefined ? data.face_count : 0;
+    let humanText = '--';
+    if (faceCount === 0) {
+        humanText = '无人';
+    } else if (faceCount === 1) {
+        humanText = '1人';
+    } else {
+        humanText = faceCount + '人';
+    }
     
-    document.getElementById('personFaceStatus').textContent = data.face_detected ? '已检测' : '未检测';
-    document.getElementById('personFaceStatus').style.color = data.face_detected ? '#10b981' : '#ef4444';
-    document.getElementById('personFaceCount').textContent = data.face_count;
-    document.getElementById('personGender').textContent = data.gender || '--';
-    document.getElementById('personAge').textContent = data.age_range || '--';
+    const vHuman = document.getElementById('vHuman');
+    const vGender = document.getElementById('vGender');
+    const vGenderConf = document.getElementById('vGenderConf');
+    const vAge = document.getElementById('vAge');
+    const vAgeConf = document.getElementById('vAgeConf');
+    const vUserName = document.getElementById('vUserName');
+    const vUserConf = document.getElementById('vUserConf');
     
-    document.getElementById('personGenderBar').style.width = (data.gender_confidence * 100) + '%';
-    document.getElementById('personAgeBar').style.width = (data.age_confidence * 100) + '%';
+    if (vHuman) vHuman.textContent = humanText;
     
-    document.getElementById('personStatus').className = 'status-dot on';
+    const gender = data.gender || '--';
+    const genderConf = data.gender_confidence;
+    const genderText = gender.toLowerCase() === 'man' ? '男' : gender.toLowerCase() === 'woman' ? '女' : gender;
+    if (vGender) vGender.textContent = genderText;
+    if (vGenderConf) vGenderConf.textContent = genderConf !== undefined ? (genderConf * 100).toFixed(0) + '%' : '--%';
+    
+    const age = data.age_range || '--';
+    const ageConf = data.age_confidence;
+    if (vAge) vAge.textContent = age;
+    if (vAgeConf) vAgeConf.textContent = ageConf !== undefined ? (ageConf * 100).toFixed(0) + '%' : '--%';
+    
+    const userName = data.user_name || '--';
+    const userConf = data.user_confidence;
+    if (vUserName) vUserName.textContent = userName;
+    if (vUserConf) vUserConf.textContent = userConf !== undefined ? (userConf * 100).toFixed(0) + '%' : '--%';
+}
+
+function updateEmotionDisplay(data) {
+    const emo = data.emotion || {};
+    const proc = data.processed || {};
+    
+    const vPositive = document.getElementById('vPositive');
+    const vNeutral = document.getElementById('vNeutral');
+    const vNegative = document.getElementById('vNegative');
+    const labelEl = document.getElementById('emotionLabel');
+    const cardEl = document.getElementById('emotionCard');
+    const auStatus = document.getElementById('auStatus');
+    
+    if (vPositive) vPositive.textContent = Math.round((emo.positive || 0) * 100) + '%';
+    if (vNeutral) vNeutral.textContent = Math.round((emo.neutral || 0) * 100) + '%';
+    if (vNegative) vNegative.textContent = Math.round((emo.negative || 0) * 100) + '%';
+    
+    if (labelEl && cardEl) {
+        const label = proc.label || 'neutral';
+        const specialStates = ['no_face', 'out_of_range', 'speaking', 'uncalibrated'];
+        if (specialStates.includes(label)) {
+            labelEl.textContent = '中性';
+            cardEl.className = 'emotion-card neutral';
+        } else {
+            const emotionType = label.startsWith('positive') ? 'positive' : label.startsWith('negative') ? 'negative' : 'neutral';
+            labelEl.textContent = emotionType === 'positive' ? '积极' : emotionType === 'negative' ? '消极' : '中性';
+            cardEl.className = 'emotion-card ' + emotionType;
+        }
+    }
+    
+    const value = proc.value || 0;
+    emotionHistory.push(value);
+    if (emotionHistory.length > 200) emotionHistory.shift();
+    
+    if (mainEmotionChart) {
+        mainEmotionChart.data.datasets[0].data = emotionHistory;
+        mainEmotionChart.data.labels = Array.from({length: emotionHistory.length}, (_, i) => i);
+        mainEmotionChart.update('none');
+    }
+    
+    if (auStatus) auStatus.className = 'status-dot on';
 }
 
 function updateTimestamp() {
-    document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+    const lastUpdate = document.getElementById('lastUpdate');
+    if (lastUpdate) lastUpdate.textContent = new Date().toLocaleTimeString();
 }
 
 async function fetchData() {
     try {
         const resp = await fetch('/api/current');
         const data = await resp.json();
-
-        if (data.emotion) updateEmotionDisplay(data);
+        
         if (data.physio) updatePhysioDisplay(data);
-
+        if (data.emotion || data.processed) updateEmotionDisplay(data);
+        
         updateTimestamp();
     } catch (e) {
         console.error('API Error', e);
-        document.getElementById('auStatus').className = 'status-dot off';
-        document.getElementById('comStatus').className = 'status-dot off';
+        const comStatus = document.getElementById('comStatus');
+        const auStatus = document.getElementById('auStatus');
+        if (comStatus) comStatus.className = 'status-dot off';
+        if (auStatus) auStatus.className = 'status-dot off';
     }
 }
 
@@ -468,26 +410,48 @@ async function fetchPersonData() {
         updatePersonDisplay(data);
     } catch (e) {
         console.error('Person API Error', e);
-        document.getElementById('personStatus').className = 'status-dot off';
     }
 }
 
-document.getElementById('gateEnabled').addEventListener('change', async (e) => {
-    try {
-        await fetch('/api/gate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ enabled: e.target.checked })
-        });
-    } catch (e) {
-        console.error('Failed to update gate', e);
-    }
-});
+let gateEnabled = true;
 
-setInterval(fetchData, 200);
-setInterval(fetchPersonData, 1000);
-fetchData();
-fetchPersonData();
+function toggleGate() {
+    gateEnabled = !gateEnabled;
+    const btn = document.getElementById('gateButton');
+    if (!btn) return;
+    
+    const dot = btn.querySelector('.gate-dot');
+    const statusText = btn.querySelector('.gate-status-text');
+    if (!dot || !statusText) return;
+    
+    if (gateEnabled) {
+        btn.classList.remove('disabled');
+        dot.classList.remove('gate-dot-off');
+        dot.classList.add('gate-dot-on');
+        statusText.textContent = '已开启';
+    } else {
+        btn.classList.add('disabled');
+        dot.classList.remove('gate-dot-on');
+        dot.classList.add('gate-dot-off');
+        statusText.textContent = '已关闭';
+    }
+    
+    fetch('/api/gate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: gateEnabled })
+    }).catch(e => console.error('Failed to update gate', e));
+}
+
+function initApp() {
+    initChart();
+    fetchData();
+    fetchPersonData();
+    setInterval(fetchData, 200);
+    setInterval(fetchPersonData, 1000);
+}
+
+document.addEventListener('DOMContentLoaded', initApp);
 </script>
 </body>
 </html>
