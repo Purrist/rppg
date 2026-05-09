@@ -682,8 +682,11 @@ class EmotionEngine:
         self.annotated = None
         self.t0 = time.time(); self._fc_au = 0; self._fc_fer = 2
         
-        self.au_result = {'emotion':'no_face','confidence':0.,'scores':{'neutral':0,'positive':0,'negative':0},'pose':'-','pitch':0,'yaw':0,'roll':0,'au':{},'speaking':False,'calibrating':False,'calib_pose':None,'calib_emotion':None,'calib_count':0,'personal_samples':0,'personal_ready':False,'engagement':'None'}
+        self.au_result = {'emotion':'no_face','confidence':0.,'scores':{'neutral':0,'positive':0,'negative':0},'pose':'-','pitch':0,'yaw':0,'roll':0,'au':{},'speaking':False,'calibrating':False,'calib_pose':None,'calib_emotion':None,'calib_count':0,'personal_samples':0,'personal_ready':False,'engagement':'None','face_detected':False,'face_count':0}
         self.fer_result = {'label':'neutral','conf':0.0,'probs_3':{'neutral':0,'positive':0,'negative':0},'has_face':False}
+        
+        # 保存最近对齐的人脸图像（用于外部模块如perception使用）
+        self.last_aligned_face = None
         
         # 专注度估算相关
         self.engagement_buffer = deque(maxlen=15)  # 15帧平滑窗口
@@ -880,6 +883,11 @@ class EmotionEngine:
                     lm_cache = lm
                     self.last_landmarks = lm
                     res = dict(self.au_result)
+                    
+                    # 更新face_count和face_detected
+                    res['face_count'] = len(lm_list) if lm_list else 0
+                    res['face_detected'] = lm is not None
+                    
                     if lm is not None:
                         speaking = current_speaking
                         
@@ -895,6 +903,11 @@ class EmotionEngine:
                         pitch, yaw, roll = self.pose_est.estimate(frame, lm)
                         last_yaw = yaw
                         au = self.au_ext.predict(frame, lm)
+                        
+                        # 保存对齐后的人脸图像供外部模块使用
+                        aligned_face = self.au_ext._align(frame, lm)
+                        if aligned_face is not None:
+                            self.last_aligned_face = aligned_face
                         
                         # 估算专注度（基于头部姿态）
                         # 注意：这里暂时只用姿态估算，因为需要更复杂的视线追踪才能获取iris_pos
@@ -1202,6 +1215,16 @@ def api_all():
         'fer': engine.fer_result,
         'fusion': engine.get_fusion()
     })
+
+@app.route("/api/aligned_face")
+def api_aligned_face():
+    """返回对齐后的人脸图像（供perception模块进行年龄性别分析）"""
+    aligned_face = engine.last_aligned_face
+    if aligned_face is not None:
+        _, buf = cv2.imencode('.jpg', aligned_face, [cv2.IMWRITE_JPEG_QUALITY, 90])
+        return Response(buf.tobytes(), mimetype='image/jpeg')
+    else:
+        return jsonify({'error': 'No aligned face available'}), 404
 
 if __name__ == "__main__":
     try: app.run(host="0.0.0.0", port=5010, debug=False, threaded=True, use_reloader=False)

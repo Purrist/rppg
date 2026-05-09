@@ -31,6 +31,12 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #050a12; c
 
 input.age-input { width: 60px; background: #050a12; border: 1px solid #13203a; border-radius: 4px; color: #c8d6e5; font-size: 14px; padding: 2px 4px; text-align: center; }
 select.gender-select { background: #050a12; border: 1px solid #13203a; border-radius: 4px; color: #c8d6e5; font-size: 12px; padding: 2px 4px; }
+.status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #3a5570; }
+.status-dot.active { background: #22c55e; }
+input.age-input.active { border-color: #22c55e; background: #06140a; }
+input.age-input.inactive { opacity: 0.5; cursor: not-allowed; }
+select.gender-select.active { border-color: #22c55e; background: #06140a; }
+select.gender-select.inactive { opacity: 0.5; cursor: not-allowed; }
 
 .AX { axisLine: { lineStyle: { color: '#13203a' } }, axisLabel: { color: '#2a4060', fontSize: 8 }, splitLine: { lineStyle: { color: '#0f1a2d', type: 'dashed' } } }
 </style>
@@ -81,14 +87,22 @@ select.gender-select { background: #050a12; border: 1px solid #13203a; border-ra
             </div>
             <div class="card">
                 <div class="card-title">年龄 <span style="font-size: 8px; color: #4a6a8a;">(Age)</span></div>
-                <input type="number" id="age-input" class="age-input" value="30" min="1" max="120">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span class="status-dot" id="age-status-dot"></span>
+                    <span class="card-value" id="age-value">--</span>
+                    <input type="number" id="age-input" class="age-input" value="30" min="1" max="120">
+                </div>
             </div>
             <div class="card">
                 <div class="card-title">性别 <span style="font-size: 8px; color: #4a6a8a;">(Gender)</span></div>
-                <select id="gender-select" class="gender-select">
-                    <option value="male" selected>男</option>
-                    <option value="female">女</option>
-                </select>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span class="status-dot" id="gender-status-dot"></span>
+                    <span class="card-value" id="gender-value">--</span>
+                    <select id="gender-select" class="gender-select">
+                        <option value="male" selected>男</option>
+                        <option value="female">女</option>
+                    </select>
+                </div>
             </div>
             <div class="card purple">
                 <div class="card-title">静息心率 <span style="font-size: 8px; color: #4a6a8a;">(HR Rest)</span></div>
@@ -192,12 +206,20 @@ function updateProfile() {
     if (age !== pA || gender !== pG) {
         pA = age;
         pG = gender;
-        fetchData();
+        // 使用专门的用户输入端点
+        fetch('/person_input?age=' + pA + '&gender=' + pG)
+            .catch(() => {});
     }
 }
 
+function fetchData() {
+    fetch('/data')
+        .then(r => r.json())
+        .then(data => update(data))
+        .catch(() => {});
+}
+
 function update(data) {
-    const raw = data.raw || { hr: 72, br: 16, signal_state: 'INIT', is_human: 0, distance_valid: 0, distance: 0 };
     const rt = data.rt || { heart_rate: [], breath_rate: [], heart_phase: [], breath_phase: [] };
     const s = data.signals || { inst_hr: [], inst_br: [], lissajous: [], phase_diff_circ: [] };
     const t = data.trends || { plv: [], hrr: [], cr_ratio: [], brv: [], br_elevation: [] };
@@ -257,6 +279,49 @@ function update(data) {
     document.getElementById('hr-rest').textContent = pf.hr_rest_est;
     document.getElementById('hr-max').textContent = pf.hr_max_est;
     document.getElementById('br-rest').textContent = pf.br_rest_est;
+    
+    // 更新年龄和性别状态显示
+    const hasPerceptionData = data.profile && data.profile.person_source === 'perception';
+    const perceptionAge = data.profile && data.profile.age !== undefined ? data.profile.age : null;
+    const perceptionGender = data.profile && data.profile.gender !== undefined ? data.profile.gender : null;
+    
+    // 更新年龄显示
+    const ageDot = document.getElementById('age-status-dot');
+    const ageValue = document.getElementById('age-value');
+    const ageInput = document.getElementById('age-input');
+    
+    if (hasPerceptionData && perceptionAge && perceptionAge > 0) {
+        ageDot.classList.add('active');
+        ageValue.textContent = perceptionAge;
+        ageInput.classList.remove('active');
+        ageInput.classList.add('inactive');
+        ageInput.disabled = true;
+    } else {
+        ageDot.classList.remove('active');
+        ageValue.textContent = '--';
+        ageInput.classList.remove('inactive');
+        ageInput.classList.add('active');
+        ageInput.disabled = false;
+    }
+    
+    // 更新性别显示
+    const genderDot = document.getElementById('gender-status-dot');
+    const genderValue = document.getElementById('gender-value');
+    const genderSelect = document.getElementById('gender-select');
+    
+    if (hasPerceptionData && perceptionGender) {
+        genderDot.classList.add('active');
+        genderValue.textContent = perceptionGender === 'male' ? '男' : '女';
+        genderSelect.classList.remove('active');
+        genderSelect.classList.add('inactive');
+        genderSelect.disabled = true;
+    } else {
+        genderDot.classList.remove('active');
+        genderValue.textContent = '--';
+        genderSelect.classList.remove('inactive');
+        genderSelect.classList.add('active');
+        genderSelect.disabled = false;
+    }
 
     // HRR
     V('hrr-value', h.hrr_pct, '%', 1);

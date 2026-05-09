@@ -79,6 +79,18 @@ trend_hr_valid_history = []
 trend_br_valid_history = []
 trend_phase_valid_history = []
 
+# ========== 年龄和性别数据处理 ==========
+# 从perception接收的年龄和性别数据队列
+person_data_queue = []
+PERSON_DATA_WINDOW = 10  # 10秒窗口
+person_data_lock = threading.Lock()
+
+# 当前使用的年龄和性别（可能来自perception或用户输入）
+current_age = 30
+current_gender = 'male'
+person_source = 'input'  # 'input' or 'perception'
+has_received_perception = False  # 是否曾经接收到过perception的有效数据
+
 
 # ========== PhasePreprocessor ==========
 class PhasePreprocessor:
@@ -856,6 +868,99 @@ def health():
     return render_template('health.html')
 
 
+@app.route('/person')
+def person_data():
+    """接收perception发送的年龄和性别数据"""
+    global person_data_queue
+    age_param = request.args.get('age')
+    gender_param = request.args.get('gender', type=str)
+    
+    # 检查是否为无效标记
+    if age_param == '-' or gender_param == '-':
+        # 非正脸或未检测到，清空队列保持原有状态
+        with person_data_lock:
+            person_data_queue.clear()
+        return jsonify({'status': 'ok', 'message': '无效数据，队列已清空'})
+    
+    # 尝试解析年龄
+    try:
+        age_param = int(age_param)
+    except (ValueError, TypeError):
+        return jsonify({'status': 'error', 'message': '年龄参数无效'})
+    
+    if age_param > 0 and gender_param in ('male', 'female'):
+        with person_data_lock:
+            person_data_queue.append({
+                'age': age_param,
+                'gender': gender_param,
+                'time': time.time()
+            })
+        return jsonify({'status': 'ok'})
+    return jsonify({'status': 'error', 'message': '参数无效'})
+
+
+@app.route('/person_input')
+def person_input_data():
+    """接收用户手动输入的年龄和性别（优先级低于perception）"""
+    global current_age, current_gender, person_source, has_received_perception, engine
+    
+    age_param = request.args.get('age', type=int)
+    gender_param = request.args.get('gender', type=str)
+    
+    # 如果曾经接收到过perception数据，不允许用户手动输入覆盖
+    if has_received_perception:
+        return jsonify({'status': 'error', 'message': '已有perception数据，不可手动覆盖'})
+    
+    changed = False
+    if age_param and age_param > 0 and age_param != current_age:
+        current_age = age_param
+        changed = True
+    
+    if gender_param and gender_param in ('male', 'female') and gender_param != current_gender:
+        current_gender = gender_param
+        changed = True
+    
+    if changed:
+        engine.update_profile(current_age, current_gender)
+        person_source = 'input'
+    
+    return jsonify({'status': 'ok', 'age': current_age, 'gender': current_gender, 'person_source': person_source})
+
+
+def calculate_person_mean():
+    """每10秒计算一次年龄和性别的均值"""
+    global person_data_queue, current_age, current_gender, person_source, has_received_perception
+    
+    while True:
+        time.sleep(PERSON_DATA_WINDOW)
+        
+        with person_data_lock:
+            if len(person_data_queue) > 0:
+                # 队列中有有效数据（正脸检测到），计算均值并更新
+                age_sum = sum(item['age'] for item in person_data_queue)
+                avg_age = round(age_sum / len(person_data_queue))
+                
+                gender_counts = {'male': 0, 'female': 0}
+                for item in person_data_queue:
+                    gender_counts[item['gender']] += 1
+                
+                avg_gender = 'male' if gender_counts['male'] >= gender_counts['female'] else 'female'
+                
+                current_age = avg_age
+                current_gender = avg_gender
+                person_source = 'perception'
+                has_received_perception = True  # 标记已收到过有效数据
+                
+                person_data_queue = []
+            # 如果队列为空（非正脸或未检测到），保持当前状态不变
+            # 一旦接收到过perception数据，就不再自动切换回input模式
+
+
+# 启动定时计算线程
+person_thread = threading.Thread(target=calculate_person_mean, daemon=True)
+person_thread.start()
+
+
 @app.route('/data')
 def get_data():
     global current_age, current_gender, engine
@@ -864,18 +969,11 @@ def get_data():
     global trend_signal_state_history, trend_hr_valid_history
     global trend_br_valid_history, trend_phase_valid_history
 
-    age_param = request.args.get('age', type=int)
-    gender_param = request.args.get('gender', type=str)
-
-    changed = False
-    if age_param and age_param != current_age:
-        current_age = age_param
-        changed = True
-    if gender_param and gender_param in ('male', 'female') and gender_param != current_gender:
-        current_gender = gender_param
-        changed = True
-    if changed:
-        engine.update_profile(current_age, current_gender)
+    global person_source, has_received_perception
+    
+    # 注意：这里不再通过 URL 参数接收 age/gender（避免与 /person 端点冲突）
+    # age/gender 只通过 /person 端点来自 perception.py，或者通过用户手动设置
+    # health.html 现在只读取数据，不再设置
 
     hr_now = float(latest_data["heart_rate"])
     br_now = float(latest_data["breath_rate"]) if latest_data["breath_rate"] > 0 else 0.0
@@ -905,6 +1003,7 @@ def get_data():
         },
         "profile": {
             "age": current_age, "gender": current_gender,
+            "person_source": person_source,
             "hr_rest_est": engine.hr_rest_est,
             "br_rest_est": engine.br_rest_est,
             "hr_max_est": engine.hr_max,

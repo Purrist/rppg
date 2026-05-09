@@ -23,18 +23,18 @@ html,body{width:100%;height:100%;background:#0c1018;color:#c8cee0;overflow:hidde
 .mini-card-value.slope{color:#4285F4}
 .mini-card-sub{font-size:10px;color:#4a5570}
 .row-3cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
-.person-info{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
-.info-item{background:rgba(0,0,0,0.3);border-radius:8px;padding:8px 10px;border:1px solid #232e44;display:flex;align-items:center;gap:6px}
+.person-info{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.info-item{background:rgba(0,0,0,0.3);border-radius:8px;padding:8px 10px;border:1px solid #232e44;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .info-label{font-size:10px;color:#6b7a94;text-transform:uppercase}
 .info-value{font-size:16px;font-weight:600;color:#fff}
 .info-conf{font-size:11px;color:#4a5570}
-.info-sub{font-size:10px;color:#4a5570;margin-top:2px}
+.info-sub{font-size:10px;color:#6b7a94;margin-left:auto}
 .psychology-layout{display:flex;flex:1;gap:12px;min-height:0}
-.psych-left{flex:0 0 45%;display:flex;flex-direction:column;gap:8px;min-height:0;max-height:260px}
-.psych-right{flex:1;display:flex;flex-direction:column;gap:8px;min-height:0;max-height:260px}
+.psych-left{flex:0 0 45%;display:flex;flex-direction:column;gap:8px;min-height:0;max-height:200px}
+.psych-right{flex:1;display:flex;flex-direction:column;gap:8px;min-height:0;max-height:200px}
 .video-box{flex:1;background:#050a12;border-radius:8px;overflow:hidden;display:flex;align-items:center;justify-content:center;border:1px solid #232e44}
 .video-box img{max-width:100%;max-height:100%;object-fit:contain}
-.emotion-chart-box{height:180px;background:#050a12;border-radius:8px;overflow:hidden;border:1px solid #232e44;padding:8px}
+.emotion-chart-box{height:120px;background:#050a12;border-radius:8px;overflow:hidden;border:1px solid #232e44;padding:8px}
 .emotion-chart-box canvas{width:100%!important;height:100%!important}
 .status-mini{display:flex;justify-content:space-between;gap:10px}
 .status-mini-item{background:rgba(0,0,0,0.3);border-radius:8px;padding:8px;border:1px solid #232e44;flex:1}
@@ -120,21 +120,19 @@ html,body{width:100%;height:100%;background:#0c1018;color:#c8cee0;overflow:hidde
           <div class="info-item">
             <div class="info-label">是否有人</div>
             <div class="info-value" id="vHuman">--</div>
+            <span class="info-conf" id="vPose">--</span>
           </div>
           <div class="info-item">
             <span class="info-label">性别</span>
             <span class="info-value" id="vGender">--</span>
             <span class="info-conf" id="vGenderConf">--%</span>
+            <span class="info-sub" id="vGenderHlkk">--</span>
           </div>
           <div class="info-item">
             <span class="info-label">年龄</span>
             <span class="info-value" id="vAge">--</span>
             <span class="info-conf" id="vAgeConf">--%</span>
-          </div>
-          <div class="info-item">
-            <span class="info-label">身份</span>
-            <span class="info-value" id="vUserName">--</span>
-            <span class="info-conf" id="vUserConf">--%</span>
+            <span class="info-sub" id="vAgeHlkk">--</span>
           </div>
         </div>
       </div>
@@ -302,7 +300,7 @@ function updatePhysioDisplay(data) {
 
 
 function updatePersonDisplay(data) {
-    const faceCount = data.face_count !== undefined ? data.face_count : 0;
+    const faceCount = data.face_count !== undefined ? data.face_count : (data.face_detected ? 1 : 0);
     let humanText = '--';
     if (faceCount === 0) {
         humanText = '无人';
@@ -313,30 +311,62 @@ function updatePersonDisplay(data) {
     }
     
     const vHuman = document.getElementById('vHuman');
+    const vPose = document.getElementById('vPose');
     const vGender = document.getElementById('vGender');
     const vGenderConf = document.getElementById('vGenderConf');
     const vAge = document.getElementById('vAge');
     const vAgeConf = document.getElementById('vAgeConf');
-    const vUserName = document.getElementById('vUserName');
-    const vUserConf = document.getElementById('vUserConf');
     
     if (vHuman) vHuman.textContent = humanText;
     
-    const gender = data.gender || '--';
-    const genderConf = data.gender_confidence;
+    const poseMap = {
+        'front': '正脸',
+        'up': '抬头',
+        'down': '低头',
+        'side_left': '左侧脸',
+        'side_right': '右侧脸',
+        '-': '--',
+        'unknown': '--'
+    };
+    const pose = data.pose || '--';
+    if (vPose) vPose.textContent = poseMap[pose] || pose;
+    
+    const isFrontFace = pose === 'front' && data.age > 0;
+    
+    const gender = isFrontFace ? (data.gender || '--') : '--';
+    const genderConf = isFrontFace ? data.gender_confidence : undefined;
     const genderText = gender.toLowerCase() === 'man' ? '男' : gender.toLowerCase() === 'woman' ? '女' : gender;
     if (vGender) vGender.textContent = genderText;
-    if (vGenderConf) vGenderConf.textContent = genderConf !== undefined ? (genderConf * 100).toFixed(0) + '%' : '--%';
     
-    const age = data.age_range || '--';
-    const ageConf = data.age_confidence;
+    // 修复置信度显示问题：检查是否已经是百分比
+    let genderConfPercent = '--%';
+    if (genderConf !== undefined) {
+        let conf = genderConf;
+        if (conf > 1.5) {  // 大于1.5说明已经是百分比值（0-100）
+            conf = Math.min(100, Math.round(conf));
+        } else {  // 小数（0-1），转换为百分比
+            conf = Math.min(100, Math.round(conf * 100));
+        }
+        genderConfPercent = conf + '%';
+    }
+    if (vGenderConf) vGenderConf.textContent = genderConfPercent;
+    
+    const age = isFrontFace ? data.age : '--';
+    const ageConf = isFrontFace ? data.age_confidence : undefined;
     if (vAge) vAge.textContent = age;
-    if (vAgeConf) vAgeConf.textContent = ageConf !== undefined ? (ageConf * 100).toFixed(0) + '%' : '--%';
     
-    const userName = data.user_name || '--';
-    const userConf = data.user_confidence;
-    if (vUserName) vUserName.textContent = userName;
-    if (vUserConf) vUserConf.textContent = userConf !== undefined ? (userConf * 100).toFixed(0) + '%' : '--%';
+    // 修复年龄置信度显示
+    let ageConfPercent = '--%';
+    if (ageConf !== undefined) {
+        let conf = ageConf;
+        if (conf > 1.5) {  // 大于1.5说明已经是百分比值（0-100）
+            conf = Math.min(100, Math.round(conf));
+        } else {  // 小数（0-1），转换为百分比
+            conf = Math.min(100, Math.round(conf * 100));
+        }
+        ageConfPercent = conf + '%';
+    }
+    if (vAgeConf) vAgeConf.textContent = ageConfPercent;
 }
 
 function updateEmotionDisplay(data) {
@@ -361,8 +391,28 @@ function updateEmotionDisplay(data) {
             labelEl.textContent = '中性';
             cardEl.className = 'emotion-card neutral';
         } else {
-            const emotionType = label.startsWith('positive') ? 'positive' : label.startsWith('negative') ? 'negative' : 'neutral';
-            labelEl.textContent = emotionType === 'positive' ? '积极' : emotionType === 'negative' ? '消极' : '中性';
+            const labelMap = {
+                'positive_high': '积极高信度',
+                'positive_low': '积极低信度',
+                'negative_high': '消极高信度',
+                'negative_low': '消极低信度',
+                'neutral_high': '中性高信度',
+                'neutral': '中性',
+                'positive': '积极',
+                'negative': '消极'
+            };
+            const classMap = {
+                'positive_high': 'positive',
+                'positive_low': 'positive',
+                'negative_high': 'negative',
+                'negative_low': 'negative',
+                'neutral_high': 'neutral',
+                'neutral': 'neutral',
+                'positive': 'positive',
+                'negative': 'negative'
+            };
+            labelEl.textContent = labelMap[label] || '中性';
+            const emotionType = classMap[label] || 'neutral';
             cardEl.className = 'emotion-card ' + emotionType;
         }
     }
@@ -408,9 +458,43 @@ async function fetchPersonData() {
         const resp = await fetch('/api/data');
         const data = await resp.json();
         updatePersonDisplay(data);
+        
+        // 获取hlkk模块当前使用的值
+        fetchHlkkData();
     } catch (e) {
         console.error('Person API Error', e);
     }
+}
+
+async function fetchHlkkData() {
+    try {
+        const resp = await fetch('/api/hlkk');
+        const data = await resp.json();
+        updateHlkkDisplay(data);
+    } catch (e) {
+        console.error('HLKK API Error', e);
+    }
+}
+
+function updateHlkkDisplay(data) {
+    const vGenderHlkk = document.getElementById('vGenderHlkk');
+    const vAgeHlkk = document.getElementById('vAgeHlkk');
+    
+    console.log('HLKK data:', data);
+    
+    const profile = data.profile || {};
+    const hlkkGender = profile.gender || '--';
+    const hlkkAge = profile.age > 0 ? profile.age : '--';
+    
+    const genderText = hlkkGender === 'male' ? '男' : hlkkGender === 'female' ? '女' : '--';
+    
+    console.log('HLKK Display:', {
+        gender: genderText,
+        age: hlkkAge
+    });
+    
+    if (vGenderHlkk) vGenderHlkk.textContent = genderText !== '--' ? genderText : '--';
+    if (vAgeHlkk) vAgeHlkk.textContent = hlkkAge !== '--' ? hlkkAge + '岁' : '--';
 }
 
 let gateEnabled = true;

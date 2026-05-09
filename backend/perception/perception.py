@@ -128,91 +128,10 @@ class FaceDatabase:
         return None
 
 
-class FaceRecognizer:
-    """人脸识别类"""
-    
-    def __init__(self, db_dir):
-        self.db = FaceDatabase(db_dir)
-        self.face_buffer = []
-        self.buffer_size = 8
-    
-    def get_embedding(self, frame):
-        if DeepFace is None:
-            return None
-        try:
-            result = DeepFace.represent(
-                frame,
-                model_name="VGG-Face",
-                enforce_detection=False,
-                detector_backend="opencv"
-            )
-            if isinstance(result, list) and len(result) > 0:
-                embedding = result[0]["embedding"]
-                return np.array(embedding)
-        except Exception:
-            pass
-        return None
-    
-    def cosine_similarity(self, emb1, emb2):
-        dot = np.dot(emb1, emb2)
-        norm1 = np.linalg.norm(emb1)
-        norm2 = np.linalg.norm(emb2)
-        return dot / (norm1 * norm2) if norm1 > 0 and norm2 > 0 else 0
-    
-    def recognize(self, frame):
-        embedding = self.get_embedding(frame)
-        if embedding is None:
-            return None
-        
-        all_embeddings, all_user_ids = self.db.get_all_embeddings()
-        
-        if len(all_embeddings) == 0:
-            user = self.db.add_new_user(embedding)
-            return {
-                "user_id": user["id"],
-                "user_name": user["name"],
-                "confidence": 1.0,
-                "is_new": True
-            }
-        
-        similarities = [self.cosine_similarity(embedding, e) for e in all_embeddings]
-        best_idx = np.argmax(similarities)
-        best_similarity = similarities[best_idx]
-        
-        if best_similarity >= RECOGNITION_THRESHOLD:
-            user_id = all_user_ids[best_idx]
-            user = self.db.find_user(user_id)
-            if user:
-                self.face_buffer.append(user_id)
-                if len(self.face_buffer) > self.buffer_size:
-                    self.face_buffer.pop(0)
-                
-                counter = Counter(self.face_buffer)
-                most_common_id = counter.most_common(1)[0][0]
-                final_user = self.db.find_user(most_common_id)
-                
-                return {
-                    "user_id": final_user["id"],
-                    "user_name": final_user["name"],
-                    "confidence": float(best_similarity),
-                    "is_new": False
-                }
-        else:
-            user = self.db.add_new_user(embedding)
-            self.face_buffer = [user["id"]]
-            return {
-                "user_id": user["id"],
-                "user_name": user["name"],
-                "confidence": 1.0,
-                "is_new": True
-            }
-        
-        return None
-
-
 class PersonAnalyzer:
     def __init__(self):
         self.video_stream_url = "http://127.0.0.1:5010/video_feed"
+        self.aligned_face_url = "http://127.0.0.1:5010/api/aligned_face"
         self.cap = None
         self._reconnect_attempts = 0
         
@@ -220,10 +139,8 @@ class PersonAnalyzer:
         self.gender_session = None
         self.load_models()
         
+        # 保留haar级联检测器用于ONNX模型分析（备用）
         self.face_detector = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-        
-        # 人脸识别组件
-        self.face_rec = FaceRecognizer(FACE_DB_DIR)
         
         self.lock = threading.Lock()
         self.running = False
@@ -263,6 +180,12 @@ class PersonAnalyzer:
         
         # 帧计数
         self._fc = 0
+        
+        # HLKK定时更新相关
+        self.last_hlkk_update_time = 0
+        self.hlkk_update_interval = 20  # 20秒发送一次
+        self.cached_age = 0
+        self.cached_gender = "--"
     
     def _connect(self):
         if self.cap and self.cap.isOpened():
@@ -316,6 +239,7 @@ class PersonAnalyzer:
                 d = resp.json()
                 return {
                     "face_detected": d.get('face_detected', False),
+                    "face_count": d.get('face_count', 0),
                     "pitch": d.get('pitch', 0),
                     "yaw": d.get('yaw', 0),
                     "roll": d.get('roll', 0),
@@ -339,35 +263,83 @@ class PersonAnalyzer:
         else:
             return '80-100'
 
+    def fetch_aligned_face(self):
+        """从emotion模块获取对齐后的人脸图像"""
+        try:
+            resp = requests.get(self.aligned_face_url, timeout=0.5)
+            if resp.status_code == 200:
+                img_array = np.asarray(bytearray(resp.content), dtype=np.uint8)
+                return cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+        except Exception as e:
+            print(f"获取对齐人脸失败: {e}")
+        return None
+
     def analyze_face_deepface(self, frame):
-        """使用DeepFace分析人脸年龄和性别"""
+        """使用DeepFace分析人脸年龄和性别（优先使用对齐人脸）"""
         if DeepFace is None:
             return None
+        
+        # 优先使用emotion模块返回的对齐人脸
+        aligned_face = self.fetch_aligned_face()
+        if aligned_face is None:
+            # 如果没有对齐人脸，回退到使用原始帧
+            print("[PersonAnalyzer] 未获取到对齐人脸，回退到原始帧分析")
+            aligned_face = frame
+            if aligned_face is None:
+                return None
+        
         try:
             result = DeepFace.analyze(
-                frame,
+                aligned_face,
                 actions=['age', 'gender'],
                 enforce_detection=False,
+                detector_backend='opencv',
                 silent=True
             )
             if isinstance(result, list):
                 result = result[0]
             
             age = result.get('age', 0)
-            gender = result.get('dominant_gender', '--')
-            gender_conf = result.get('gender', {}).get('Man', 0.5) if isinstance(result.get('gender'), dict) else 0.7
+            dominant_gender = result.get('dominant_gender', '--')
+            gender_dict = result.get('gender', {})
+            
+            # 获取性别置信度
+            if isinstance(gender_dict, dict):
+                if dominant_gender == 'Man':
+                    gender_conf = gender_dict.get('Man', 0.5)
+                elif dominant_gender == 'Woman':
+                    gender_conf = gender_dict.get('Woman', 0.5)
+                else:
+                    gender_conf = 0.5
+            else:
+                gender_conf = 0.7
+            
+            # 确保置信度是 0-1 范围的小数
+            if gender_conf > 1.5:
+                gender_conf = gender_conf / 100.0
+            # 限制在 0-1 之间
+            gender_conf = max(0.0, min(1.0, gender_conf))
+            
+            # 转换性别为中文
+            if dominant_gender == 'Man':
+                gender = '男'
+            elif dominant_gender == 'Woman':
+                gender = '女'
+            else:
+                gender = '--'
             
             return {
                 "age": int(age),
                 "age_range": self._age_to_range(age),
-                "age_confidence": 0.7,
+                "age_confidence": 0.85,  # 固定的年龄置信度
                 "gender": gender,
                 "gender_confidence": gender_conf,
                 "face_count": 1,
                 "age_model": {"available": True},
                 "gender_model": {"available": True}
             }
-        except Exception:
+        except Exception as e:
+            print(f"DeepFace分析失败: {e}")
             return None
 
     def analyze_face_onnx(self, frame):
@@ -396,10 +368,6 @@ class PersonAnalyzer:
             return None
         
         x, y, w, h = best_face
-        x = int(x * 2)
-        y = int(y * 2)
-        w = int(w * 2)
-        h = int(h * 2)
         
         padding = int(w * 0.2)
         x = max(0, x - padding)
@@ -558,6 +526,7 @@ class PersonAnalyzer:
             if emotion_status:
                 res.update({
                     "face_detected": emotion_status["face_detected"],
+                    "face_count": emotion_status["face_count"],
                     "pitch": round(emotion_status["pitch"], 1),
                     "yaw": round(emotion_status["yaw"], 1),
                     "roll": round(emotion_status["roll"], 1),
@@ -566,27 +535,28 @@ class PersonAnalyzer:
                     "timestamp": time.time()
                 })
                 
-                # 只在正脸且有帧时进行年龄性别和人脸识别
-                if emotion_status["is_front_face"] and frame is not None:
+                # 只在正脸且有帧时进行年龄性别分析
+                if emotion_status["pose"] == 'front' and frame is not None:
                     # 使用DeepFace进行分析
                     analysis = self.analyze_face_deepface(frame)
-                    face_recognition = self.face_rec.recognize(frame)
                     
                     if analysis:
-                        analysis = self.smooth_result(analysis)
-                        res.update({
-                            "age": analysis["age"],
-                            "age_range": analysis["age_range"],
-                            "age_confidence": analysis["age_confidence"],
-                            "gender": analysis["gender"],
-                            "gender_confidence": analysis["gender_confidence"],
-                            "age_model": analysis["age_model"],
-                            "gender_model": analysis["gender_model"],
-                            "user_id": face_recognition["user_id"] if face_recognition else None,
-                            "user_name": face_recognition["user_name"] if face_recognition else "--",
-                            "user_confidence": face_recognition["confidence"] if face_recognition else 0.0,
-                            "is_new_user": face_recognition["is_new"] if face_recognition else False,
-                        })
+                        print(f"[PersonAnalyzer] 检测结果: 年龄={analysis['age_range']}({analysis['age_confidence']:.2f}), 性别={analysis['gender']}({analysis['gender_confidence']:.2f})")
+                        # 添加置信度过滤，只接受高置信度的结果
+                        min_confidence = 0.5
+                        if analysis["age_confidence"] >= min_confidence and analysis["gender_confidence"] >= min_confidence:
+                            analysis = self.smooth_result(analysis)
+                            res.update({
+                                "age": analysis["age"],
+                                "age_range": analysis["age_range"],
+                                "age_confidence": analysis["age_confidence"],
+                                "gender": analysis["gender"],
+                                "gender_confidence": analysis["gender_confidence"],
+                                "age_model": analysis["age_model"],
+                                "gender_model": analysis["gender_model"],
+                            })
+                        else:
+                            print(f"[PersonAnalyzer] 置信度不足，跳过更新")
             
             self.result = res
 
@@ -609,7 +579,36 @@ class PersonAnalyzer:
     def _run_loop(self):
         while self.running:
             self.update()
+            self._try_update_hlkk()
             time.sleep(0.033)
+    
+    def _try_update_hlkk(self):
+        """实时向hlkk.py发送年龄和性别数据（由hlkk.py每10秒取均值）"""
+        with self.lock:
+            age = self.result.get("age", 0)
+            gender = self.result.get("gender", "--")
+        
+        try:
+            if age > 0 and gender in ["男", "女"]:
+                # 正脸检测到有效数据
+                gender_en = "male" if gender == "男" else "female"
+                url = f"http://127.0.0.1:5020/person?age={age}&gender={gender_en}"
+            else:
+                # 非正脸或未检测到，传无效标记
+                url = "http://127.0.0.1:5020/person?age=-&gender=-"
+            
+            resp = requests.get(url, timeout=0.5)
+            if resp.status_code == 200:
+                if age > 0 and gender in ["男", "女"]:
+                    self.last_hlkk_update_time = time.time()
+                    self.cached_age = age
+                    self.cached_gender = gender
+        except Exception:
+            pass
+    
+    def get_result(self):
+        with self.lock:
+            return self.result.copy()
 
 
 class EmotionProcessor:
@@ -919,14 +918,21 @@ def api_gate():
     return jsonify({"ok": True, "gate_enabled": enabled})
 
 
-@app.route("/person")
-def person_index():
-    return render_template("person.html")
-
-
 @app.route("/api/data")
 def api_data():
     return jsonify(person_analyzer.get_result())
+
+
+@app.route("/api/hlkk")
+def api_hlkk():
+    """代理获取hlkk数据，避免跨域"""
+    try:
+        resp = requests.get(HLKK_DATA_API, timeout=1.0)
+        if resp.status_code == 200:
+            return jsonify(resp.json())
+    except Exception as e:
+        print(f"获取hlkk数据失败: {e}")
+    return jsonify({})
 
 
 @app.route("/video_feed")
