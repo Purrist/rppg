@@ -9,6 +9,7 @@ import sys
 import time
 import random
 import logging
+import threading
 from flask import Flask, render_template, jsonify, request
 
 logging.getLogger('werkzeug').setLevel(logging.CRITICAL)
@@ -61,6 +62,10 @@ is_bomb = {}
 hide_timers = {}
 game_timer = None
 
+# 定时器相关
+miss_check_timer = None
+miss_check_interval = 50  # 50ms检查一次
+
 
 def get_difficulty_config(difficulty):
     return DIFFICULTY_CONFIG.get(difficulty, DIFFICULTY_CONFIG[1])
@@ -89,13 +94,14 @@ def show_moles():
     if game_state['status'] != 'playing':
         return
 
-    global current_moles, mole_show_times, is_bomb
+    global current_moles, mole_show_times, is_bomb, hide_timers
 
     config = get_difficulty_config(game_state['difficulty'])
     
     current_moles = []
     mole_show_times = {}
     is_bomb = {}
+    hide_timers = {}
 
     available_holes = list(range(8))
     selected_holes = []
@@ -117,12 +123,12 @@ def show_moles():
         current_moles.append(hole_index)
         mole_show_times[hole_index] = time.time() * 1000
         is_bomb[hole_index] = i > 0
-
         hide_timers[hole_index] = int(time.time() * 1000) + config['show_time']
 
 
 def trigger_miss():
-    global current_moles
+    """独立的地鼠超时检测函数，由定时器定期调用"""
+    global current_moles, mole_show_times, is_bomb, hide_timers
 
     if game_state['status'] != 'playing':
         return
@@ -148,12 +154,30 @@ def trigger_miss():
 
     game_state['accuracy'] = calculate_accuracy()
 
+    # 如果所有地鼠都消失了，显示新的地鼠
     if game_state['status'] == 'playing' and len(current_moles) == 0:
-        next_show_time = int(time.time() * 1000) + config['interval']
-        return {'next_show': next_show_time, 'moles': []}
+        show_moles()
+
+
+def start_miss_check_timer():
+    """启动独立的地鼠超时检测定时器"""
+    global miss_check_timer
     
-    return {'next_show': hide_timers[min(hide_timers.keys())] if hide_timers else None, 
-            'moles': current_moles, 'is_bomb': is_bomb}
+    def check_miss_loop():
+        while game_state['status'] == 'playing':
+            trigger_miss()
+            time.sleep(miss_check_interval / 1000.0)
+    
+    if miss_check_timer is None or not miss_check_timer.is_alive():
+        miss_check_timer = threading.Thread(target=check_miss_loop, daemon=True)
+        miss_check_timer.start()
+
+
+def stop_miss_check_timer():
+    """停止地鼠超时检测定时器"""
+    global miss_check_timer
+    # 线程会自动在游戏状态变为非playing时退出
+    miss_check_timer = None
 
 
 @app.route("/")
@@ -163,7 +187,6 @@ def index():
 
 @app.route("/api/game-state", methods=['GET'])
 def get_game_state():
-    trigger_miss()
     return jsonify(game_state)
 
 
@@ -178,6 +201,8 @@ def update_game_state():
             game_state['difficulty'] = new_diff
             game_state['difficultyName'] = DIFFICULTY_NAMES.get(new_diff, '较难')
             data.pop('difficulty', None)
+        elif 'difficultyName' in data:
+            data.pop('difficultyName', None)
         
         game_state.update(data)
     
@@ -208,6 +233,9 @@ def start_game():
 
     show_moles()
     
+    # 启动独立的地鼠超时检测定时器
+    start_miss_check_timer()
+    
     return jsonify({
         'success': True,
         'state': game_state,
@@ -224,6 +252,8 @@ def pause_game():
     elif game_state['status'] == 'paused':
         game_state['status'] = 'playing'
         show_moles()
+        # 重新启动定时器
+        start_miss_check_timer()
     
     return jsonify({'success': True, 'state': game_state})
 
@@ -239,6 +269,9 @@ def end_game():
     mole_show_times = {}
     is_bomb = {}
     hide_timers = {}
+    
+    # 停止定时器
+    stop_miss_check_timer()
     
     game_state['accuracy'] = calculate_accuracy()
     
@@ -289,14 +322,6 @@ def hit_mole():
 
     game_state['accuracy'] = calculate_accuracy()
 
-    config = get_difficulty_config(game_state['difficulty'])
-    next_show = None
-    if len(current_moles) == 0:
-        next_show = int(time.time() * 1000) + config['interval']
-        show_moles()
-    elif hide_timers:
-        next_show = hide_timers[min(hide_timers.keys())]
-
     return jsonify({
         'success': True,
         'type': 'bomb' if is_bomb.get(hole_index, False) else 'hit',
@@ -305,18 +330,13 @@ def hit_mole():
         'accuracy': game_state['accuracy'],
         'moles': current_moles,
         'is_bomb': is_bomb,
-        'next_show': next_show
+        'next_show': hide_timers[min(hide_timers.keys())] if hide_timers else None
     })
 
 
 @app.route("/api/game/moles", methods=['GET'])
 def get_moles():
-    trigger_miss()
     config = get_difficulty_config(game_state['difficulty'])
-    now = time.time() * 1000
-    
-    if game_state['status'] == 'playing' and len(current_moles) == 0:
-        show_moles()
     
     next_show = hide_timers[min(hide_timers.keys())] if hide_timers else None
     
