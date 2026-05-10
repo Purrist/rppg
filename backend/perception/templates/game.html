@@ -259,6 +259,36 @@ function updateUI() {
         : '--';
     
     updateMoodIndicator();
+    
+    // 更新后端状态
+    updateBackendState();
+}
+
+function updateBackendState() {
+    const total = gameState.hitCount + gameState.missCount;
+    const accuracy = total > 0 ? (gameState.hitCount / total * 100).toFixed(1) : '--';
+    
+    let status = 'idle';
+    if (gameState.running && !gameState.paused) {
+        status = 'playing';
+    } else if (gameState.running && gameState.paused) {
+        status = 'paused';
+    }
+    
+    fetch('/api/game-state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            status: status,
+            running: gameState.running,
+            timeLeft: gameState.timeLeft,
+            score: gameState.score,
+            difficulty: gameState.difficulty + 1,
+            difficultyName: difficultyConfig[gameState.difficulty].name,
+            accuracy: accuracy,
+            results: gameState.results.slice(-50) // 只保留最近50条记录
+        })
+    }).catch(e => console.error('Failed to update backend state:', e));
 }
 
 function updateMoodIndicator() {
@@ -336,15 +366,7 @@ function adjustDifficulty() {
     
     const avgRecentAccuracy = gameState.recentAccuracies.reduce((a, b) => a + b, 0) / gameState.recentAccuracies.length;
     
-    if (avgRecentAccuracy > FLOW_ACCURACY_MAX + 5 && gameState.difficulty < 7) {
-        gameState.difficulty++;
-        gameState.difficultyChanges++;
-        gameState.recentAccuracies = [];
-    } else if (avgRecentAccuracy < FLOW_ACCURACY_MIN - 5 && gameState.difficulty > 0) {
-        gameState.difficulty--;
-        gameState.difficultyChanges++;
-        gameState.recentAccuracies = [];
-    }
+    // 自动难度调整已禁用，难度由 DDA 系统控制
 }
 
 function showMoles() {
@@ -632,6 +654,21 @@ document.querySelectorAll('.mole-hole').forEach(hole => {
 });
 
 updateUI();
+
+// 定时从后端获取游戏状态（同步 DDA 修改的难度）
+setInterval(() => {
+    fetch('/api/game-state')
+        .then(r => r.json())
+        .then(state => {
+            // 如果后端返回的难度和本地不同，说明 DDA 修改了难度
+            if (state.difficulty !== undefined && state.difficulty - 1 !== gameState.difficulty) {
+                console.log('[DDA] 难度同步: 本地', gameState.difficulty + 1, '-> 后端', state.difficulty);
+                gameState.difficulty = state.difficulty - 1; // 后端是1-8，本地是0-7
+                updateUI();
+            }
+        })
+        .catch(e => console.error('获取游戏状态失败:', e));
+}, 1000);
 </script>
 </body>
 </html>

@@ -1,0 +1,579 @@
+# -*- coding: utf-8 -*-
+"""
+Dynamic Difficulty Adjustment (DDA) System
+基于 Hierarchical State Estimation 与 Evidence Fusion 的动态难度调整系统
+
+系统架构：
+Level 0: Perception Layer (生理 + 情绪 + 认知)
+Level 1: Reliability Gate (信号可靠性门控)
+Level 2A: Can Continue (能力状态估计)
+Level 2B: Want Continue (意愿状态估计)
+Level 3: Flow State Estimation (心流状态估计)
+Level 4: Difficulty Policy Engine (难度策略引擎)
+Level 5: Anti-Oscillation (防抖机制)
+Level 6: Safety Override (安全保护机制)
+"""
+
+import time
+from collections import deque
+
+
+class DDASystem:
+    def __init__(self):
+        # 滑动窗口（最近5题）
+        self.window_size = 5
+        self.question_history = deque(maxlen=self.window_size)
+        
+        # 当前状态
+        self.current_difficulty = 1
+        self.min_difficulty = 1
+        self.max_difficulty = 8
+        
+        # 状态计数器（用于防抖）
+        self.flow_state_history = deque(maxlen=2)
+        self.consecutive_same_state = 0
+        self.last_state = None
+        
+        # HR 斜率 EMA 平滑
+        self.hr_slope_ema = 0
+        self.ema_alpha = 0.2
+        
+        # 时间窗口
+        self.last_decision_time = time.time()
+        self.decision_interval = 5
+        
+        # 安全状态
+        self.hr_abnormal_count = 0
+        self.negative_high_conf_count = 0
+        self.high_hrr_duration = 0
+        self.last_hr_check_time = time.time()
+        
+        # 当前情绪（用于安全规则检查）
+        self._current_emotion = 'neutral'
+        
+        # 上一个心流状态（用于防抖）
+        self._last_flow_state = 'flow'
+        
+        # 统计数据
+        self.total_hits = 0
+        self.total_misses = 0
+        self.total_errors = 0
+        self.total_bombs = 0
+    
+    def _calculate_accuracy_from_history(self):
+        """从题目历史计算准确率"""
+        if not self.question_history:
+            return 0.5
+        
+        total = len(self.question_history)
+        hits = sum(1 for q in self.question_history if q.get('type') == 'hit')
+        return hits / total if total > 0 else 0.5
+    
+    def _calculate_rt_stats(self):
+        """计算反应时间统计"""
+        rts = []
+        for q in self.question_history:
+            t = q.get('time', 0)
+            if isinstance(t, int) and t > 0:
+                rts.append(t)
+        
+        if not rts:
+            return {'avg': 2000, 'trend': 0, 'ratio': 1.0}
+        
+        avg_rt = sum(rts) / len(rts)
+        
+        if len(rts) >= 3:
+            recent_rts = rts[-3:]
+            earlier_rts = rts[:-3] if len(rts) > 3 else recent_rts
+            
+            recent_avg = sum(recent_rts) / len(recent_rts)
+            earlier_avg = sum(earlier_rts) / len(earlier_rts) if earlier_rts else recent_avg
+            
+            trend = recent_avg - earlier_avg
+            ratio = recent_avg / earlier_avg if earlier_avg > 0 else 1.0
+        else:
+            trend = 0
+            ratio = 1.0
+        
+        return {'avg': avg_rt, 'trend': trend, 'ratio': ratio}
+    
+    def _calculate_hit_ratio(self):
+        """计算击中率"""
+        recent = list(self.question_history)[-3:] if len(self.question_history) >= 3 else self.question_history
+        
+        if not recent:
+            return 0.5
+        
+        hits = sum(1 for q in recent if q.get('type') == 'hit')
+        return hits / len(recent)
+    
+    def _calculate_error_rate(self):
+        """计算错误率（打错+炸弹）"""
+        recent = list(self.question_history)[-3:] if len(self.question_history) >= 3 else self.question_history
+        
+        if not recent:
+            return 0
+        
+        errors = sum(1 for q in recent if q.get('type') in ['error', 'bomb'])
+        return errors / len(recent)
+    
+    def _calculate_difficulty_tolerance(self):
+        """计算难度耐受性：检查难度提升后的表现"""
+        if len(self.question_history) < 2:
+            return 10
+        
+        recent_difficulties = [q.get('difficulty', 1) for q in self.question_history]
+        recent_types = [q.get('type') for q in self.question_history]
+        
+        if len(recent_difficulties) >= 3:
+            last_diff = recent_difficulties[-1]
+            prev_diff = recent_difficulties[-2]
+            
+            if last_diff > prev_diff:
+                recent_hits = sum(1 for t in recent_types[-2:] if t == 'hit')
+                if recent_hits >= 2:
+                    return 20
+                elif recent_hits >= 1:
+                    return 10
+                else:
+                    return 0
+        return 10
+
+    def _calculate_hrr_score(self, hrr, for_can_continue=True):
+        """计算 HRR 得分"""
+        hrr = hrr.lower() if isinstance(hrr, str) else "medium"
+        
+        if for_can_continue:
+            if hrr == "中等强度":
+                return 15
+            elif hrr == "低强度":
+                return 8
+            else:
+                return 0
+        else:
+            if hrr == "中等强度":
+                return 20
+            elif hrr == "低强度":
+                return 10
+            else:
+                return -15
+
+    def _calculate_hr_slope_score(self, hr_slope_raw):
+        """计算 HR 斜率得分"""
+        self.hr_slope_ema = self.ema_alpha * hr_slope_raw + (1 - self.ema_alpha) * self.hr_slope_ema
+        
+        slope = self.hr_slope_ema
+        
+        if -0.5 <= slope <= 0.5:
+            return 10
+        elif -1 <= slope <= 1:
+            return 8
+        elif slope > 2:
+            return -5
+        elif slope < -2:
+            return -5
+        else:
+            return 5
+
+    def estimate_can_continue(self, hr_valid, hrr_pct, hr_slope):
+        """估计能力状态（Can Continue）"""
+        use_hr = hr_valid
+        
+        hr_signal = '正常' if hr_valid else '异常'
+        
+        if hrr_pct < 40:
+            hrr = '低强度'
+        elif hrr_pct <= 60:
+            hrr = '中强度'
+        else:
+            hrr = '高强度'
+        
+        accuracy = self._calculate_accuracy_from_history()
+        rt_stats = self._calculate_rt_stats()
+        tolerance_score = self._calculate_difficulty_tolerance()
+        error_rate = self._calculate_error_rate()
+        
+        if accuracy >= 0.9:
+            acc_score = 30
+        elif accuracy >= 0.7:
+            acc_score = 20
+        elif accuracy >= 0.5:
+            acc_score = 10
+        else:
+            acc_score = 0
+        
+        rt_ratio = rt_stats['ratio']
+        if rt_ratio < 0.8:
+            rt_score = 25
+        elif rt_ratio <= 1.2:
+            rt_score = 20
+        elif rt_ratio <= 1.5:
+            rt_score = 10
+        else:
+            rt_score = 0
+        
+        error_penalty = min(error_rate * 20, 10)
+        
+        hrr_score = self._calculate_hrr_score(hrr) if use_hr else 0
+        hr_slope_score = self._calculate_hr_slope_score(hr_slope) if use_hr else 0
+        
+        total = acc_score + rt_score + tolerance_score + hrr_score + hr_slope_score - error_penalty
+        total = max(0, min(100, total))
+        
+        if total > 75:
+            state = "Strong"
+        elif total >= 55:
+            state = "Capable"
+        elif total >= 35:
+            state = "Struggling"
+        else:
+            state = "Overloaded"
+        
+        return {
+            'score': total,
+            'state': state,
+            'components': {
+                'accuracy': acc_score,
+                'rt_trend': rt_score,
+                'tolerance': tolerance_score,
+                'hrr': hrr_score,
+                'hr_slope': hr_slope_score,
+                'error_penalty': error_penalty,
+                'use_hr': use_hr,
+                'accuracy_value': accuracy,
+                'rt_ms': rt_stats['avg'],
+                'error_rate': error_rate
+            }
+        }
+
+    def _calculate_emotion_score(self, emotion):
+        """计算情绪得分"""
+        emotion_map = {
+            '积极高信度': 35, 'positive_high': 35,
+            '积极低信度': 15, 'positive_low': 15,
+            '中性高信度': 10, 'neutral_high': 10,
+            '中性': 5, 'neutral': 5,
+            '消极低信度': -15, 'negative_low': -15,
+            '消极高信度': -40, 'negative_high': -40
+        }
+        return emotion_map.get(emotion, 0)
+
+    def _calculate_rt_engagement(self):
+        """计算 RT 参与度得分"""
+        rt_stats = self._calculate_rt_stats()
+        ratio = rt_stats['ratio']
+        
+        if ratio < 0.8:
+            return 15
+        elif ratio <= 1.1:
+            return 10
+        elif ratio <= 1.3:
+            return -5
+        else:
+            return -15
+
+    def _calculate_accuracy_confidence(self):
+        """计算准确率信心得分"""
+        accuracy = self._calculate_accuracy_from_history()
+        
+        if accuracy > 0.85:
+            return 15
+        elif accuracy >= 0.65:
+            return 10
+        elif accuracy >= 0.5:
+            return 0
+        else:
+            return -10
+
+    def estimate_want_continue(self, hr_valid, hrr_pct):
+        """估计意愿状态（Want Continue）"""
+        use_hr = hr_valid
+        
+        if hrr_pct < 40:
+            hrr = '低强度'
+        elif hrr_pct <= 60:
+            hrr = '中强度'
+        else:
+            hrr = '高强度'
+        
+        emotion = self._current_emotion
+        
+        emotion_score = self._calculate_emotion_score(emotion)
+        hrr_score = self._calculate_hrr_score(hrr, for_can_continue=False) if use_hr else 0
+        rt_engagement_score = self._calculate_rt_engagement()
+        acc_conf_score = self._calculate_accuracy_confidence()
+        
+        hit_ratio = self._calculate_hit_ratio()
+        hit_boost = (hit_ratio - 0.5) * 20
+        
+        total = (emotion_score + 40) * 0.45 + hrr_score * 0.2 + rt_engagement_score * 0.2 + acc_conf_score * 0.15 + hit_boost
+        total = max(0, min(100, total + 50))
+        
+        if total > 75:
+            state = "Highly Engaged"
+        elif total >= 55:
+            state = "Engaged"
+        elif total >= 35:
+            state = "Passive"
+        else:
+            state = "Withdrawal Risk"
+        
+        return {
+            'score': total,
+            'state': state,
+            'components': {
+                'emotion': emotion_score,
+                'hrr': hrr_score,
+                'rt_engagement': rt_engagement_score,
+                'accuracy_confidence': acc_conf_score,
+                'hit_boost': hit_boost,
+                'hit_ratio': hit_ratio
+            }
+        }
+
+    def estimate_flow_state(self, can_continue_state, want_continue_state):
+        """估计心流状态"""
+        state_matrix = {
+            ('Strong', 'Highly Engaged'): 'boredom',
+            ('Strong', 'Engaged'): 'flow',
+            ('Capable', 'Engaged'): 'flow',
+            ('Struggling', 'Engaged'): 'challenge',
+            ('Struggling', 'Passive'): 'anxiety',
+            ('Overloaded', 'Passive'): 'fatigue',
+            ('Overloaded', 'Withdrawal Risk'): 'fatigue'
+        }
+        
+        return state_matrix.get((can_continue_state, want_continue_state), 'flow')
+
+    def _check_safety_rules(self, hr_valid, hrr_pct):
+        """检查安全规则"""
+        current_time = time.time()
+        
+        hr_signal = '正常' if hr_valid else '异常'
+        
+        if not hr_valid:
+            self.hr_abnormal_count += 1
+        else:
+            self.hr_abnormal_count = 0
+        
+        if hrr_pct > 50:
+            self.high_hrr_duration += current_time - self.last_hr_check_time
+        else:
+            self.high_hrr_duration = 0
+        
+        emotion = self._current_emotion
+        if emotion in ["消极高信度", "negative_high"]:
+            self.negative_high_conf_count += 1
+        else:
+            self.negative_high_conf_count = 0
+        
+        accuracy_collapse = False
+        if len(self.question_history) >= 3:
+            recent_accuracy = self._calculate_accuracy_from_history()
+            accuracy_collapse = recent_accuracy <= 0.2
+        
+        self.last_hr_check_time = current_time
+        
+        return {
+            'hr_abnormal': self.hr_abnormal_count > 3,
+            'sustained_high_hrr': self.high_hrr_duration > 60,
+            'negative_consecutive': self.negative_high_conf_count >= 5,
+            'accuracy_collapse': accuracy_collapse
+        }
+
+    def get_difficulty_adjustment(self, flow_state, safety_rules):
+        """获取难度调整量"""
+        if safety_rules['accuracy_collapse']:
+            return -1, "安全规则: 准确率崩塌"
+        if safety_rules['sustained_high_hrr']:
+            return -1, "安全规则: 持续高负荷"
+        if safety_rules['negative_consecutive']:
+            return 0, "安全规则: 消极情绪连续，禁止升难度"
+        
+        policy = {
+            'boredom': 1,
+            'flow': 0,
+            'challenge': 0,
+            'anxiety': -1,
+            'fatigue': -2
+        }
+        
+        return policy.get(flow_state, 0), f"策略: {flow_state}"
+
+    def update(self, physiology_data, emotion_data, game_data):
+        """更新 DDA 状态"""
+        hr_valid = physiology_data.get('hr_valid', False)
+        hrr_pct = physiology_data.get('hrr_pct', 0)
+        hr_slope = physiology_data.get('hr_slope', 0)
+        
+        emotion = emotion_data.get('emotion', 'neutral')
+        self._current_emotion = emotion
+        
+        results = game_data.get('results', [])
+        
+        if results:
+            for result in results:
+                time_val = result.get('time', 0)
+                if not isinstance(time_val, int):
+                    time_val = 0
+                q_data = {
+                    'type': result.get('type', 'miss'),
+                    'time': time_val,
+                    'difficulty': result.get('difficulty', 1),
+                    'score': result.get('score', 0)
+                }
+                self.question_history.append(q_data)
+                
+                if q_data['type'] == 'hit':
+                    self.total_hits += 1
+                elif q_data['type'] == 'miss':
+                    self.total_misses += 1
+                elif q_data['type'] == 'error':
+                    self.total_errors += 1
+                elif q_data['type'] == 'bomb':
+                    self.total_bombs += 1
+        
+        can_continue = self.estimate_can_continue(hr_valid, hrr_pct, hr_slope)
+        want_continue = self.estimate_want_continue(hr_valid, hrr_pct)
+        flow_state = self.estimate_flow_state(can_continue['state'], want_continue['state'])
+        
+        safety_rules = self._check_safety_rules(hr_valid, hrr_pct)
+        
+        self.flow_state_history.append(flow_state)
+        if flow_state == self.last_state:
+            self.consecutive_same_state += 1
+        else:
+            self.consecutive_same_state = 1
+        self.last_state = flow_state
+        
+        adjustment, reason = self.get_difficulty_adjustment(flow_state, safety_rules)
+        
+        should_adjust = self.consecutive_same_state >= 2 or safety_rules['accuracy_collapse']
+        
+        adjustment_made = False
+        if should_adjust:
+            new_difficulty = self.current_difficulty + adjustment
+            new_difficulty = max(self.min_difficulty, min(self.max_difficulty, new_difficulty))
+            
+            if new_difficulty != self.current_difficulty:
+                self.current_difficulty = new_difficulty
+                adjustment_made = True
+        
+        return {
+            'current_difficulty': self.current_difficulty,
+            'adjustment': adjustment if should_adjust else 0,
+            'adjustment_made': adjustment_made,
+            'reason': reason,
+            'can_continue': can_continue,
+            'want_continue': want_continue,
+            'flow_state': flow_state,
+            'safety_rules': safety_rules,
+            'consecutive_state_count': self.consecutive_same_state,
+            'window_size': len(self.question_history),
+            'stats': {
+                'total_hits': self.total_hits,
+                'total_misses': self.total_misses,
+                'total_errors': self.total_errors,
+                'total_bombs': self.total_bombs,
+                'overall_accuracy': (self.total_hits / (self.total_hits + self.total_misses + self.total_errors + self.total_bombs)) if (self.total_hits + self.total_misses + self.total_errors + self.total_bombs) > 0 else 0
+            }
+        }
+    
+    def update_from_unified(self, unified):
+        """从统一的 JSON 数据更新 DDA 状态"""
+        hr_valid = unified.get('hr_valid', False)
+        hrr_pct = unified.get('hrr_pct', 0)
+        hr_slope = unified.get('hr_slope', 0)
+        
+        emotion = unified.get('emotion', 'neutral')
+        self._current_emotion = emotion
+        
+        difficulty = unified.get('difficulty', 1)
+        
+        last_result = unified.get('last_result')
+        if last_result:
+            time_val = last_result.get('time', 0)
+            if not isinstance(time_val, int):
+                time_val = 0
+            q_data = {
+                'type': last_result.get('type', 'miss'),
+                'time': time_val,
+                'difficulty': difficulty,
+                'score': 0
+            }
+            if q_data['type'] in ['hit', 'miss', 'error', 'bomb']:
+                self.question_history.append(q_data)
+                
+                if q_data['type'] == 'hit':
+                    self.total_hits += 1
+                elif q_data['type'] == 'miss':
+                    self.total_misses += 1
+                elif q_data['type'] == 'error':
+                    self.total_errors += 1
+                elif q_data['type'] == 'bomb':
+                    self.total_bombs += 1
+        
+        can_continue = self.estimate_can_continue(hr_valid, hrr_pct, hr_slope)
+        want_continue = self.estimate_want_continue(hr_valid, hrr_pct)
+        flow_state = self.estimate_flow_state(can_continue['state'], want_continue['state'])
+        
+        safety_rules = self._check_safety_rules(hr_valid, hrr_pct)
+        
+        if flow_state == self._last_flow_state:
+            self.consecutive_same_state += 1
+        else:
+            self.consecutive_same_state = 1
+        self._last_flow_state = flow_state
+        
+        adjustment, reason = self.get_difficulty_adjustment(flow_state, safety_rules)
+        
+        if safety_rules['hr_abnormal']:
+            adjustment = 0
+            reason = "安全: HR异常"
+        
+        if safety_rules['negative_consecutive']:
+            adjustment = min(adjustment, 0)
+            if adjustment > 0:
+                adjustment = 0
+                reason = "安全: 消极情绪连续"
+        
+        if safety_rules['accuracy_collapse']:
+            adjustment = -1
+            reason = "安全: 准确率崩塌"
+        
+        if safety_rules['sustained_high_hrr']:
+            adjustment = min(adjustment, -1)
+            if adjustment > -1:
+                adjustment = -1
+                reason = "安全: 高负荷持续"
+        
+        should_adjust = self.consecutive_same_state >= 2 or safety_rules['accuracy_collapse']
+        
+        adjustment_made = False
+        if should_adjust:
+            new_difficulty = self.current_difficulty + adjustment
+            new_difficulty = max(self.min_difficulty, min(self.max_difficulty, new_difficulty))
+            
+            if new_difficulty != self.current_difficulty:
+                self.current_difficulty = new_difficulty
+                adjustment_made = True
+        
+        return {
+            'current_difficulty': self.current_difficulty,
+            'adjustment': adjustment if should_adjust else 0,
+            'adjustment_made': adjustment_made,
+            'reason': reason,
+            'can_continue': can_continue,
+            'want_continue': want_continue,
+            'flow_state': flow_state,
+            'safety_rules': safety_rules,
+            'consecutive_state_count': self.consecutive_same_state,
+            'window_size': len(self.question_history),
+            'stats': {
+                'total_hits': self.total_hits,
+                'total_misses': self.total_misses,
+                'total_errors': self.total_errors,
+                'total_bombs': self.total_bombs,
+                'overall_accuracy': (self.total_hits / (self.total_hits + self.total_misses + self.total_errors + self.total_bombs)) if (self.total_hits + self.total_misses + self.total_errors + self.total_bombs) > 0 else 0
+            }
+        }

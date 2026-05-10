@@ -46,7 +46,7 @@ def find_available_port(start_port=5000, max_attempts=10):
         attempts += 1
     return None
 
-LOCAL_IP = "192.168.3.91"
+LOCAL_IP = "192.168.137.25"
 try:
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.connect(("8.8.8.8", 80))
@@ -55,7 +55,7 @@ try:
 except:
     pass
 
-TABLET_VIDEO_URL = "http://10.158.6.244:8080/video"
+TABLET_VIDEO_URL = "http://192.168.137.25:8080/video"
 PROJECTION_CAMERA_SOURCE = 1
 
 if len(sys.argv) >= 2:

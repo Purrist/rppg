@@ -225,6 +225,7 @@ function update(data) {
     const t = data.trends || { plv: [], hrr: [], cr_ratio: [], brv: [], br_elevation: [] };
     const pf = data.profile || { hr_rest_est: 62, hr_max_est: 166, br_rest_est: 14 };
     const h = data.physiology || { plv_r: 0, hrr_pct: 0, cr_ratio: 0, brv_cv: 0, br_elevation: 0, hr_slope: 0, mean_phase_diff: 0 };
+    const raw = data.raw || {};
 
     const signalState = raw.signal_state || 'INIT';
     const hrV = raw.hr_valid || false;
@@ -774,13 +775,6 @@ function update(data) {
         yAxis: { type: 'value', min: brElevMin - brElevPad, max: brElevMax + brElevPad, ...AX },
         series: [{ type: 'line', data: formattedBrElevData, smooth: true, symbol: 'none', lineStyle: { color: '#14b8a6', width: 1.2 }, areaStyle: { color: 'rgba(20,184,166,0.1)' } }]
     }, true);
-}
-
-function fetchData() {
-    fetch('/data?age=' + pA + '&gender=' + pG)
-        .then(r => r.json())
-        .then(data => update(data))
-        .catch(() => {});
 }
 
 document.getElementById('age-input').addEventListener('change', updateProfile);

@@ -9,13 +9,13 @@
 *{margin:0;padding:0;box-sizing:border-box;font-family:'Segoe UI',system-ui,sans-serif}
 html,body{width:100%;height:100%;background:#0c1018;color:#c8cee0;overflow:hidden}
 .main-container{display:flex;height:100vh;padding:12px;gap:12px}
-.left-panel{flex:0 0 70%;display:flex;flex-direction:column;gap:12px}
+.left-panel{flex:0 0 70%;display:flex;flex-direction:column;gap:8px}
 .right-panel{flex:1;display:flex;flex-direction:column;gap:12px}
 .panel-card{background:linear-gradient(135deg,#151c2c,#1a2236);border-radius:12px;border:1px solid #232e44;overflow:hidden;display:flex;flex-direction:column}
 .panel-header{padding:10px 16px;background:rgba(0,0,0,0.2);border-bottom:1px solid #232e44;display:flex;align-items:center;justify-content:space-between}
 .panel-title{font-size:13px;font-weight:600;color:#64ffda;letter-spacing:0.5px}
-.panel-body{flex:1;padding:12px;display:flex;flex-direction:column;gap:10px}
-.mini-card{background:rgba(0,0,0,0.3);border-radius:8px;padding:10px 12px;border:1px solid #232e44;display:flex;align-items:center;gap:8px}
+.panel-body{flex:1;padding:8px;display:flex;flex-direction:column;gap:10px}
+.mini-card{background:rgba(0,0,0,0.3);border-radius:8px;padding:10px 12px;border:1px solid #232e44;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px;min-height:0}
 .mini-card-title{font-size:10px;color:#6b7a94;text-transform:uppercase;letter-spacing:0.5px}
 .mini-card-value{font-size:20px;font-weight:700;color:#fff}
 .mini-card-value.heart{color:#EA4335}
@@ -29,41 +29,41 @@ html,body{width:100%;height:100%;background:#0c1018;color:#c8cee0;overflow:hidde
 .info-value{font-size:16px;font-weight:600;color:#fff}
 .info-conf{font-size:11px;color:#4a5570}
 .info-sub{font-size:10px;color:#6b7a94;margin-left:auto}
-.psychology-layout{display:flex;flex:1;gap:12px;min-height:0}
-.psych-left{flex:0 0 45%;display:flex;flex-direction:column;gap:8px;min-height:0;max-height:200px}
-.psych-right{flex:1;display:flex;flex-direction:column;gap:8px;min-height:0;max-height:200px}
+.psychology-layout{display:flex;flex:1;gap:12px;min-height:0;height:100%}
+.psych-left{flex:0 0 40%;display:flex;flex-direction:column;gap:8px;min-height:0;height:100%}
+.psych-right{flex:1;display:grid;grid-template-rows:1fr 1fr;gap:6px;min-height:0;height:100%}
 .video-box{flex:1;background:#050a12;border-radius:8px;overflow:hidden;display:flex;align-items:center;justify-content:center;border:1px solid #232e44}
 .video-box img{max-width:100%;max-height:100%;object-fit:contain}
-.emotion-chart-box{height:120px;background:#050a12;border-radius:8px;overflow:hidden;border:1px solid #232e44;padding:8px}
-.emotion-chart-box canvas{width:100%!important;height:100%!important}
+.emotion-chart-box{flex:1;min-height:0;max-height:200px;background:#050a12;border-radius:8px;overflow:hidden;border:1px solid #232e44;padding:8px}
+.emotion-chart-box canvas{width:100%!important;height:100%!important;max-height:180px}
 .status-mini{display:flex;justify-content:space-between;gap:10px}
 .status-mini-item{background:rgba(0,0,0,0.3);border-radius:8px;padding:8px;border:1px solid #232e44;flex:1}
 .status-mini-label{font-size:10px;color:#6b7a94;text-transform:uppercase;margin-bottom:4px}
 .status-mini-value{font-size:14px;font-weight:600;color:#fff}
-.emotion-3cards{display:flex;gap:8px}
-.emotion-item{flex:1;padding:8px 10px;border-radius:8px;border:1px solid #232e44;display:flex;align-items:center;gap:6px}
+.emotion-3cards{display:flex;gap:8px;height:100%}
+.emotion-item{flex:1;padding:4px;border-radius:8px;border:1px solid #232e44;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-height:0;overflow:hidden}
 .emotion-item.positive{background:rgba(52,168,83,0.15);border-color:#34A853}
 .emotion-item.neutral{background:rgba(107,122,148,0.15);border-color:#6b7a94}
 .emotion-item.negative{background:rgba(234,67,53,0.15);border-color:#EA4335}
-.emotion-item-label{font-size:10px;color:#6b7a94;text-transform:uppercase}
-.emotion-item-value{font-size:24px;font-weight:700}
+.emotion-item-label{font-size:8px;color:#6b7a94;text-transform:uppercase}
+.emotion-item-value{font-size:18px;font-weight:700}
 .emotion-item.positive .emotion-item-value{color:#34A853}
 .emotion-item.neutral .emotion-item-value{color:#6b7a94}
 .emotion-item.negative .emotion-item-value{color:#EA4335}
-.psych-bottom{display:flex;gap:10px;height:80px}
-.gate-button{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px 20px;background:rgba(0,0,0,0.3);border:1px solid #374151;border-radius:10px;color:#6b7a94;font-size:12px;font-weight:500;cursor:pointer;transition:all 0.2s ease}
+.psych-bottom{display:flex;gap:8px;height:100%}
+.gate-button{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:6px;background:rgba(0,0,0,0.3);border:1px solid #374151;border-radius:10px;color:#6b7a94;font-size:10px;font-weight:500;cursor:pointer;transition:all 0.2s ease;min-height:0;overflow:hidden}
 .gate-button:hover{background:rgba(55,65,81,0.5);border-color:#4b5563}
 .gate-button.disabled{background:rgba(0,0,0,0.2);border-color:#1f2937;color:#374151}
-.gate-label{font-size:11px;color:#6b7a94;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px}
-.gate-status{display:flex;align-items:center;gap:6px}
-.gate-dot{width:10px;height:10px;border-radius:50%}
+.gate-label{font-size:9px;color:#6b7a94;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px}
+.gate-status{display:flex;align-items:center;gap:5px}
+.gate-dot{width:7px;height:7px;border-radius:50%}
 .gate-dot-on{background:#34A853;box-shadow:0 0 8px rgba(52,168,83,0.5)}
 .gate-dot-off{background:#4b5563}
-.gate-status-text{font-size:12px;color:#6b7a94}
+.gate-status-text{font-size:10px;color:#6b7a94}
 .gate-button.disabled .gate-status-text{color:#374151}
-.emotion-card{flex:1;background:linear-gradient(135deg,#1a1f35,#252b42);border-radius:10px;border:1px solid #3b82f6;padding:12px;display:flex;flex-direction:column;align-items:center;justify-content:center}
-.emotion-card-label{font-size:10px;color:#6b7a94;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px}
-.emotion-card-value{font-size:24px;font-weight:700;color:#fff}
+.emotion-card{flex:1;background:linear-gradient(135deg,#1a1f35,#252b42);border-radius:10px;border:1px solid #3b82f6;padding:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:0;overflow:hidden}
+.emotion-card-label{font-size:8px;color:#6b7a94;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px}
+.emotion-card-value{font-size:18px;font-weight:700;color:#fff}
 .emotion-card.positive{border-color:#34A853;background:linear-gradient(135deg,rgba(52,168,83,0.15),rgba(52,168,83,0.05))}
 .emotion-card.positive .emotion-card-value{color:#34A853}
 .emotion-card.negative{border-color:#EA4335;background:linear-gradient(135deg,rgba(234,67,53,0.15),rgba(234,67,53,0.05))}
@@ -76,14 +76,37 @@ html,body{width:100%;height:100%;background:#0c1018;color:#c8cee0;overflow:hidde
 .emotion-display.neutral{background:rgba(107,122,148,0.2);color:#6b7a94}
 .chart-mini{height:80px;min-height:0;background:#050a12;border-radius:6px;border:1px solid #232e44}
 .chart-mini canvas{width:100%!important;height:100%!important}
-.cognitive-panel{flex:1;display:flex;align-items:center;justify-content:center;border:1px dashed #232e44}
-.cognitive-placeholder{color:#4a5570;font-size:13px}
-.dda-panel{flex:1;display:flex;align-items:center;justify-content:center;border:1px dashed #232e44}
-.dda-placeholder{color:#4a5570;font-size:13px}
+.cognitive-panel{flex:1;display:flex;border:1px solid #232e44;border-radius:10px;overflow:hidden}
+.game-stats-left{flex:0 0 40%;display:grid;grid-template-columns:repeat(2,1fr);grid-template-rows:repeat(2,1fr);gap:10px;padding:12px;background:rgba(0,0,0,0.2)}
+.game-records-right{flex:1;display:flex;flex-direction:column;padding:12px;background:rgba(0,0,0,0.15);border-left:1px solid #232e44}
+.game-records-title{font-size:11px;color:#6b7a94;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px}
+.game-records-list{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:6px}
+.game-records-list::-webkit-scrollbar{width:4px}
+.game-records-list::-webkit-scrollbar-track{background:#0c1018}
+.game-records-list::-webkit-scrollbar-thumb{background:#232e44}
+.game-record-item{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:rgba(0,0,0,0.25);border-radius:6px;font-size:11px}
+.game-record-hit{color:#34A853;font-weight:600}
+.game-record-miss{color:#f59e0b;font-weight:600}
+.game-record-error{color:#EA4335;font-weight:600}
+.game-record-bomb{color:#EA4335;font-weight:600}
+.game-record-time{color:#6b7a94}
+.game-record-diff{color:#4285F4}
+.game-record-score{color:#f59e0b;font-weight:700}
+.dda-panel{flex:1;display:flex;flex-direction:column;gap:8px;overflow-y:auto;padding:8px}
+.dda-section{background:#1a2236;border-radius:8px;padding:8px}
+.dda-section-title{font-size:11px;color:#64ffda;margin-bottom:6px;font-weight:600}
+.dda-item{display:flex;justify-content:space-between;padding:3px 0;font-size:11px}
+.dda-label{color:#8892a4}
+.dda-value{color:#e6edf3;font-family:monospace}
+.dda-value.highlight{color:#ffd700;font-weight:bold;font-size:14px}
 .status-bar{display:flex;align-items:center;gap:16px;padding:8px 12px;background:rgba(0,0,0,0.3);border-radius:8px;font-size:11px;color:#6b7a94}
 .status-dot{width:6px;height:6px;border-radius:50%;display:inline-block}
 .status-dot.on{background:#34A853}
 .status-dot.off{background:#555}
+.model-toggle{display:flex;align-items:center;gap:8px;margin-left:auto}
+.model-toggle-btn{padding:4px 10px;border-radius:4px;border:1px solid #3a5570;background:#0c1018;color:#6b7a94;cursor:pointer;font-size:10px;transition:all 0.2s}
+.model-toggle-btn:hover{border-color:#64ffda;color:#64ffda}
+.model-toggle-btn.active{background:#1e3a5f;border-color:#64ffda;color:#64ffda}
 </style>
 </head>
 <body>
@@ -96,6 +119,10 @@ html,body{width:100%;height:100%;background:#0c1018;color:#c8cee0;overflow:hidde
         <div class="status-bar">
           <span><span class="status-dot" id="comStatus"></span> 心率呼吸率</span>
           <span>最后更新: <span id="lastUpdate">--</span></span>
+          <div class="model-toggle">
+            <button class="model-toggle-btn active" id="btnDeepFace" onclick="setModel('deepface')">DeepFace</button>
+            <button class="model-toggle-btn" id="btnOnnx" onclick="setModel('onnx')">ONNX</button>
+          </div>
         </div>
       </div>
       <div class="panel-body">
@@ -140,13 +167,7 @@ html,body{width:100%;height:100%;background:#0c1018;color:#c8cee0;overflow:hidde
 
     <!-- 心理卡片 -->
     <div class="panel-card" style="flex:1">
-      <div class="panel-header">
-        <span class="panel-title">心理监测</span>
-        <div class="status-bar">
-          <span><span class="status-dot" id="auStatus"></span> AU情绪</span>
-        </div>
-      </div>
-      <div class="panel-body" style="flex:1">
+      <div class="panel-body" style="flex:1;padding:12px">
         <div class="psychology-layout">
           <div class="psych-left">
             <div class="emotion-chart-box">
@@ -186,9 +207,35 @@ html,body{width:100%;height:100%;background:#0c1018;color:#c8cee0;overflow:hidde
       </div>
     </div>
 
-    <!-- 认知卡片 -->
-    <div class="panel-card cognitive-panel">
-      <span class="cognitive-placeholder">认知监测 - 待开发</span>
+    <!-- 认知卡片 - 游戏状态 -->
+    <div class="panel-card" style="flex:1">
+      <div class="cognitive-panel" style="border:none;border-radius:0">
+        <div class="game-stats-left">
+          <div class="mini-card">
+            <span class="mini-card-title">剩余时间</span>
+            <span class="mini-card-value" style="color:#EA4335" id="vGameTime">3:00</span>
+            <span class="mini-card-sub" id="vGameStatus">未开始</span>
+          </div>
+          <div class="mini-card">
+            <span class="mini-card-title">得分</span>
+            <span class="mini-card-value" style="color:#34A853" id="vGameScore">0</span>
+            <span class="mini-card-sub">当前分数</span>
+          </div>
+          <div class="mini-card">
+            <span class="mini-card-title">难度</span>
+            <span class="mini-card-value" style="color:#4285F4" id="vGameDiff">1</span>
+            <span class="mini-card-sub" id="vGameDiffName">简单</span>
+          </div>
+          <div class="mini-card">
+            <span class="mini-card-title">准确率</span>
+            <span class="mini-card-value" style="color:#64ffda" id="vGameAcc">--%</span>
+            <span class="mini-card-sub">总体表现</span>
+          </div>
+        </div>
+        <div class="game-records-right">
+          <div class="game-records-list" id="gameRecordsList"></div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -199,7 +246,36 @@ html,body{width:100%;height:100%;background:#0c1018;color:#c8cee0;overflow:hidde
         <span class="panel-title">DDA难度调整中枢</span>
       </div>
       <div class="panel-body dda-panel">
-        <span class="dda-placeholder">待开发</span>
+        <div class="dda-section">
+          <div class="dda-section-title">📊 生理数据 → DDA</div>
+          <div class="dda-item"><span class="dda-label">hrr_pct:</span><span class="dda-value" id="dda-hrr-pct">--</span></div>
+          <div class="dda-item"><span class="dda-label">hrr:</span><span class="dda-value" id="dda-hrr">--</span></div>
+          <div class="dda-item"><span class="dda-label">hr_slope:</span><span class="dda-value" id="dda-hr-slope">--</span></div>
+          <div class="dda-item"><span class="dda-label">slope_label:</span><span class="dda-value" id="dda-slope-label">--</span></div>
+        </div>
+        <div class="dda-section">
+          <div class="dda-section-title">😊 情绪数据 → DDA</div>
+          <div class="dda-item"><span class="dda-label">emotion_cn:</span><span class="dda-value" id="dda-emotion-cn">--</span></div>
+          <div class="dda-item"><span class="dda-label">confidence:</span><span class="dda-value" id="dda-emotion-conf">--</span></div>
+        </div>
+        <div class="dda-section">
+          <div class="dda-section-title">🎮 游戏数据 → DDA</div>
+          <div class="dda-item"><span class="dda-label">timeLeft:</span><span class="dda-value" id="dda-time-left">--</span></div>
+          <div class="dda-item"><span class="dda-label">score:</span><span class="dda-value" id="dda-score">--</span></div>
+          <div class="dda-item"><span class="dda-label">difficulty:</span><span class="dda-value" id="dda-game-diff">--</span></div>
+          <div class="dda-item"><span class="dda-label">accuracy:</span><span class="dda-value" id="dda-game-acc">--</span></div>
+        </div>
+        <div class="dda-section">
+          <div class="dda-section-title">🎯 最新结果 → DDA</div>
+          <div class="dda-item"><span class="dda-label">type:</span><span class="dda-value" id="dda-result-type">--</span></div>
+          <div class="dda-item"><span class="dda-label">time:</span><span class="dda-value" id="dda-result-time">--</span></div>
+        </div>
+        <div class="dda-section">
+          <div class="dda-section-title">⚙️ DDA 输出</div>
+          <div class="dda-item"><span class="dda-label">建议难度:</span><span class="dda-value highlight" id="dda-output-diff">--</span></div>
+          <div class="dda-item"><span class="dda-label">flow_state:</span><span class="dda-value" id="dda-output-flow">--</span></div>
+          <div class="dda-item"><span class="dda-label">adjustment:</span><span class="dda-value" id="dda-output-adj">--</span></div>
+        </div>
       </div>
     </div>
   </div>
@@ -258,10 +334,9 @@ function updatePhysioDisplay(data) {
     if (vHRR) vHRR.textContent = hrr.toFixed(1);
     
     let hrrStatus = '储备';
-    if (hrr < 20) hrrStatus = '低强度';
-    else if (hrr < 40) hrrStatus = '中等强度';
-    else if (hrr < 60) hrrStatus = '高强度';
-    else hrrStatus = '极限强度';
+    if (hrr < 40) hrrStatus = '低强度';
+    else if (hrr <= 60) hrrStatus = '中强度';
+    else hrrStatus = '高强度';
     if (vHRRStatus) vHRRStatus.textContent = hrrStatus;
     
     const hrSlope = physio.hr_slope || 0;
@@ -269,21 +344,18 @@ function updatePhysioDisplay(data) {
         vHRSlope.textContent = hrSlope.toFixed(2);
         
         let slopeStatus = '趋势';
-        if (hrSlope > 1.0) {
+        if (hrSlope > 2.0) {
             vHRSlope.style.color = '#EA4335';
             slopeStatus = '快速上升';
-        } else if (hrSlope > 0.3) {
+        } else if (hrSlope > 0.5) {
             vHRSlope.style.color = '#f59e0b';
             slopeStatus = '缓慢上升';
-        } else if (hrSlope < -1.0) {
+        } else if (hrSlope < -0.5) {
             vHRSlope.style.color = '#34A853';
             slopeStatus = '快速下降';
-        } else if (hrSlope < -0.3) {
-            vHRSlope.style.color = '#60a5fa';
-            slopeStatus = '缓慢下降';
-        } else {
+        } else if (hrSlope > -0.5 && hrSlope <= 0.5) {
             vHRSlope.style.color = '#4285F4';
-            slopeStatus = '稳定';
+            slopeStatus = '平稳';
         }
         if (vHRSlopeStatus) vHRSlopeStatus.textContent = slopeStatus;
     }
@@ -419,11 +491,12 @@ function updateEmotionDisplay(data) {
     
     const value = proc.value || 0;
     emotionHistory.push(value);
-    if (emotionHistory.length > 200) emotionHistory.shift();
+    if (emotionHistory.length > 100) emotionHistory.shift();
     
     if (mainEmotionChart) {
         mainEmotionChart.data.datasets[0].data = emotionHistory;
         mainEmotionChart.data.labels = Array.from({length: emotionHistory.length}, (_, i) => i);
+        mainEmotionChart.options.scales.x.max = Math.max(emotionHistory.length - 1, 0);
         mainEmotionChart.update('none');
     }
     
@@ -444,6 +517,8 @@ async function fetchData() {
         if (data.emotion || data.processed) updateEmotionDisplay(data);
         
         updateTimestamp();
+        
+        fetchDDAData();
     } catch (e) {
         console.error('API Error', e);
         const comStatus = document.getElementById('comStatus');
@@ -451,6 +526,79 @@ async function fetchData() {
         if (comStatus) comStatus.className = 'status-dot off';
         if (auStatus) auStatus.className = 'status-dot off';
     }
+}
+
+async function fetchDDAData() {
+    try {
+        const resp = await fetch('/api/dda/input');
+        const data = await resp.json();
+        updateDDADisplay(data);
+    } catch (e) {
+        console.error('DDA API Error', e);
+    }
+}
+
+function updateDDADisplay(data) {
+    // 生理数据
+    const hrrPctEl = document.getElementById('dda-hrr-pct');
+    const hrrEl = document.getElementById('dda-hrr');
+    const hrSlopeEl = document.getElementById('dda-hr-slope');
+    const slopeLabelEl = document.getElementById('dda-slope-label');
+    
+    // 情绪数据
+    const emotionCnEl = document.getElementById('dda-emotion-cn');
+    const emotionConfEl = document.getElementById('dda-emotion-conf');
+    
+    // 游戏数据
+    const timeLeftEl = document.getElementById('dda-time-left');
+    const scoreEl = document.getElementById('dda-score');
+    const gameDiffEl = document.getElementById('dda-game-diff');
+    const gameAccEl = document.getElementById('dda-game-acc');
+    
+    // 最新结果
+    const resultTypeEl = document.getElementById('dda-result-type');
+    const resultTimeEl = document.getElementById('dda-result-time');
+    
+    // DDA 输出
+    const ddaOutputDiffEl = document.getElementById('dda-output-diff');
+    const ddaOutputFlowEl = document.getElementById('dda-output-flow');
+    const ddaOutputAdjEl = document.getElementById('dda-output-adj');
+    
+    // 生理数据
+    if (hrrPctEl) hrrPctEl.textContent = data.hrr_pct !== undefined ? data.hrr_pct.toFixed(1) + '%' : '--';
+    if (hrrEl) hrrEl.textContent = data.hrr || '--';
+    if (hrSlopeEl) hrSlopeEl.textContent = data.hr_slope !== undefined ? data.hr_slope.toFixed(2) : '--';
+    if (slopeLabelEl) slopeLabelEl.textContent = data.slope_label || '--';
+    
+    // 情绪数据
+    if (emotionCnEl) emotionCnEl.textContent = data.emotion_cn || '--';
+    if (emotionConfEl) emotionConfEl.textContent = data.confidence !== undefined ? (data.confidence * 100).toFixed(0) + '%' : '--';
+    
+    // 游戏数据
+    if (timeLeftEl) {
+        const tl = data.timeLeft || 0;
+        const mins = Math.floor(tl / 60);
+        const secs = tl % 60;
+        timeLeftEl.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+    if (scoreEl) scoreEl.textContent = data.score !== undefined ? data.score : '--';
+    if (gameDiffEl) gameDiffEl.textContent = data.difficulty !== undefined ? data.difficulty : '--';
+    if (gameAccEl) gameAccEl.textContent = data.accuracy || '--';
+    
+    // 最新结果
+    if (data.last_result) {
+        if (resultTypeEl) resultTypeEl.textContent = data.last_result.type || '--';
+        if (resultTimeEl) resultTimeEl.textContent = data.last_result.time ? data.last_result.time + 'ms' : '--';
+    } else {
+        if (resultTypeEl) resultTypeEl.textContent = '--';
+        if (resultTimeEl) resultTimeEl.textContent = '--';
+    }
+    
+    // DDA 输出（从 dda_output 字段）
+    const ddaOutput = data.dda_output || {};
+    if (ddaOutputDiffEl) ddaOutputDiffEl.textContent = ddaOutput.current_difficulty !== undefined ? ddaOutput.current_difficulty : '--';
+    if (ddaOutputFlowEl) ddaOutputFlowEl.textContent = ddaOutput.flow_state || '--';
+    if (ddaOutputAdjEl) ddaOutputAdjEl.textContent = ddaOutput.adjustment !== undefined ? (ddaOutput.adjustment > 0 ? '+' + ddaOutput.adjustment : ddaOutput.adjustment) : '--';
 }
 
 async function fetchPersonData() {
@@ -527,12 +675,128 @@ function toggleGate() {
     }).catch(e => console.error('Failed to update gate', e));
 }
 
+function updateGameDisplay(data) {
+    console.log('[DEBUG] 收到游戏数据:', data);
+    
+    const vGameTime = document.getElementById('vGameTime');
+    const vGameStatus = document.getElementById('vGameStatus');
+    const vGameScore = document.getElementById('vGameScore');
+    const vGameDiff = document.getElementById('vGameDiff');
+    const vGameDiffName = document.getElementById('vGameDiffName');
+    const vGameAcc = document.getElementById('vGameAcc');
+    const gameRecordsList = document.getElementById('gameRecordsList');
+    
+    if (vGameTime) {
+        const mins = Math.floor((data.timeLeft || 0) / 60);
+        const secs = (data.timeLeft || 0) % 60;
+        vGameTime.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+    
+    if (vGameStatus) {
+        const statusMap = {
+            'idle': '未开始',
+            'playing': '进行中',
+            'paused': '已暂停'
+        };
+        vGameStatus.textContent = statusMap[data.status] || (data.running ? '进行中' : '未开始');
+    }
+    
+    if (vGameScore) vGameScore.textContent = data.score || 0;
+    if (vGameDiff) vGameDiff.textContent = data.difficulty || 1;
+    if (vGameDiffName) vGameDiffName.textContent = data.difficultyName || '简单';
+    if (vGameAcc) vGameAcc.textContent = (data.accuracy || '--') + '%';
+    
+    if (gameRecordsList) {
+        gameRecordsList.innerHTML = '';
+        const results = data.results || [];
+        console.log('[DEBUG] 游戏记录数量:', results.length);
+        results.reverse().forEach((r, idx) => {
+            const item = document.createElement('div');
+            item.className = 'game-record-item';
+            
+            let typeClass = 'game-record-hit';
+            let typeText = '✓ 打中';
+            if (r.type === 'miss') {
+                typeClass = 'game-record-miss';
+                typeText = '○ 漏打';
+            } else if (r.type === 'error') {
+                typeClass = 'game-record-error';
+                typeText = '✗ 打错';
+            } else if (r.type === 'bomb') {
+                typeClass = 'game-record-bomb';
+                typeText = '💣 炸弹';
+            }
+            
+            item.innerHTML = `
+                <span class="${typeClass}">${typeText}</span>
+                <span class="game-record-time">${r.time === '--' ? '--' : r.time + 'ms'}</span>
+                <span class="game-record-diff">Lv.${r.difficulty}</span>
+                <span class="game-record-score">${r.score > 0 ? '+' : ''}${r.score}</span>
+            `;
+            gameRecordsList.appendChild(item);
+        });
+    }
+}
+
+async function fetchGameData() {
+    try {
+        console.log('[DEBUG] 正在获取游戏数据...');
+        const resp = await fetch('/api/game');
+        const data = await resp.json();
+        updateGameDisplay(data);
+    } catch (e) {
+        console.error('Game API Error', e);
+    }
+}
+
 function initApp() {
     initChart();
     fetchData();
     fetchPersonData();
+    fetchCurrentModel();
+    fetchGameData();
     setInterval(fetchData, 200);
     setInterval(fetchPersonData, 1000);
+    setInterval(fetchGameData, 500);
+}
+
+async function fetchCurrentModel() {
+    try {
+        const resp = await fetch('/api/model');
+        const data = await resp.json();
+        updateModelButtons(data.model || 'deepface');
+    } catch (e) {
+        console.error('Model API Error', e);
+    }
+}
+
+function updateModelButtons(model) {
+    const btnDeepFace = document.getElementById('btnDeepFace');
+    const btnOnnx = document.getElementById('btnOnnx');
+    if (model === 'onnx') {
+        btnDeepFace.classList.remove('active');
+        btnOnnx.classList.add('active');
+    } else {
+        btnDeepFace.classList.add('active');
+        btnOnnx.classList.remove('active');
+    }
+}
+
+async function setModel(model) {
+    try {
+        const resp = await fetch('/api/model', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({model: model})
+        });
+        const data = await resp.json();
+        if (data.ok) {
+            updateModelButtons(model);
+            console.log('模型已切换为:', model);
+        }
+    } catch (e) {
+        console.error('切换模型失败', e);
+    }
 }
 
 document.addEventListener('DOMContentLoaded', initApp);

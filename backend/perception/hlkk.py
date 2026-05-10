@@ -83,13 +83,16 @@ trend_phase_valid_history = []
 # 从perception接收的年龄和性别数据队列
 person_data_queue = []
 PERSON_DATA_WINDOW = 10  # 10秒窗口
+PERCEPTION_TIMEOUT = 30  # perception超时时间（秒），超过这个时间没收到数据就回退input
 person_data_lock = threading.Lock()
 
 # 当前使用的年龄和性别（可能来自perception或用户输入）
 current_age = 30
 current_gender = 'male'
 person_source = 'input'  # 'input' or 'perception'
+last_perception_time = 0  # 最后一次收到perception数据的时间
 has_received_perception = False  # 是否曾经接收到过perception的有效数据
+fallback_to_input = False  # 是否由于perception超时回退到input模式
 
 
 # ========== PhasePreprocessor ==========
@@ -871,7 +874,7 @@ def health():
 @app.route('/person')
 def person_data():
     """接收perception发送的年龄和性别数据"""
-    global person_data_queue
+    global person_data_queue, last_perception_time, fallback_to_input
     age_param = request.args.get('age')
     gender_param = request.args.get('gender', type=str)
     
@@ -890,10 +893,16 @@ def person_data():
     
     if age_param > 0 and gender_param in ('male', 'female'):
         with person_data_lock:
+            # 更新最后一次收到perception数据的时间
+            last_perception_time = time.time()
+            # 如果是从回退模式恢复，重置标志
+            if fallback_to_input:
+                fallback_to_input = False
+                print("检测到perception重新连接，恢复使用perception数据")
             person_data_queue.append({
                 'age': age_param,
                 'gender': gender_param,
-                'time': time.time()
+                'time': last_perception_time
             })
         return jsonify({'status': 'ok'})
     return jsonify({'status': 'error', 'message': '参数无效'})
@@ -901,14 +910,14 @@ def person_data():
 
 @app.route('/person_input')
 def person_input_data():
-    """接收用户手动输入的年龄和性别（优先级低于perception）"""
-    global current_age, current_gender, person_source, has_received_perception, engine
+    """接收用户手动输入的年龄和性别（perception超时情况下允许覆盖）"""
+    global current_age, current_gender, person_source, has_received_perception, engine, fallback_to_input
     
     age_param = request.args.get('age', type=int)
     gender_param = request.args.get('gender', type=str)
     
-    # 如果曾经接收到过perception数据，不允许用户手动输入覆盖
-    if has_received_perception:
+    # 如果曾经接收到过perception数据，且没有超时回退，才不允许用户手动输入
+    if has_received_perception and not fallback_to_input:
         return jsonify({'status': 'error', 'message': '已有perception数据，不可手动覆盖'})
     
     changed = False
@@ -928,14 +937,25 @@ def person_input_data():
 
 
 def calculate_person_mean():
-    """每10秒计算一次年龄和性别的均值"""
+    """每10秒计算一次年龄和性别的均值，带超时检测"""
     global person_data_queue, current_age, current_gender, person_source, has_received_perception
+    global last_perception_time, fallback_to_input
     
     while True:
         time.sleep(PERSON_DATA_WINDOW)
         
+        current_time = time.time()
         with person_data_lock:
-            if len(person_data_queue) > 0:
+            # ========== 超时检测：超过 PERCEPTION_TIMEOUT 秒没收到perception数据就回退input ==========
+            if has_received_perception and not fallback_to_input:
+                time_since_last_perception = current_time - last_perception_time
+                if time_since_last_perception > PERCEPTION_TIMEOUT:
+                    print(f"警告：{PERCEPTION_TIMEOUT}秒未收到perception数据，自动回退到用户输入模式")
+                    fallback_to_input = True
+                    person_source = 'input'
+            
+            # ========== 正常数据处理 ==========
+            if len(person_data_queue) > 0 and not fallback_to_input:
                 # 队列中有有效数据（正脸检测到），计算均值并更新
                 age_sum = sum(item['age'] for item in person_data_queue)
                 avg_age = round(age_sum / len(person_data_queue))
@@ -953,7 +973,7 @@ def calculate_person_mean():
                 
                 person_data_queue = []
             # 如果队列为空（非正脸或未检测到），保持当前状态不变
-            # 一旦接收到过perception数据，就不再自动切换回input模式
+            # 如果超时回退input模式后，允许用户重新输入
 
 
 # 启动定时计算线程
@@ -1004,6 +1024,7 @@ def get_data():
         "profile": {
             "age": current_age, "gender": current_gender,
             "person_source": person_source,
+            "fallback_to_input": fallback_to_input,
             "hr_rest_est": engine.hr_rest_est,
             "br_rest_est": engine.br_rest_est,
             "hr_max_est": engine.hr_max,
