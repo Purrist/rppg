@@ -62,7 +62,7 @@ dda_system.current_difficulty = 4
 AU_STATUS_API = "http://127.0.0.1:5010/api/status"
 HLKK_DATA_API = "http://127.0.0.1:5020/data"
 
-PERSON_HTTP_PORT = 5030
+PERSON_HTTP_PORT = 5090
 IP_CAMERA_URL = "http://192.168.137.25:8080/video"
 
 MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "core", "models")
@@ -399,7 +399,7 @@ class PersonAnalyzer:
                 "age_confidence": age_conf if age_pred is not None else 0.0,
                 "gender": "男" if gender_pred == 0 else "女" if gender_pred == 1 else "--",
                 "gender_confidence": gender_conf if gender_pred is not None else 0.0,
-                "face_count": len(faces),
+                "face_count": 1,
                 "age_model": age_model_result,
                 "gender_model": gender_model_result,
                 "using_onnx": True
@@ -567,6 +567,11 @@ class PersonAnalyzer:
     
     def _try_update_hlkk(self):
         """实时向hlkk.py发送年龄和性别数据（由hlkk.py每10秒取均值）"""
+        # 检查时间间隔，避免请求风暴
+        current_time = time.time()
+        if current_time - self.last_hlkk_update_time < self.hlkk_update_interval:
+            return
+        
         with self.lock:
             age = self.result.get("age", 0)
             gender = self.result.get("gender", "--")
@@ -582,16 +587,12 @@ class PersonAnalyzer:
             
             resp = requests.get(url, timeout=0.5)
             if resp.status_code == 200:
+                self.last_hlkk_update_time = current_time
                 if age > 0 and gender in ["男", "女"]:
-                    self.last_hlkk_update_time = time.time()
                     self.cached_age = age
                     self.cached_gender = gender
         except Exception:
             pass
-    
-    def get_result(self):
-        with self.lock:
-            return self.result.copy()
 
 
 class EmotionProcessor:
@@ -919,6 +920,11 @@ def run_dda_update():
         unified = get_unified_dda_data()
         last_dda_data = unified
         
+        # 只在游戏进行时才执行DDA更新
+        game_status = unified.get('game_status', 'idle')
+        if game_status != 'playing':
+            return None
+        
         result = dda_system.update_from_unified(unified)
         print(f"[DDA] 更新结果: 难度={result['current_difficulty']}, 状态={result['flow_state']}, 调整={result['adjustment']}")
         
@@ -1002,6 +1008,7 @@ def get_unified_dda_data():
         'score': game_data.get('score', 0),
         'difficulty': game_data.get('difficulty', 1),
         'accuracy': game_data.get('accuracy', '--'),
+        'game_status': game_data.get('status', 'idle'),
         'last_result': None
     }
     
@@ -1082,15 +1089,19 @@ def sync_difficulty_to_game():
         if resp.status_code == 200:
             game_state = resp.json()
             current_game_diff = game_state.get('difficulty', 4)
+            game_status = game_state.get('status', 'idle')
             
-            # DDA是唯一的难度调整源，无论游戏状态如何都同步
+            # 只在游戏进行时同步难度
+            if game_status != 'playing':
+                return
+            
             if dda_system.current_difficulty != current_game_diff:
                 requests.post("http://127.0.0.1:5050/api/game-state", 
                             json={'difficulty': dda_system.current_difficulty},
                             timeout=0.5)
                 print(f"[DDA] 同步难度到游戏: {current_game_diff} -> {dda_system.current_difficulty}")
     except Exception as e:
-        print(f"[DDA] 同步难度失败: {e}")
+        pass  # 静默忽略同步错误
 
 
 @app.route("/")
@@ -1213,6 +1224,25 @@ def api_dda_update():
 def api_dda_input():
     """获取传给DDA的统一输入数据 - perception已算好所有标签"""
     unified = get_unified_dda_data()
+    
+    try:
+        # 只在游戏进行时才执行DDA更新
+        game_status = unified.get('game_status', 'idle')
+        if game_status == 'playing':
+            result = dda_system.update_from_unified(unified)
+            unified['dda_output'] = {
+                'current_difficulty': result['current_difficulty'],
+                'adjustment': result['adjustment'],
+                'adjustment_made': result['adjustment_made'],
+                'reason': result['reason'],
+                'flow_state': result['flow_state'],
+                'can_continue': result['can_continue'],
+                'want_continue': result['want_continue'],
+                'safety_rules': result['safety_rules']
+            }
+    except Exception:
+        pass
+    
     return jsonify(unified)
 
 

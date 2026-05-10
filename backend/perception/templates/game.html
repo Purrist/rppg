@@ -207,17 +207,6 @@ html, body { width: 100%; height: 100%; background: #f8fafc; font-family: 'Segoe
 </div>
 
 <script>
-const difficultyConfig = [
-    { name: '简单', showTime: 2500, interval: 1800, bombChance: 0, maxMoles: 1 },
-    { name: '普通', showTime: 2100, interval: 1500, bombChance: 0.08, maxMoles: 1 },
-    { name: '困难', showTime: 1800, interval: 1300, bombChance: 0.12, maxMoles: 2 },
-    { name: '专家', showTime: 1500, interval: 1100, bombChance: 0.16, maxMoles: 2 },
-    { name: '大师', showTime: 1300, interval: 950, bombChance: 0.20, maxMoles: 2 },
-    { name: '传奇', showTime: 1100, interval: 800, bombChance: 0.25, maxMoles: 3 },
-    { name: '地狱', showTime: 900, interval: 700, bombChance: 0.30, maxMoles: 3 },
-    { name: '噩梦', showTime: 750, interval: 600, bombChance: 0.35, maxMoles: 3 }
-];
-
 const FLOW_ACCURACY_MIN = 65;
 const FLOW_ACCURACY_MAX = 85;
 
@@ -226,20 +215,14 @@ let gameState = {
     paused: false,
     timeLeft: 180,
     score: 0,
-    difficulty: 0,
-    targetDifficulty: 0,
-    currentMoles: [],
-    moleShowTimes: {},
-    isBomb: {},
+    difficulty: 1,
+    difficultyName: '简单',
+    accuracy: '--',
     hitCount: 0,
     missCount: 0,
-    errorCount: 0,
     reactionTimes: [],
     results: [],
-    recentAccuracies: [],
-    difficultyChanges: 0,
-    timer: null,
-    hideTimers: {}
+    timer: null
 };
 
 function updateUI() {
@@ -247,48 +230,11 @@ function updateUI() {
     const secs = gameState.timeLeft % 60;
     document.getElementById('time').textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
     document.getElementById('score').textContent = gameState.score;
-    document.getElementById('difficulty').textContent = gameState.difficulty + 1;
-    document.getElementById('difficulty-name').textContent = difficultyConfig[gameState.difficulty].name;
-    
-    const total = gameState.hitCount + gameState.missCount;
-    const accuracy = total > 0 ? (gameState.hitCount / total * 100).toFixed(1) : '--';
-    document.getElementById('accuracy').textContent = accuracy + '%';
-    
-    const avgReaction = gameState.reactionTimes.length > 0 
-        ? Math.round(gameState.reactionTimes.reduce((a,b) => a+b, 0) / gameState.reactionTimes.length) 
-        : '--';
+    document.getElementById('difficulty').textContent = gameState.difficulty;
+    document.getElementById('difficulty-name').textContent = gameState.difficultyName;
+    document.getElementById('accuracy').textContent = gameState.accuracy + (gameState.accuracy !== '--' ? '%' : '');
     
     updateMoodIndicator();
-    
-    // 更新后端状态
-    updateBackendState();
-}
-
-function updateBackendState() {
-    const total = gameState.hitCount + gameState.missCount;
-    const accuracy = total > 0 ? (gameState.hitCount / total * 100).toFixed(1) : '--';
-    
-    let status = 'idle';
-    if (gameState.running && !gameState.paused) {
-        status = 'playing';
-    } else if (gameState.running && gameState.paused) {
-        status = 'paused';
-    }
-    
-    fetch('/api/game-state', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            status: status,
-            running: gameState.running,
-            timeLeft: gameState.timeLeft,
-            score: gameState.score,
-            difficulty: gameState.difficulty + 1,
-            difficultyName: difficultyConfig[gameState.difficulty].name,
-            accuracy: accuracy,
-            results: gameState.results.slice(-50) // 只保留最近50条记录
-        })
-    }).catch(e => console.error('Failed to update backend state:', e));
 }
 
 function updateMoodIndicator() {
@@ -353,106 +299,30 @@ function showResults() {
     list.scrollTop = list.scrollHeight;
 }
 
-function adjustDifficulty() {
-    const total = gameState.hitCount + gameState.missCount;
-    if (total < 8) return;
-    
-    const accuracy = (gameState.hitCount / total * 100);
-    
-    gameState.recentAccuracies.push(accuracy);
-    if (gameState.recentAccuracies.length > 5) {
-        gameState.recentAccuracies.shift();
-    }
-    
-    const avgRecentAccuracy = gameState.recentAccuracies.reduce((a, b) => a + b, 0) / gameState.recentAccuracies.length;
-    
-    // 自动难度调整已禁用，难度由 DDA 系统控制
-}
-
-function showMoles() {
-    if (!gameState.running || gameState.paused) return;
-    
-    const config = difficultyConfig[gameState.difficulty];
-    const holes = document.querySelectorAll('.mole-hole');
-    
-    holes.forEach((hole, i) => {
-        const moleContainer = hole.querySelector('.mole-container');
-        const mole = hole.querySelector('.mole');
-        const bombIndicator = hole.querySelector('.bomb-indicator');
-        
-        moleContainer.classList.remove('visible');
-        mole.classList.remove('bomb-mole');
-        bombIndicator.classList.add('hidden');
-        
-        clearTimeout(gameState.hideTimers[i]);
-    });
-    
-    gameState.currentMoles = [];
-    gameState.moleShowTimes = {};
-    gameState.isBomb = {};
-    
-    const availableHoles = [0, 1, 2, 3, 4, 5, 6, 7];
-    const selectedHoles = [];
-    
-    const idx = Math.floor(Math.random() * availableHoles.length);
-    selectedHoles.push(availableHoles[idx]);
-    availableHoles.splice(idx, 1);
-    
-    const bombCount = Math.random() < config.bombChance ? (Math.random() < 0.5 ? 1 : 2) : 0;
-    for (let i = 0; i < bombCount && availableHoles.length > 0; i++) {
-        const bombIdx = Math.floor(Math.random() * availableHoles.length);
-        selectedHoles.push(availableHoles[bombIdx]);
-        availableHoles.splice(bombIdx, 1);
-    }
-    
-    selectedHoles.forEach((holeIndex, i) => {
-        const hole = holes[holeIndex];
-        const moleContainer = hole.querySelector('.mole-container');
-        const mole = hole.querySelector('.mole');
-        const bombIndicator = hole.querySelector('.bomb-indicator');
-        
-        const isBomb = i > 0;
-        
-        moleContainer.classList.add('visible');
-        gameState.currentMoles.push(holeIndex);
-        gameState.moleShowTimes[holeIndex] = Date.now();
-        gameState.isBomb[holeIndex] = isBomb;
-        
-        if (isBomb) {
-            mole.textContent = '💣';
-            bombIndicator.classList.remove('hidden');
-        } else {
-            mole.textContent = '🐹';
-        }
-        
-        gameState.hideTimers[holeIndex] = setTimeout(() => {
-            if (gameState.running && !gameState.paused && gameState.currentMoles.includes(holeIndex)) {
-                moleContainer.classList.remove('visible');
+function syncMoles() {
+    fetch('/api/game/moles')
+        .then(r => r.json())
+        .then(data => {
+            const holes = document.querySelectorAll('.mole-hole');
+            
+            holes.forEach((hole, index) => {
+                const moleContainer = hole.querySelector('.mole-container');
+                const mole = hole.querySelector('.mole');
+                const bombIndicator = hole.querySelector('.bomb-indicator');
                 
-                if (!gameState.isBomb[holeIndex]) {
-                    gameState.missCount++;
-                    gameState.score -= 5;
-                    gameState.results.push({
-                        type: 'miss',
-                        time: '--',
-                        difficulty: gameState.difficulty + 1,
-                        score: -5
-                    });
+                const isVisible = data.moles.includes(index);
+                const isBomb = data.is_bomb && data.is_bomb[index];
+                
+                if (isVisible) {
+                    moleContainer.classList.add('visible');
+                    mole.textContent = isBomb ? '💣' : '🐹';
+                    bombIndicator.classList.toggle('hidden', !isBomb);
+                } else {
+                    moleContainer.classList.remove('visible');
                 }
-                
-                const idx = gameState.currentMoles.indexOf(holeIndex);
-                if (idx > -1) gameState.currentMoles.splice(idx, 1);
-                
-                showResults();
-                adjustDifficulty();
-                updateUI();
-                
-                if (gameState.currentMoles.length === 0) {
-                    setTimeout(showMoles, config.interval);
-                }
-            }
-        }, config.showTime);
-    });
+            });
+        })
+        .catch(e => console.error('同步地鼠状态失败:', e));
 }
 
 function handleHit(event) {
@@ -461,205 +331,187 @@ function handleHit(event) {
     const hole = event.currentTarget;
     const holeIndex = parseInt(hole.dataset.hole);
     
-    if (!gameState.currentMoles.includes(holeIndex)) {
-        gameState.errorCount++;
-        gameState.score -= 5;
-        gameState.results.push({
-            type: 'error',
-            time: '--',
-            difficulty: gameState.difficulty + 1,
-            score: -5
-        });
-        hole.classList.add('hit');
-        setTimeout(() => hole.classList.remove('hit'), 200);
-        showResults();
-        return;
-    }
-    
-    const reactionTime = Date.now() - gameState.moleShowTimes[holeIndex];
-    
-    if (gameState.isBomb[holeIndex]) {
-        gameState.score -= 10;
-        gameState.results.push({
-            type: 'bomb',
-            time: reactionTime,
-            difficulty: gameState.difficulty + 1,
-            score: -10
-        });
-    } else {
-        gameState.hitCount++;
-        gameState.score += 5;
-        gameState.reactionTimes.push(reactionTime);
-        gameState.results.push({
-            type: 'hit',
-            time: reactionTime,
-            difficulty: gameState.difficulty + 1,
-            score: +5
-        });
-    }
-    
-    const moleContainer = hole.querySelector('.mole-container');
-    moleContainer.classList.remove('visible');
-    hole.classList.add('success');
-    setTimeout(() => hole.classList.remove('success'), 200);
-    
-    clearTimeout(gameState.hideTimers[holeIndex]);
-    const idx = gameState.currentMoles.indexOf(holeIndex);
-    if (idx > -1) gameState.currentMoles.splice(idx, 1);
-    
-    adjustDifficulty();
-    showResults();
-    updateUI();
-    
-    const config = difficultyConfig[gameState.difficulty];
-    if (gameState.currentMoles.length === 0) {
-        setTimeout(showMoles, config.interval);
-    }
+    fetch('/api/game/hit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hole: holeIndex })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            gameState.score = data.score;
+            gameState.accuracy = data.accuracy;
+            
+            if (data.type === 'error') {
+                hole.classList.add('hit');
+                setTimeout(() => hole.classList.remove('hit'), 200);
+            } else {
+                hole.classList.add('success');
+                setTimeout(() => hole.classList.remove('success'), 200);
+            }
+            
+            updateUI();
+            syncState();
+        }
+    })
+    .catch(e => console.error('击打请求失败:', e));
 }
 
 function startGame() {
-    // 从后端获取当前难度（DDA作为唯一源）
-    fetch('/api/game-state')
+    fetch('/api/game/start', { method: 'POST' })
         .then(r => r.json())
-        .then(state => {
-            const currentDifficulty = state.difficulty ? state.difficulty - 1 : 3; // 后端是1-8，本地是0-7，默认3（难度4）
-            gameState = {
-                running: true,
-                paused: false,
-                timeLeft: 180,
-                score: 0,
-                difficulty: currentDifficulty,
-                targetDifficulty: currentDifficulty,
-                currentMoles: [],
-                moleShowTimes: {},
-                isBomb: {},
-                hitCount: 0,
-                missCount: 0,
-                errorCount: 0,
-                reactionTimes: [],
-                results: [],
-                recentAccuracies: [],
-                difficultyChanges: 0,
-                timer: null,
-                hideTimers: {}
-            };
-
-            document.getElementById('btn-start').disabled = true;
-            document.getElementById('btn-pause').disabled = false;
-            document.getElementById('btn-stop').disabled = false;
-            document.getElementById('btn-pause').textContent = '暂停';
-            document.getElementById('game-over').style.display = 'none';
-
-            updateUI();
-            showResults();
-
-            gameState.timer = setInterval(() => {
-                if (!gameState.paused) {
-                    gameState.timeLeft--;
-                    updateUI();
-
-                    if (gameState.timeLeft <= 0) {
-                        endGame();
-                    }
-                }
-            }, 1000);
-
-            showMoles();
+        .then(data => {
+            if (data.success) {
+                gameState.running = true;
+                gameState.paused = false;
+                gameState.timeLeft = data.state.timeLeft;
+                gameState.score = data.state.score;
+                gameState.difficulty = data.state.difficulty;
+                gameState.difficultyName = data.state.difficultyName;
+                gameState.accuracy = data.state.accuracy;
+                gameState.results = data.state.results || [];
+                gameState.hitCount = data.state.hitCount || 0;
+                gameState.missCount = data.state.missCount || 0;
+                gameState.reactionTimes = [];
+                
+                document.getElementById('btn-start').disabled = true;
+                document.getElementById('btn-pause').disabled = false;
+                document.getElementById('btn-stop').disabled = false;
+                document.getElementById('btn-pause').textContent = '暂停';
+                document.getElementById('game-over').style.display = 'none';
+                
+                updateUI();
+                showResults();
+                
+                gameState.timer = setInterval(() => {
+                    syncState();
+                }, 100);
+                
+                syncMoles();
+            }
         })
-        .catch(err => {
-            console.error('[DDA] 获取初始难度失败:', err);
-        });
+        .catch(e => console.error('开始游戏失败:', e));
 }
 
 function togglePause() {
-    gameState.paused = !gameState.paused;
-    
-    if (gameState.paused) {
-        document.getElementById('btn-pause').textContent = '继续';
-        const holes = document.querySelectorAll('.mole-hole');
-        holes.forEach(hole => {
-            const moleContainer = hole.querySelector('.mole-container');
-            moleContainer.classList.remove('visible');
-        });
-        Object.values(gameState.hideTimers).forEach(clearTimeout);
-    } else {
-        document.getElementById('btn-pause').textContent = '暂停';
-        showMoles();
-    }
+    fetch('/api/game/pause', { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                gameState.paused = data.state.status === 'paused';
+                document.getElementById('btn-pause').textContent = gameState.paused ? '继续' : '暂停';
+                
+                const holes = document.querySelectorAll('.mole-hole');
+                holes.forEach(hole => {
+                    const moleContainer = hole.querySelector('.mole-container');
+                    if (gameState.paused) {
+                        moleContainer.classList.remove('visible');
+                    }
+                });
+                
+                if (!gameState.paused) {
+                    syncMoles();
+                }
+            }
+        })
+        .catch(e => console.error('暂停/继续失败:', e));
 }
 
 function endGame() {
-    gameState.running = false;
-    clearInterval(gameState.timer);
-    Object.values(gameState.hideTimers).forEach(clearTimeout);
-    
-    document.getElementById('btn-start').disabled = false;
-    document.getElementById('btn-pause').disabled = true;
-    document.getElementById('btn-stop').disabled = true;
-    
-    const holes = document.querySelectorAll('.mole-hole');
-    holes.forEach(hole => {
-        const moleContainer = hole.querySelector('.mole-container');
-        moleContainer.classList.remove('visible');
-    });
-    
-    document.getElementById('final-score').textContent = gameState.score;
-    const total = gameState.hitCount + gameState.missCount;
-    const accuracy = total > 0 ? (gameState.hitCount / total * 100).toFixed(1) : '0';
-    document.getElementById('final-accuracy').textContent = accuracy + '%';
-    const avgReaction = gameState.reactionTimes.length > 0 
-        ? Math.round(gameState.reactionTimes.reduce((a,b) => a+b, 0) / gameState.reactionTimes.length) 
-        : '0';
-    document.getElementById('final-reaction').textContent = avgReaction + 'ms';
-    document.getElementById('final-difficulty').textContent = `${gameState.difficulty + 1} (${difficultyConfig[gameState.difficulty].name})`;
-    
-    document.getElementById('game-over').style.display = 'flex';
+    fetch('/api/game/end', { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                gameState.running = false;
+                gameState.paused = false;
+                clearInterval(gameState.timer);
+                
+                document.getElementById('btn-start').disabled = false;
+                document.getElementById('btn-pause').disabled = true;
+                document.getElementById('btn-stop').disabled = true;
+                
+                const holes = document.querySelectorAll('.mole-hole');
+                holes.forEach(hole => {
+                    const moleContainer = hole.querySelector('.mole-container');
+                    moleContainer.classList.remove('visible');
+                });
+                
+                document.getElementById('final-score').textContent = gameState.score;
+                document.getElementById('final-accuracy').textContent = gameState.accuracy + '%';
+                
+                const avgReaction = gameState.reactionTimes.length > 0 
+                    ? Math.round(gameState.reactionTimes.reduce((a,b) => a+b, 0) / gameState.reactionTimes.length) 
+                    : '0';
+                document.getElementById('final-reaction').textContent = avgReaction + 'ms';
+                document.getElementById('final-difficulty').textContent = `${gameState.difficulty} (${gameState.difficultyName})`;
+                
+                document.getElementById('game-over').style.display = 'flex';
+            }
+        })
+        .catch(e => console.error('结束游戏失败:', e));
 }
 
 function resetGame() {
-    // 从后端获取当前难度（DDA作为唯一源）
     fetch('/api/game-state')
         .then(r => r.json())
         .then(state => {
-            const currentDifficulty = state.difficulty ? state.difficulty - 1 : 3; // 后端是1-8，本地是0-7，默认3（难度4）
             gameState = {
                 running: false,
                 paused: false,
-                timeLeft: 180,
+                timeLeft: state.timeLeft || 180,
                 score: 0,
-                difficulty: currentDifficulty,
-                targetDifficulty: currentDifficulty,
-                currentMoles: [],
-                moleShowTimes: {},
-                isBomb: {},
+                difficulty: state.difficulty || 1,
+                difficultyName: state.difficultyName || '简单',
+                accuracy: '--',
                 hitCount: 0,
                 missCount: 0,
-                errorCount: 0,
                 reactionTimes: [],
                 results: [],
-                recentAccuracies: [],
-                difficultyChanges: 0,
-                timer: null,
-                hideTimers: {}
+                timer: null
             };
-
+            
             document.getElementById('btn-start').disabled = false;
             document.getElementById('btn-pause').disabled = true;
             document.getElementById('btn-stop').disabled = true;
             document.getElementById('btn-pause').textContent = '暂停';
             document.getElementById('game-over').style.display = 'none';
-
+            
             const holes = document.querySelectorAll('.mole-hole');
             holes.forEach(hole => {
                 const moleContainer = hole.querySelector('.mole-container');
                 moleContainer.classList.remove('visible');
             });
-
+            
             updateUI();
         })
-        .catch(err => {
-            console.error('[DDA] 获取初始难度失败:', err);
-        });
+        .catch(e => console.error('重置游戏失败:', e));
+}
+
+function syncState() {
+    fetch('/api/game-state')
+        .then(r => r.json())
+        .then(state => {
+            gameState.timeLeft = state.timeLeft || 180;
+            gameState.score = state.score || 0;
+            gameState.difficulty = state.difficulty || 1;
+            gameState.difficultyName = state.difficultyName || '简单';
+            gameState.accuracy = state.accuracy || '--';
+            gameState.results = state.results || [];
+            gameState.hitCount = state.hitCount || 0;
+            gameState.missCount = state.missCount || 0;
+            gameState.running = state.running || false;
+            gameState.paused = state.status === 'paused';
+            
+            if (gameState.timeLeft <= 0 && gameState.running) {
+                endGame();
+                return;
+            }
+            
+            updateUI();
+            showResults();
+            syncMoles();
+        })
+        .catch(e => console.error('同步状态失败:', e));
 }
 
 document.getElementById('btn-start').addEventListener('click', startGame);
@@ -670,35 +522,17 @@ document.querySelectorAll('.mole-hole').forEach(hole => {
     hole.addEventListener('click', handleHit);
 });
 
-// 页面加载时从后端获取初始难度（DDA作为唯一源）
 fetch('/api/game-state')
     .then(r => r.json())
     .then(state => {
-        const currentDifficulty = state.difficulty ? state.difficulty - 1 : 3; // 后端是1-8，本地是0-7，默认3（难度4）
-        gameState.difficulty = currentDifficulty;
-        gameState.targetDifficulty = currentDifficulty;
+        gameState.difficulty = state.difficulty || 1;
+        gameState.difficultyName = state.difficultyName || '简单';
         updateUI();
-        console.log('[DDA] 初始化难度:', gameState.difficulty + 1);
     })
-    .catch(err => {
-        console.error('[DDA] 获取初始难度失败:', err);
+    .catch(e => {
+        console.error('初始化失败:', e);
         updateUI();
     });
-
-// 定时从后端获取游戏状态（同步 DDA 修改的难度）
-setInterval(() => {
-    fetch('/api/game-state')
-        .then(r => r.json())
-        .then(state => {
-            // 如果后端返回的难度和本地不同，说明 DDA 修改了难度
-            if (state.difficulty !== undefined && state.difficulty - 1 !== gameState.difficulty) {
-                console.log('[DDA] 难度同步: 本地', gameState.difficulty + 1, '-> 后端', state.difficulty);
-                gameState.difficulty = state.difficulty - 1; // 后端是1-8，本地是0-7
-                updateUI();
-            }
-        })
-        .catch(e => console.error('获取游戏状态失败:', e));
-}, 1000);
 </script>
 </body>
 </html>

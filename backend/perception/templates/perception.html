@@ -595,10 +595,20 @@ function updateDDADisplay(data) {
     }
     
     // DDA 输出（从 dda_output 字段）
+    const gameStatus = data.game_status || 'idle';
+    const isGamePlaying = gameStatus === 'playing';
     const ddaOutput = data.dda_output || {};
-    if (ddaOutputDiffEl) ddaOutputDiffEl.textContent = ddaOutput.current_difficulty !== undefined ? ddaOutput.current_difficulty : '--';
-    if (ddaOutputFlowEl) ddaOutputFlowEl.textContent = ddaOutput.flow_state || '--';
-    if (ddaOutputAdjEl) ddaOutputAdjEl.textContent = ddaOutput.adjustment !== undefined ? (ddaOutput.adjustment > 0 ? '+' + ddaOutput.adjustment : ddaOutput.adjustment) : '--';
+    
+    if (isGamePlaying && ddaOutput) {
+        if (ddaOutputDiffEl) ddaOutputDiffEl.textContent = ddaOutput.current_difficulty !== undefined ? ddaOutput.current_difficulty : '--';
+        if (ddaOutputFlowEl) ddaOutputFlowEl.textContent = ddaOutput.flow_state || '--';
+        if (ddaOutputAdjEl) ddaOutputAdjEl.textContent = ddaOutput.adjustment !== undefined ? (ddaOutput.adjustment > 0 ? '+' + ddaOutput.adjustment : ddaOutput.adjustment) : '--';
+    } else {
+        const statusText = gameStatus === 'idle' ? '等待游戏开始' : (gameStatus === 'paused' ? '游戏已暂停' : '--');
+        if (ddaOutputDiffEl) ddaOutputDiffEl.textContent = statusText;
+        if (ddaOutputFlowEl) ddaOutputFlowEl.textContent = statusText;
+        if (ddaOutputAdjEl) ddaOutputAdjEl.textContent = statusText;
+    }
 }
 
 async function fetchPersonData() {

@@ -26,12 +26,12 @@ class DDASystem:
         self.question_history = deque(maxlen=self.window_size)
         
         # 当前状态
-        self.current_difficulty = 1
+        self.current_difficulty = 4  # 开局默认难度4
         self.min_difficulty = 1
         self.max_difficulty = 8
         
         # 状态计数器（用于防抖）
-        self.flow_state_history = deque(maxlen=2)
+        self.flow_state_history = deque(maxlen=5)  # 更长的历史窗口
         self.consecutive_same_state = 0
         self.last_state = None
         
@@ -41,7 +41,9 @@ class DDASystem:
         
         # 时间窗口
         self.last_decision_time = time.time()
-        self.decision_interval = 5
+        self.decision_interval = 10  # 增加决策间隔到10秒
+        self.last_adjust_time = time.time()  # 上次调整时间
+        self.min_adjust_interval = 30  # 最小调整间隔30秒
         
         # 安全状态
         self.hr_abnormal_count = 0
@@ -64,6 +66,11 @@ class DDASystem:
         # 可靠性门控参数
         self.hr_max_age = 10.0  # HR数据最大有效年龄（秒）
         self.hr_decay_half_life = 5.0  # HR数据折损半衰期（秒）
+        
+        # 难度平滑 - EMA参数
+        self.ema_difficulty = 4.0  # EMA平滑后的难度
+        self.difficulty_ema_alpha = 0.15  # EMA系数，降低让变化更慢
+        self.max_single_adjustment = 1  # 单次最大调整幅度
     
     def _calculate_hr_reliability(self, hr_valid, hr_age):
         """计算HR信号的可靠性权重（证据折损）
@@ -433,12 +440,11 @@ class DDASystem:
         hit_ratio = self._calculate_hit_ratio()
         hit_boost = (hit_ratio - 0.5) * 20
         
-        # 重新设计评分公式，移除+40和+50偏移
-        # 各特征权重：情绪40%，HRR20%，RT参与度20%，准确率信心15%，hit boost5%
+        # 评分公式：情绪40%，HRR20%，RT参与度20%，准确率信心15%，hit boost5%
+        # 理论满分：35*1.2 + 20*0.8 + 15*0.8 + 15*0.6 + 10*0.4 = 42+16+12+9+4 = 83
         total = emotion_score * 1.2 + hrr_score * 0.8 + rt_engagement_score * 0.8 + acc_conf_score * 0.6 + hit_boost * 0.4
         
-        # 归一化到0-100范围
-        total = total + 50  # 中心在50
+        # 归一化到0-100范围（使用tanh压缩曲线，让极端情绪更敏感）
         total = max(0, min(100, total))
         
         if total > 75:
@@ -533,11 +539,13 @@ class DDASystem:
         if safety_rules['negative_consecutive']:
             return 0, "安全规则: 消极情绪连续，禁止升难度"
         
-        # 检查是否"太简单了"：高准确率 + 不是Overloaded
+        # 检查是否"太简单了"：高准确率 + 不是Overloaded + 至少有5题数据
         if can_continue_components:
             accuracy = can_continue_components.get('accuracy_value', 0)
             state = can_continue_components.get('state', 'Struggling')
-            if accuracy >= 0.9 and state != 'Overloaded':
+            # 只有至少有5题数据且准确率非常高时才触发
+            has_enough_data = len(self.question_history) >= 5
+            if has_enough_data and accuracy >= 0.95 and state != 'Overloaded':
                 return 1, "表现优异: 准确率过高"
         
         policy = {
@@ -545,7 +553,7 @@ class DDASystem:
             'flow': 0,
             'challenge': 0,
             'anxiety': -1,
-            'fatigue': -2
+            'fatigue': -1  # 减小疲劳时的调整幅度
         }
         
         return policy.get(flow_state, 0), f"策略: {flow_state}"
@@ -561,6 +569,7 @@ class DDASystem:
         emotion_confidence = emotion_data.get('confidence', 0) or 0
         self._current_emotion = emotion
         
+        game_status = game_data.get('status', 'idle')
         results = game_data.get('results', [])
         
         if results:
@@ -600,15 +609,51 @@ class DDASystem:
         
         adjustment, reason = self.get_difficulty_adjustment(flow_state, safety_rules, can_continue['components'])
         
-        should_adjust = self.consecutive_same_state >= 2 or safety_rules['accuracy_collapse']
+        is_game_running = game_status == 'playing'
+        
+        # 检查最小调整间隔
+        current_time = time.time()
+        time_since_last_adjust = current_time - self.last_adjust_time
+        within_cooldown = time_since_last_adjust < self.min_adjust_interval
+        
+        # 更严格的调整条件：需要连续3次相同状态 + 不在冷却期
+        should_adjust = is_game_running and (
+            (self.consecutive_same_state >= 3 or safety_rules['accuracy_collapse']) 
+            and not within_cooldown
+        )
+        
+        if not is_game_running:
+            adjustment = 0
+            reason = "游戏未进行中"
+        elif within_cooldown:
+            adjustment = 0
+            reason = f"冷却中: 还需{int(self.min_adjust_interval - time_since_last_adjust)}秒"
         
         adjustment_made = False
         if should_adjust:
-            new_difficulty = self.current_difficulty + adjustment
+            # 使用EMA平滑调整
+            target_difficulty = self.current_difficulty + adjustment
+            target_difficulty = max(self.min_difficulty, min(self.max_difficulty, target_difficulty))
+            
+            # EMA平滑: new = alpha * target + (1-alpha) * current
+            self.ema_difficulty = (self.difficulty_ema_alpha * target_difficulty + 
+                                   (1 - self.difficulty_ema_alpha) * self.ema_difficulty)
+            
+            # 四舍五入到最近整数
+            new_difficulty = int(round(self.ema_difficulty))
             new_difficulty = max(self.min_difficulty, min(self.max_difficulty, new_difficulty))
+            
+            # 限制单次调整幅度不超过±1
+            diff = new_difficulty - self.current_difficulty
+            if abs(diff) > self.max_single_adjustment:
+                if diff > 0:
+                    new_difficulty = self.current_difficulty + self.max_single_adjustment
+                else:
+                    new_difficulty = self.current_difficulty - self.max_single_adjustment
             
             if new_difficulty != self.current_difficulty:
                 self.current_difficulty = new_difficulty
+                self.last_adjust_time = current_time
                 adjustment_made = True
         
         return {
@@ -643,6 +688,7 @@ class DDASystem:
         self._current_emotion = emotion
         
         difficulty = unified.get('difficulty', 1)
+        game_status = unified.get('game_status', 'idle')
         
         results = unified.get('results', [])
         if results:
@@ -685,6 +731,7 @@ class DDASystem:
         self._last_flow_state = flow_state
         
         adjustment, reason = self.get_difficulty_adjustment(flow_state, safety_rules, can_continue['components'])
+        adjustment_made = False
         
         if safety_rules['hr_abnormal']:
             adjustment = 0
@@ -706,15 +753,50 @@ class DDASystem:
                 adjustment = -1
                 reason = "安全: 高负荷持续"
         
-        should_adjust = self.consecutive_same_state >= 2 or safety_rules['accuracy_collapse']
+        is_game_running = game_status == 'playing'
         
-        adjustment_made = False
+        # 检查最小调整间隔
+        current_time = time.time()
+        time_since_last_adjust = current_time - self.last_adjust_time
+        within_cooldown = time_since_last_adjust < self.min_adjust_interval
+        
+        # 更严格的调整条件：需要连续3次相同状态 + 不在冷却期
+        should_adjust = is_game_running and (
+            (self.consecutive_same_state >= 3 or safety_rules['accuracy_collapse']) 
+            and not within_cooldown
+        )
+        
+        if not is_game_running:
+            adjustment = 0
+            reason = "游戏未进行中"
+        elif within_cooldown:
+            adjustment = 0
+            reason = f"冷却中: 还需{int(self.min_adjust_interval - time_since_last_adjust)}秒"
+        
         if should_adjust:
-            new_difficulty = self.current_difficulty + adjustment
+            # 使用EMA平滑调整
+            target_difficulty = self.current_difficulty + adjustment
+            target_difficulty = max(self.min_difficulty, min(self.max_difficulty, target_difficulty))
+            
+            # EMA平滑: new = alpha * target + (1-alpha) * current
+            self.ema_difficulty = (self.difficulty_ema_alpha * target_difficulty + 
+                                   (1 - self.difficulty_ema_alpha) * self.ema_difficulty)
+            
+            # 四舍五入到最近整数
+            new_difficulty = int(round(self.ema_difficulty))
             new_difficulty = max(self.min_difficulty, min(self.max_difficulty, new_difficulty))
+            
+            # 限制单次调整幅度不超过±1
+            diff = new_difficulty - self.current_difficulty
+            if abs(diff) > self.max_single_adjustment:
+                if diff > 0:
+                    new_difficulty = self.current_difficulty + self.max_single_adjustment
+                else:
+                    new_difficulty = self.current_difficulty - self.max_single_adjustment
             
             if new_difficulty != self.current_difficulty:
                 self.current_difficulty = new_difficulty
+                self.last_adjust_time = current_time
                 adjustment_made = True
         
         return {
