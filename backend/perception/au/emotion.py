@@ -3,6 +3,11 @@ import os, time, threading, json, base64
 import numpy as np
 from collections import deque
 import sys
+import logging
+
+logging.getLogger('werkzeug').setLevel(logging.CRITICAL)
+logging.getLogger('flask').setLevel(logging.CRITICAL)
+logging.basicConfig(level=logging.CRITICAL)
 
 os.environ["FLASK_SKIP_DOTENV"] = "1"
 os.chdir(os.path.dirname(os.path.abspath(__file__)))

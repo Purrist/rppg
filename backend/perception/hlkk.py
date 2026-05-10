@@ -7,6 +7,11 @@ import threading
 import os
 import numpy as np
 from flask import Flask, render_template, jsonify, request
+import logging
+
+logging.getLogger('werkzeug').setLevel(logging.CRITICAL)
+logging.getLogger('flask').setLevel(logging.CRITICAL)
+logging.basicConfig(level=logging.CRITICAL)
 
 PORT = "COM9"
 BAUD = 115200

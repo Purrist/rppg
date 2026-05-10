@@ -518,48 +518,57 @@ function handleHit(event) {
 }
 
 function startGame() {
-    gameState = {
-        running: true,
-        paused: false,
-        timeLeft: 180,
-        score: 0,
-        difficulty: 0,
-        targetDifficulty: 0,
-        currentMoles: [],
-        moleShowTimes: {},
-        isBomb: {},
-        hitCount: 0,
-        missCount: 0,
-        errorCount: 0,
-        reactionTimes: [],
-        results: [],
-        recentAccuracies: [],
-        difficultyChanges: 0,
-        timer: null,
-        hideTimers: {}
-    };
-    
-    document.getElementById('btn-start').disabled = true;
-    document.getElementById('btn-pause').disabled = false;
-    document.getElementById('btn-stop').disabled = false;
-    document.getElementById('btn-pause').textContent = '暂停';
-    document.getElementById('game-over').style.display = 'none';
-    
-    updateUI();
-    showResults();
-    
-    gameState.timer = setInterval(() => {
-        if (!gameState.paused) {
-            gameState.timeLeft--;
+    // 从后端获取当前难度（DDA作为唯一源）
+    fetch('/api/game-state')
+        .then(r => r.json())
+        .then(state => {
+            const currentDifficulty = state.difficulty ? state.difficulty - 1 : 3; // 后端是1-8，本地是0-7，默认3（难度4）
+            gameState = {
+                running: true,
+                paused: false,
+                timeLeft: 180,
+                score: 0,
+                difficulty: currentDifficulty,
+                targetDifficulty: currentDifficulty,
+                currentMoles: [],
+                moleShowTimes: {},
+                isBomb: {},
+                hitCount: 0,
+                missCount: 0,
+                errorCount: 0,
+                reactionTimes: [],
+                results: [],
+                recentAccuracies: [],
+                difficultyChanges: 0,
+                timer: null,
+                hideTimers: {}
+            };
+
+            document.getElementById('btn-start').disabled = true;
+            document.getElementById('btn-pause').disabled = false;
+            document.getElementById('btn-stop').disabled = false;
+            document.getElementById('btn-pause').textContent = '暂停';
+            document.getElementById('game-over').style.display = 'none';
+
             updateUI();
-            
-            if (gameState.timeLeft <= 0) {
-                endGame();
-            }
-        }
-    }, 1000);
-    
-    showMoles();
+            showResults();
+
+            gameState.timer = setInterval(() => {
+                if (!gameState.paused) {
+                    gameState.timeLeft--;
+                    updateUI();
+
+                    if (gameState.timeLeft <= 0) {
+                        endGame();
+                    }
+                }
+            }, 1000);
+
+            showMoles();
+        })
+        .catch(err => {
+            console.error('[DDA] 获取初始难度失败:', err);
+        });
 }
 
 function togglePause() {
@@ -608,41 +617,49 @@ function endGame() {
 }
 
 function resetGame() {
-    gameState = {
-        running: false,
-        paused: false,
-        timeLeft: 180,
-        score: 0,
-        difficulty: 0,
-        targetDifficulty: 0,
-        currentMoles: [],
-        moleShowTimes: {},
-        isBomb: {},
-        hitCount: 0,
-        missCount: 0,
-        errorCount: 0,
-        reactionTimes: [],
-        results: [],
-        recentAccuracies: [],
-        difficultyChanges: 0,
-        timer: null,
-        hideTimers: {}
-    };
-    
-    document.getElementById('btn-start').disabled = false;
-    document.getElementById('btn-pause').disabled = true;
-    document.getElementById('btn-stop').disabled = true;
-    document.getElementById('btn-pause').textContent = '暂停';
-    document.getElementById('game-over').style.display = 'none';
-    
-    updateUI();
-    showResults();
-    
-    const holes = document.querySelectorAll('.mole-hole');
-    holes.forEach(hole => {
-        const moleContainer = hole.querySelector('.mole-container');
-        moleContainer.classList.remove('visible');
-    });
+    // 从后端获取当前难度（DDA作为唯一源）
+    fetch('/api/game-state')
+        .then(r => r.json())
+        .then(state => {
+            const currentDifficulty = state.difficulty ? state.difficulty - 1 : 3; // 后端是1-8，本地是0-7，默认3（难度4）
+            gameState = {
+                running: false,
+                paused: false,
+                timeLeft: 180,
+                score: 0,
+                difficulty: currentDifficulty,
+                targetDifficulty: currentDifficulty,
+                currentMoles: [],
+                moleShowTimes: {},
+                isBomb: {},
+                hitCount: 0,
+                missCount: 0,
+                errorCount: 0,
+                reactionTimes: [],
+                results: [],
+                recentAccuracies: [],
+                difficultyChanges: 0,
+                timer: null,
+                hideTimers: {}
+            };
+
+            document.getElementById('btn-start').disabled = false;
+            document.getElementById('btn-pause').disabled = true;
+            document.getElementById('btn-stop').disabled = true;
+            document.getElementById('btn-pause').textContent = '暂停';
+            document.getElementById('game-over').style.display = 'none';
+
+            const holes = document.querySelectorAll('.mole-hole');
+            holes.forEach(hole => {
+                const moleContainer = hole.querySelector('.mole-container');
+                moleContainer.classList.remove('visible');
+            });
+
+            updateUI();
+        })
+        .catch(err => {
+            console.error('[DDA] 获取初始难度失败:', err);
+        });
 }
 
 document.getElementById('btn-start').addEventListener('click', startGame);
@@ -653,7 +670,20 @@ document.querySelectorAll('.mole-hole').forEach(hole => {
     hole.addEventListener('click', handleHit);
 });
 
-updateUI();
+// 页面加载时从后端获取初始难度（DDA作为唯一源）
+fetch('/api/game-state')
+    .then(r => r.json())
+    .then(state => {
+        const currentDifficulty = state.difficulty ? state.difficulty - 1 : 3; // 后端是1-8，本地是0-7，默认3（难度4）
+        gameState.difficulty = currentDifficulty;
+        gameState.targetDifficulty = currentDifficulty;
+        updateUI();
+        console.log('[DDA] 初始化难度:', gameState.difficulty + 1);
+    })
+    .catch(err => {
+        console.error('[DDA] 获取初始难度失败:', err);
+        updateUI();
+    });
 
 // 定时从后端获取游戏状态（同步 DDA 修改的难度）
 setInterval(() => {

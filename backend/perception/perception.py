@@ -16,7 +16,13 @@ import subprocess
 import atexit
 import sys
 from collections import deque, Counter
+import logging
 from flask import Flask, render_template, jsonify, request, Response
+
+# 完全禁用Flask日志
+logging.getLogger('werkzeug').setLevel(logging.CRITICAL)
+logging.getLogger('flask').setLevel(logging.CRITICAL)
+logging.basicConfig(level=logging.CRITICAL)
 
 # 关键！先导入关键第三方库，然后临时移除当前目录，导入sixdrepnet！
 try:
@@ -51,6 +57,8 @@ AU_EMOTION_API = "http://127.0.0.1:5010/api/fusion"
 
 from dda import DDASystem
 dda_system = DDASystem()
+# 开局默认难度为4，DDA是唯一的难度调整源
+dda_system.current_difficulty = 4
 AU_STATUS_API = "http://127.0.0.1:5010/api/status"
 HLKK_DATA_API = "http://127.0.0.1:5020/data"
 
@@ -210,15 +218,15 @@ class PersonAnalyzer:
         try:
             if os.path.exists(AGE_MODEL_PATH):
                 self.age_session = ort.InferenceSession(AGE_MODEL_PATH, providers=['CPUExecutionProvider'])
-                print(f"✓ 年龄模型加载成功: {AGE_MODEL_PATH}")
+                print("年龄模型加载成功")
             else:
-                print(f"✗ 年龄模型未找到: {AGE_MODEL_PATH}")
+                print(f"年龄模型未找到: {AGE_MODEL_PATH}")
             
             if os.path.exists(GENDER_MODEL_PATH):
                 self.gender_session = ort.InferenceSession(GENDER_MODEL_PATH, providers=['CPUExecutionProvider'])
-                print(f"✓ 性别模型加载成功: {GENDER_MODEL_PATH}")
+                print("性别模型加载成功")
             else:
-                print(f"✗ 性别模型未找到: {GENDER_MODEL_PATH}")
+                print(f"性别模型未找到: {GENDER_MODEL_PATH}")
         except Exception as e:
             print(f"模型加载失败: {e}")
 
@@ -290,10 +298,8 @@ class PersonAnalyzer:
         # 直接尝试获取 emotion.py 对齐好的高质量人脸（唯一选择！）
         aligned_face = self.fetch_aligned_face()
         if aligned_face is None:
-            print(f"[PersonAnalyzer] 无法获取对齐人脸，跳过此次分析")
             return None
         
-        print(f"[PersonAnalyzer] 使用 emotion.py 对齐好的人脸进行分析")
         try:
             result = DeepFace.analyze(
                 aligned_face,
@@ -303,7 +309,6 @@ class PersonAnalyzer:
                 silent=True
             )
             if result:
-                print(f"[PersonAnalyzer] 对齐人脸分析成功")
                 if isinstance(result, list):
                     result = result[0]
                 
@@ -327,8 +332,6 @@ class PersonAnalyzer:
                     gender_conf = gender_conf / 100
                 gender_conf = max(0.0, min(1.0, gender_conf))
                 
-                print(f"[PersonAnalyzer] 对齐人脸结果: 年龄={age}, 性别={dominant_gender} (置信度={gender_conf:.2f})")
-                
                 return {
                     "age": age,
                     "age_range": self._age_to_range(age),
@@ -340,8 +343,7 @@ class PersonAnalyzer:
                     "gender_model": {"available": True, "model": "DeepFace"},
                     "using_aligned_face": True
                 }
-        except Exception as e:
-            print(f"[PersonAnalyzer] 对齐人脸分析失败: {e}")
+        except Exception:
             return None
 
     def analyze_face_onnx(self, frame):
@@ -349,10 +351,8 @@ class PersonAnalyzer:
         # 直接尝试获取 emotion.py 对齐好的高质量人脸（唯一选择！）
         aligned_face = self.fetch_aligned_face()
         if aligned_face is None:
-            print(f"[PersonAnalyzer] (ONNX) 无法获取对齐人脸，跳过此次分析")
             return None
         
-        print(f"[PersonAnalyzer] (ONNX) 使用 emotion.py 对齐好的人脸")
         face_img = aligned_face
         
         age_model_result = {"available": False}
@@ -411,10 +411,8 @@ class PersonAnalyzer:
     def analyze_face(self, frame):
         """根据当前设置的模型进行分析"""
         if self.current_model == 'onnx':
-            print(f"[PersonAnalyzer] 使用 ONNX 模型")
             return self.analyze_face_onnx(frame)
         else:
-            print(f"[PersonAnalyzer] 使用 DeepFace 模型")
             return self.analyze_face_deepface(frame)
 
     def smooth_result(self, result):
@@ -439,8 +437,6 @@ class PersonAnalyzer:
         
         # 确保视频流已连接
         if self.cap is None or not self.cap.isOpened():
-            if self._reconnect_attempts % self.max_reconnect_attempts == 0:
-                print(f"[PersonAnalyzer] 尝试连接视频流: {self.video_stream_url}")
             self._connect()
             self._reconnect_attempts += 1
             with self.lock:
@@ -531,7 +527,6 @@ class PersonAnalyzer:
                     analysis = self.analyze_face(frame)
                     
                     if analysis:
-                        print(f"[PersonAnalyzer] 检测结果: 年龄={analysis['age']}, 性别={analysis['gender']}({analysis['gender_confidence']:.2f})")
                         # 添加置信度过滤，只接受高置信度的结果
                         min_confidence = 0.5
                         if analysis["age_confidence"] >= min_confidence and analysis["gender_confidence"] >= min_confidence:
@@ -545,8 +540,6 @@ class PersonAnalyzer:
                                 "age_model": analysis["age_model"],
                                 "gender_model": analysis["gender_model"],
                             })
-                        else:
-                            print(f"[PersonAnalyzer] 置信度不足，跳过更新")
             
             self.result = res
 
@@ -618,6 +611,7 @@ class EmotionProcessor:
             "human": False,
             "timestamp": 0,
             "hr_valid": False,
+            "hr_valid_since": 0,
             "hrr_pct": 0,
             "hr_slope": 0
         }
@@ -641,6 +635,8 @@ class EmotionProcessor:
         self.gate_enabled = True
         self.history = []
         self.history_max = 300
+        self.start_time = time.time()
+        self.startup_grace_period = 30
 
     def fetch_au_emotion(self):
         try:
@@ -657,8 +653,8 @@ class EmotionProcessor:
                     "engagement": d.get("tag", "None"),
                     "timestamp": time.time()
                 }
-        except Exception as e:
-            print(f"获取情绪数据失败: {e}")
+        except Exception:
+            pass
         return None
 
     def fetch_face_status(self):
@@ -675,8 +671,8 @@ class EmotionProcessor:
                     "pose": d.get("pose", "-"),
                     "is_front_face": abs(d.get("yaw", 0)) < 35 and abs(d.get("pitch", 0)) < 25
                 }
-        except Exception as e:
-            print(f"获取人脸状态失败: {e}")
+        except Exception:
+            pass
         return None
 
     def fetch_physio_data(self):
@@ -826,6 +822,10 @@ class EmotionProcessor:
                     self.history.pop(0)
 
             if physio:
+                if physio.get("hr_valid", False):
+                    physio["hr_valid_since"] = time.time()
+                else:
+                    physio["hr_valid_since"] = self.physio_data.get("hr_valid_since", 0)
                 self.physio_data = physio
 
             if face:
@@ -870,8 +870,6 @@ def start_child_processes():
     
     gamedemo_script = os.path.join(script_dir, "gamedemo.py")
     if os.path.exists(gamedemo_script):
-        print(f"启动 打地鼠游戏模块: {gamedemo_script}")
-        print(f"工作目录: {script_dir}")
         gamedemo_proc = subprocess.Popen([sys.executable, gamedemo_script], 
                                         cwd=script_dir)
         child_processes.append(gamedemo_proc)
@@ -986,8 +984,13 @@ def get_unified_dda_data():
     except Exception as e:
         print(f"[DDA] 获取游戏数据失败: {e}")
     
+    hr_valid_since = physio.get('hr_valid_since', 0)
+    hr_age = time.time() - hr_valid_since if hr_valid_since > 0 else float('inf')
+    
     unified = {
         'hr_valid': hr_valid,
+        'hr_valid_since': hr_valid_since,
+        'hr_age': hr_age,
         'hrr_pct': hrr_pct,
         'hrr': hrr_level,
         'hr_slope': hr_slope,
@@ -1013,6 +1016,21 @@ def get_unified_dda_data():
             'type': last.get('type', 'hit'),
             'time': time_val
         }
+        
+        # 传递完整的游戏结果历史，用于DDA趋势分析
+        unified['results'] = []
+        for result in results[-10:]:  # 最多传递最近10条
+            r_time = result.get('time', 0)
+            if not isinstance(r_time, int):
+                r_time = 0
+            unified['results'].append({
+                'type': result.get('type', 'miss'),
+                'time': r_time,
+                'difficulty': result.get('difficulty', 1),
+                'score': result.get('score', 0)
+            })
+    else:
+        unified['results'] = []
     
     return unified
 
@@ -1021,10 +1039,14 @@ def get_physiology_data_for_dda():
     with processor.lock:
         physio = processor.physio_data
     
+    hr_valid_since = physio.get('hr_valid_since', 0)
+    hr_age = time.time() - hr_valid_since if hr_valid_since > 0 else float('inf')
+    
     return {
         'hr_valid': physio.get('hr_valid', False),
         'hrr_pct': physio.get('hrr_pct', 0),
-        'hr_slope': physio.get('hr_slope', 0)
+        'hr_slope': physio.get('hr_slope', 0),
+        'hr_age': hr_age
     }
 
 def get_emotion_data_for_dda():
@@ -1054,13 +1076,14 @@ def get_game_data_for_dda():
     }
 
 def sync_difficulty_to_game():
-    """将DDA建议的难度同步到游戏"""
+    """将DDA建议的难度同步到游戏 - DDA是唯一的难度调整源"""
     try:
         resp = requests.get("http://127.0.0.1:5050/api/game-state", timeout=0.5)
         if resp.status_code == 200:
             game_state = resp.json()
-            current_game_diff = game_state.get('difficulty', 1)
+            current_game_diff = game_state.get('difficulty', 4)
             
+            # DDA是唯一的难度调整源，无论游戏状态如何都同步
             if dda_system.current_difficulty != current_game_diff:
                 requests.post("http://127.0.0.1:5050/api/game-state", 
                             json={'difficulty': dda_system.current_difficulty},
@@ -1123,21 +1146,16 @@ def api_hlkk():
 def api_game():
     """代理获取游戏状态，避免跨域"""
     try:
-        print("[DEBUG] 尝试获取游戏状态...")
         resp = requests.get("http://127.0.0.1:5050/api/game-state", timeout=3.0)
-        print(f"[DEBUG] 游戏API响应: {resp.status_code}")
         if resp.status_code == 200:
             data = resp.json()
-            print(f"[DEBUG] 游戏数据: {data}")
             return jsonify(data)
-        else:
-            print(f"[DEBUG] 游戏API返回错误状态码: {resp.status_code}")
-    except requests.exceptions.ConnectionError as e:
-        print(f"[DEBUG] 无法连接到游戏服务器: {e}")
-    except requests.exceptions.Timeout as e:
-        print(f"[DEBUG] 游戏服务器超时: {e}")
-    except Exception as e:
-        print(f"[DEBUG] 获取游戏状态失败: {e}")
+    except requests.exceptions.ConnectionError:
+        pass
+    except requests.exceptions.Timeout:
+        pass
+    except Exception:
+        pass
     # 返回默认数据
     return jsonify({
         'status': 'idle',
