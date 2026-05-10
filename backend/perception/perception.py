@@ -212,6 +212,9 @@ class PersonAnalyzer:
             self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             self._reconnect_attempts = 0
             return True
+        
+        self.cap.release()
+        self.cap = None
         return False
 
     def load_models(self):
@@ -567,7 +570,6 @@ class PersonAnalyzer:
     
     def _try_update_hlkk(self):
         """实时向hlkk.py发送年龄和性别数据（由hlkk.py每10秒取均值）"""
-        # 检查时间间隔，避免请求风暴
         current_time = time.time()
         if current_time - self.last_hlkk_update_time < self.hlkk_update_interval:
             return
@@ -578,11 +580,9 @@ class PersonAnalyzer:
         
         try:
             if age > 0 and gender in ["男", "女"]:
-                # 正脸检测到有效数据
                 gender_en = "male" if gender == "男" else "female"
                 url = f"http://127.0.0.1:5020/person?age={age}&gender={gender_en}"
             else:
-                # 非正脸或未检测到，传无效标记
                 url = "http://127.0.0.1:5020/person?age=-&gender=-"
             
             resp = requests.get(url, timeout=0.5)
@@ -591,8 +591,13 @@ class PersonAnalyzer:
                 if age > 0 and gender in ["男", "女"]:
                     self.cached_age = age
                     self.cached_gender = gender
-        except Exception:
-            pass
+                self._hlkk_fail_count = 0
+        except Exception as e:
+            self._hlkk_fail_count = getattr(self, '_hlkk_fail_count', 0) + 1
+            if self._hlkk_fail_count >= 5:
+                print(f"[Perception] HLKK服务连接失败次数: {self._hlkk_fail_count}")
+            if self._hlkk_fail_count >= 20:
+                print(f"[Perception] HLKK服务持续失败，建议检查服务状态")
 
 
 class EmotionProcessor:
@@ -897,11 +902,14 @@ atexit.register(cleanup)
 def update_loop():
     last_dda_update = time.time()
     last_game_sync = time.time()
+    last_processor_update = time.time()
     
     while True:
-        processor.update()
-        
         current_time = time.time()
+        
+        if current_time - last_processor_update >= 0.5:
+            last_processor_update = current_time
+            processor.update()
         
         if current_time - last_dda_update >= 2:
             last_dda_update = current_time
@@ -915,13 +923,19 @@ def update_loop():
 
 def run_dda_update():
     """执行DDA更新：收集数据 -> 更新DDA -> 获取调整建议"""
-    global last_dda_data
+    global last_dda_data, last_game_status
     try:
         unified = get_unified_dda_data()
         last_dda_data = unified
         
-        # 只在游戏进行时才执行DDA更新
         game_status = unified.get('game_status', 'idle')
+        
+        if last_game_status != 'playing' and game_status == 'playing':
+            dda_system.reset_for_new_game()
+            print("[DDA] 检测到新游戏开始，重置状态")
+        
+        last_game_status = game_status
+        
         if game_status != 'playing':
             return None
         
@@ -933,17 +947,23 @@ def run_dda_update():
         print(f"[DDA] 更新失败: {e}")
         return None
 
+
 last_dda_data = {}
+last_game_status = 'idle'
 
 def get_unified_dda_data():
     """产出一个统一的 JSON，包含所有 perception 已经算好的标签 - 直接传给 DDA"""
     with processor.lock:
         physio = processor.physio_data
         emotion = processor.processed_emotion
+        face_data = processor.face_data
     
     hr_valid = physio.get('hr_valid', False)
     hrr_pct = physio.get('hrr_pct', 0)
     hr_slope = physio.get('hr_slope', 0)
+    
+    face_detected = face_data.get('face_detected', True)
+    face_count = face_data.get('face_count', 1)
     
     # HRR 强度标签（和 hlkk.py 保持一致）
     if hrr_pct < 40:
@@ -1004,6 +1024,8 @@ def get_unified_dda_data():
         'emotion': label,
         'emotion_cn': emotion_cn,
         'confidence': emotion.get('confidence', 0),
+        'face_detected': face_detected,
+        'face_count': face_count,
         'timeLeft': game_data.get('timeLeft', 180),
         'score': game_data.get('score', 0),
         'difficulty': game_data.get('difficulty', 1),
@@ -1031,6 +1053,7 @@ def get_unified_dda_data():
             if not isinstance(r_time, int):
                 r_time = 0
             unified['results'].append({
+                'seq': result.get('seq', None),
                 'type': result.get('type', 'miss'),
                 'time': r_time,
                 'difficulty': result.get('difficulty', 1),
@@ -1084,24 +1107,29 @@ def get_game_data_for_dda():
 
 def sync_difficulty_to_game():
     """将DDA建议的难度同步到游戏 - DDA是唯一的难度调整源"""
-    try:
-        resp = requests.get("http://127.0.0.1:5050/api/game-state", timeout=0.5)
-        if resp.status_code == 200:
-            game_state = resp.json()
-            current_game_diff = game_state.get('difficulty', 4)
-            game_status = game_state.get('status', 'idle')
-            
-            # 只在游戏进行时同步难度
-            if game_status != 'playing':
+    max_retries = 2
+    for attempt in range(max_retries):
+        try:
+            resp = requests.get("http://127.0.0.1:5050/api/game-state", timeout=2.0)
+            if resp.status_code == 200:
+                game_state = resp.json()
+                current_game_diff = game_state.get('difficulty', 4)
+                game_status = game_state.get('status', 'idle')
+                
+                if game_status != 'playing':
+                    return
+                
+                if dda_system.current_difficulty != current_game_diff:
+                    sync_resp = requests.post("http://127.0.0.1:5050/api/game/difficulty",
+                                json={'difficulty': dda_system.current_difficulty},
+                                timeout=2.0)
+                    if sync_resp.status_code == 200:
+                        print(f"[DDA] 同步难度到游戏: {current_game_diff} -> {dda_system.current_difficulty}")
                 return
-            
-            if dda_system.current_difficulty != current_game_diff:
-                requests.post("http://127.0.0.1:5050/api/game-state", 
-                            json={'difficulty': dda_system.current_difficulty},
-                            timeout=0.5)
-                print(f"[DDA] 同步难度到游戏: {current_game_diff} -> {dda_system.current_difficulty}")
-    except Exception as e:
-        pass  # 静默忽略同步错误
+        except Exception as e:
+            if attempt == max_retries - 1:
+                print(f"[DDA] 同步难度失败: {e}")
+            time.sleep(0.1 * (attempt + 1))
 
 
 @app.route("/")
@@ -1226,22 +1254,18 @@ def api_dda_input():
     unified = get_unified_dda_data()
     
     try:
-        # 只在游戏进行时才执行DDA更新
-        game_status = unified.get('game_status', 'idle')
-        if game_status == 'playing':
-            result = dda_system.update_from_unified(unified)
-            unified['dda_output'] = {
-                'current_difficulty': result['current_difficulty'],
-                'adjustment': result['adjustment'],
-                'adjustment_made': result['adjustment_made'],
-                'reason': result['reason'],
-                'flow_state': result['flow_state'],
-                'can_continue': result['can_continue'],
-                'want_continue': result['want_continue'],
-                'safety_rules': result['safety_rules']
-            }
-    except Exception:
-        pass
+        unified['dda_output'] = {
+            'current_difficulty': dda_system.current_difficulty,
+            'adjustment': dda_system.last_adjustment if hasattr(dda_system, 'last_adjustment') else 0,
+            'adjustment_made': False,
+            'reason': "查询状态",
+            'flow_state': dda_system._last_flow_state if hasattr(dda_system, '_last_flow_state') else 'flow',
+            'can_continue': {'state': dda_system._last_can_state if hasattr(dda_system, '_last_can_state') else 'Capable', 'score': dda_system._last_can_score if hasattr(dda_system, '_last_can_score') else 50},
+            'want_continue': {'state': dda_system._last_want_state if hasattr(dda_system, '_last_want_state') else 'Engaged', 'score': dda_system._last_want_score if hasattr(dda_system, '_last_want_score') else 50},
+            'safety_rules': dda_system._last_safety_rules if hasattr(dda_system, '_last_safety_rules') else {'hr_abnormal': False, 'sustained_high_hrr': False, 'negative_consecutive': False, 'accuracy_collapse': False}
+        }
+    except Exception as e:
+        print(f"[DDA] 查询状态失败: {e}")
     
     return jsonify(unified)
 

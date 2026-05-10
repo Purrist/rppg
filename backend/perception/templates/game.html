@@ -269,11 +269,15 @@ function updateMoodIndicator() {
 
 function showResults() {
     const list = document.getElementById('results-list');
-    list.innerHTML = '';
+    if (gameState.results.length === 0) {
+        list.innerHTML = '';
+        return;
+    }
     
-    gameState.results.forEach((r, i) => {
-        const item = document.createElement('div');
-        item.className = 'result-item';
+    const recentResults = gameState.results.slice(-10);
+    let html = '';
+    
+    recentResults.forEach((r) => {
         let typeClass = 'result-hit';
         let typeText = '✓ 打中';
         if (r.type === 'miss') {
@@ -287,15 +291,17 @@ function showResults() {
             typeText = '💣 炸弹';
         }
         
-        item.innerHTML = `
-            <span class="${typeClass}">${typeText}</span>
-            <span class="result-time">${r.time === '--' ? '--' : r.time + 'ms'}</span>
-            <span class="result-diff">Lv.${r.difficulty}</span>
-            <span class="result-score">${r.score > 0 ? '+' : ''}${r.score}</span>
+        html += `
+            <div class="result-item">
+                <span class="${typeClass}">${typeText}</span>
+                <span class="result-time">${r.time === '--' ? '--' : r.time + 'ms'}</span>
+                <span class="result-diff">Lv.${r.difficulty}</span>
+                <span class="result-score">${r.score > 0 ? '+' : ''}${r.score}</span>
+            </div>
         `;
-        list.appendChild(item);
     });
     
+    list.innerHTML = html;
     list.scrollTop = list.scrollHeight;
 }
 
@@ -303,26 +309,30 @@ function syncMoles() {
     fetch('/api/game/moles')
         .then(r => r.json())
         .then(data => {
-            const holes = document.querySelectorAll('.mole-hole');
-            
-            holes.forEach((hole, index) => {
-                const moleContainer = hole.querySelector('.mole-container');
-                const mole = hole.querySelector('.mole');
-                const bombIndicator = hole.querySelector('.bomb-indicator');
-                
-                const isVisible = data.moles.includes(index);
-                const isBomb = data.is_bomb && data.is_bomb[index];
-                
-                if (isVisible) {
-                    moleContainer.classList.add('visible');
-                    mole.textContent = isBomb ? '💣' : '🐹';
-                    bombIndicator.classList.toggle('hidden', !isBomb);
-                } else {
-                    moleContainer.classList.remove('visible');
-                }
-            });
+            updateMoles(data.moles, data.is_bomb);
         })
         .catch(e => console.error('同步地鼠状态失败:', e));
+}
+
+function updateMoles(moles, isBombData) {
+    const holes = document.querySelectorAll('.mole-hole');
+    
+    holes.forEach((hole, index) => {
+        const moleContainer = hole.querySelector('.mole-container');
+        const mole = hole.querySelector('.mole');
+        const bombIndicator = hole.querySelector('.bomb-indicator');
+        
+        const isVisible = moles.includes(index);
+        const isBomb = isBombData && isBombData[index];
+        
+        if (isVisible) {
+            moleContainer.classList.add('visible');
+            mole.textContent = isBomb ? '💣' : '🐹';
+            bombIndicator.classList.toggle('hidden', !isBomb);
+        } else {
+            moleContainer.classList.remove('visible');
+        }
+    });
 }
 
 function handleHit(event) {
@@ -358,6 +368,8 @@ function handleHit(event) {
 }
 
 function startGame() {
+    if (gameState.running) return;
+    
     fetch('/api/game/start', { method: 'POST' })
         .then(r => r.json())
         .then(data => {
@@ -383,14 +395,24 @@ function startGame() {
                 updateUI();
                 showResults();
                 
+                if (gameState.timer) {
+                    clearInterval(gameState.timer);
+                    gameState.timer = null;
+                }
+                
                 gameState.timer = setInterval(() => {
+                if (gameState.running && !gameState.paused) {
                     syncState();
-                }, 100);
+                }
+            }, 200);
                 
                 syncMoles();
             }
         })
-        .catch(e => console.error('开始游戏失败:', e));
+        .catch(e => {
+            console.error('开始游戏失败:', e);
+            document.getElementById('btn-start').disabled = false;
+        });
 }
 
 function togglePause() {
@@ -418,13 +440,19 @@ function togglePause() {
 }
 
 function endGame() {
+    if (!gameState.running) return;
+    
     fetch('/api/game/end', { method: 'POST' })
         .then(r => r.json())
         .then(data => {
             if (data.success) {
                 gameState.running = false;
                 gameState.paused = false;
-                clearInterval(gameState.timer);
+                
+                if (gameState.timer) {
+                    clearInterval(gameState.timer);
+                    gameState.timer = null;
+                }
                 
                 document.getElementById('btn-start').disabled = false;
                 document.getElementById('btn-pause').disabled = true;
@@ -488,9 +516,10 @@ function resetGame() {
 }
 
 function syncState() {
-    fetch('/api/game-state')
+    fetch('/api/game/sync')
         .then(r => r.json())
-        .then(state => {
+        .then(data => {
+            const state = data.game_state;
             gameState.timeLeft = state.timeLeft || 180;
             gameState.score = state.score || 0;
             gameState.difficulty = state.difficulty || 1;
@@ -509,7 +538,7 @@ function syncState() {
             
             updateUI();
             showResults();
-            syncMoles();
+            updateMoles(data.moles, data.is_bomb);
         })
         .catch(e => console.error('同步状态失败:', e));
 }
