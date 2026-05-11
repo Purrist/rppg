@@ -28,17 +28,20 @@ class VoiceManager:
     SAMPLE_RATE = 16000
     CHANNELS = 1
     
-    # VAD参数
+    # VAD参数 - 适配老年人说话特点
     VAD_ENERGY_THRESHOLD = 0.01
-    VAD_SILENCE_TIMEOUT = 1.5
-    VAD_MIN_SPEECH_DURATION = 0.3
-    VAD_MAX_RECORD_DURATION = 10
+    VAD_SILENCE_TIMEOUT = 2.5     # 从1.5s延长到2.5s，老年人说话停顿更长
+    VAD_MIN_SPEECH_DURATION = 0.5 # 从0.3s延长到0.5s，避免误检
+    VAD_MAX_RECORD_DURATION = 15  # 从10s延长到15s，允许更长语音
     
     # 防抖窗口
-    DEBOUNCE_TIME = 1.5
+    DEBOUNCE_TIME = 2.0  # 从1.5s延长到2.0s，更强的防抖
+    
+    # 全局冷却时间（无论什么状态，2秒内不接受新唤醒）
+    COOLDOWN_TIME = 2.0
     
     # 唤醒词列表
-    WAKE_WORDS = ['阿康', '阿康阿康', 'akon', '你好阿康', '阿康你好', '小康', '小康小康']
+    WAKE_WORDS = ['阿康', '你好阿康', '阿康你好']
 
     # 回应语列表 - 亲和、简短、多样化
     RESPONSES = [
@@ -87,6 +90,15 @@ class VoiceManager:
         # ⭐ 语音播报管理
         self._speaking_lock = threading.Lock()  # 确保同一时间只有一个播报任务
         self._current_speak_session = 0  # 当前播报会话ID
+        
+        # ⭐ KWS暂停控制
+        self._kws_paused = False
+        self._kws_lock = threading.Lock()
+        
+        # ⭐ 预合成音频缓存
+        self._prevoice_cache = {}
+        self._prevoice_loaded = False
+        self._prevoice_dir = Path(__file__).parent / "prevoice"
         
         # 音频队列和录音数据
         self.audio_queue = queue.Queue()
@@ -329,6 +341,59 @@ class VoiceManager:
             print(f"[VoiceManager] pytts语音合成引擎加载失败: {e}")
             self.pytts_engine = None
 
+        # ⭐ 加载预合成音频缓存
+        self._load_prevoice_cache()
+
+    def _load_prevoice_cache(self):
+        """加载预合成的回应语音频缓存"""
+        if not self._prevoice_dir.exists():
+            print("[VoiceManager] 预合成音频目录不存在")
+            return
+        
+        index_file = self._prevoice_dir / "index.json"
+        if not index_file.exists():
+            print("[VoiceManager] 预合成音频索引文件不存在")
+            return
+        
+        try:
+            import json
+            import soundfile as sf
+            with open(index_file, 'r', encoding='utf-8') as f:
+                index_data = json.load(f)
+            
+            responses = index_data.get('responses', [])
+            print(f"[VoiceManager] 开始加载 {len(responses)} 个预合成音频")
+            
+            for idx, response in enumerate(responses):
+                audio_file = self._prevoice_dir / f"response_{idx}.wav"
+                if audio_file.exists():
+                    data, sr = sf.read(str(audio_file), dtype='float32')
+                    self._prevoice_cache[response] = {
+                        'data': data,
+                        'sample_rate': sr
+                    }
+                    print(f"[VoiceManager] 已缓存: {response}")
+            
+            self._prevoice_loaded = True
+            print(f"[VoiceManager] 预合成音频缓存加载完成，共 {len(self._prevoice_cache)} 个")
+        except Exception as e:
+            print(f"[VoiceManager] 加载预合成音频失败: {e}")
+
+    def _play_prevoice(self, response):
+        """播放预合成的回应语音频（同步阻塞）"""
+        if response not in self._prevoice_cache:
+            return False
+        
+        try:
+            import sounddevice as sd
+            audio_data = self._prevoice_cache[response]
+            sd.play(audio_data['data'], samplerate=audio_data['sample_rate'])
+            sd.wait()
+            return True
+        except Exception as e:
+            print(f"[VoiceManager] 播放预合成音频失败: {e}")
+            return False
+
     def _detect_microphone(self):
         """自动检测 Realtek 麦克风"""
         try:
@@ -418,18 +483,46 @@ class VoiceManager:
             print(f"[VoiceManager] 音频流错误: {e}")
     
     def _audio_callback(self, indata, frames, time_info, status):
-        """麦克风录音回调"""
+        """麦克风录音回调 - 修复竞态条件"""
         if status:
             print(f"[VoiceManager] 音频状态警告: {status}")
         
-        # 如果正在播放语音，不保存录音数据，也不进行唤醒词检测
-        if not self.is_playing:
-            # 如果正在录制语音，保存音频数据并进行 VAD 检测
-            if self.is_recording:
-                self.recorded_audio.append(indata.copy())
-                self._process_vad(indata)
-            # 只有不在播放时才将音频放入队列进行唤醒词检测
+        # ⭐ 优先检查 _kws_paused（线程安全标记）
+        # 不再依赖 is_playing（它在线程中异步设置，有竞态）
+        kws_should_skip = False
+        with self._kws_lock:
+            kws_should_skip = self._kws_paused
+        
+        if not kws_should_skip:
+            # 只在非暂停时放入KWS队列
             self.audio_queue.put(indata.copy())
+        
+        # 录音数据始终保存（录音状态由 is_recording 控制）
+        if self.is_recording:
+            self.recorded_audio.append(indata.copy())
+            self._process_vad(indata)
+    
+    def _pause_kws(self):
+        """暂停KWS检测（播放前调用）"""
+        with self._kws_lock:
+            self._kws_paused = True
+        # ⭐ 清空队列中的残留音频
+        while not self.audio_queue.empty():
+            try:
+                self.audio_queue.get_nowait()
+            except queue.Empty:
+                break
+        print("[VoiceManager] KWS 已暂停，队列已清空")
+    
+    def _resume_kws(self):
+        """恢复KWS检测（播放结束后延迟调用）"""
+        import traceback
+        with self._kws_lock:
+            self._kws_paused = False
+        # ⭐ 添加调用堆栈追踪
+        stack = traceback.extract_stack()
+        caller = stack[-2] if len(stack) > 1 else "unknown"
+        print(f"[VoiceManager] KWS 已恢复 (调用者: {caller.filename}:{caller.lineno} {caller.name})")
     
     def _process_vad(self, audio_chunk):
         """语音端点检测处理"""
@@ -487,57 +580,40 @@ class VoiceManager:
                 print(f"[VoiceManager] 处理音频时出错: {e}")
     
     def _on_keyword_detected(self, keyword):
-        """检测到关键词时的回调"""
+        """检测到关键词时的回调 - 修复重复唤醒"""
         print(f"[VoiceManager] 检测到唤醒词: {keyword}")
-        
         current_time = time.time()
         time_since_last_wake = current_time - self.last_wake_time
         
-        # ⭐ 连续唤醒词切分检测：间隔<0.8s只触发一次
-        if time_since_last_wake < 0.8:
-            print(f"[VoiceManager] 连续唤醒检测: 忽略间隔 {time_since_last_wake:.2f}s 的重复唤醒")
+        # ⭐ 全局冷却：无论什么状态，2秒内不重复触发
+        if time_since_last_wake < self.COOLDOWN_TIME:
+            print(f"[VoiceManager] 冷却中: 忽略 ({time_since_last_wake:.2f}s < {self.COOLDOWN_TIME}s)")
             return
         
-        if self.state == "STANDBY":
-            # 待机状态，直接触发唤醒
-            self._trigger_wake_up()
+        # ⭐ 如果当前不在待机状态，不允许唤醒（除非超过5秒强制打断）
+        if self.state != "STANDBY":
+            if time_since_last_wake < 5.0:
+                print(f"[VoiceManager] 非待机状态，忽略唤醒 (当前: {self.state})")
+                return
+            # 超过5秒的卡死会话，强制打断
+            print(f"[VoiceManager] ⭐ 强制打断卡死会话: 当前状态 {self.state}")
+            with self._session_lock:
+                self._session_id += 1
+                new_session_id = self._session_id
+            self.is_recording = False
+            self.is_playing = False
+            self.recorded_audio = []
+            self.vad_is_speaking = False
+            self.vad_silence_start_time = None
+            self.vad_speech_start_time = None
+            self._pause_kws()
+            time.sleep(0.1)
+            self._trigger_wake_up(new_session_id)
             self.last_wake_time = current_time
             return
         
-        # 在防抖窗口内，忽略快速连续唤醒
-        if time_since_last_wake < self.DEBOUNCE_TIME:
-            print(f"[VoiceManager] 防抖: 忽略快速连续唤醒")
-            return
-        
-        # ⭐ 超过防抖窗口，强制打断当前会话
-        print(f"[VoiceManager] ⭐ 强制打断: 当前状态 {self.state}")
-        
-        # 增加会话ID，标记当前会话为过期
-        with self._session_lock:
-            self._session_id += 1
-            new_session_id = self._session_id
-        
-        # 立即停止录音和播放
-        self.is_recording = False
-        self.is_playing = False
-        
-        # 清空录音数据
-        self.recorded_audio = []
-        self.vad_is_speaking = False
-        self.vad_silence_start_time = None
-        self.vad_speech_start_time = None
-        
-        # 通知前端打断事件
-        self.socketio.emit('voice_interrupted', {
-            'previous_state': self.state,
-            'message': '检测到新的唤醒，打断当前流程'
-        })
-        
-        # 短暂延迟确保旧会话退出
-        time.sleep(0.1)
-        
-        # 触发新的唤醒流程
-        self._trigger_wake_up(new_session_id)
+        # 正常唤醒
+        self._trigger_wake_up()
         self.last_wake_time = current_time
     
     def _trigger_wake_up(self, session_id=None, skip_response=False):
@@ -658,13 +734,14 @@ class VoiceManager:
             with self._session_lock:
                 return self._current_session_id == session_id
         
-        # 如果有回应语，进入回应状态并播放
         if response:
-            # 进入回应状态
+            # ⭐ 1. 先暂停KWS，再播放（防止回声触发唤醒）
+            self._pause_kws()
+            
             self._set_state("RESPONDING")
             print(f"[VoiceManager] [会话{session_id}] 状态: RESPONDING -> {response}")
             
-            # 通知前端弹出对话框
+            # 通知前端
             self.socketio.emit('voice_wake_up', {
                 'response': response,
                 'user_text': '',
@@ -672,76 +749,30 @@ class VoiceManager:
                 'session_id': session_id
             })
             
-            # ⭐ 通知前端播放回应并等待完成
-            speak_event = threading.Event()
+            # ⭐ 2. 同步播放回应语（阻塞直到完成）
+            self._speak_sync(response)
             
-            def speak_and_wait(text):
-                """后端播放语音并等待完成"""
-                if not text:
-                    speak_event.set()
-                    return
-                
-                print(f"[VoiceManager] [会话{session_id}] 后端播放: {text}")
-                
-                # 通知前端播放状态
-                self.socketio.emit('voice_speaking', {
-                    'status': 'start',
-                    'text': text
-                })
-                
-                # 直接调用_speak方法进行后端播放（现在是异步的）
-                self._speak(text)
-                
-                # 等待播放完成 - 轮询is_playing状态
-                start_time = time.time()
-                while self.is_playing and time.time() - start_time < 10:  # 最多等待10秒
-                    time.sleep(0.1)
-                
-                # 确保播放状态被重置
-                self.is_playing = False
-                speak_event.set()
-                self.socketio.emit('voice_speaking', {'status': 'end'})
-            
-            # 通知前端播放回应
-            speak_and_wait(response)
-            
-            # ⭐ 等待语音播放完成（最多等待3秒）
-            speak_event.wait(timeout=3.0)
-            
-            # ⭐ 检查是否被打断
+            # ⭐ 3. 检查打断
             if not is_session_valid():
-                print(f"[VoiceManager] [会话{session_id}] 已被打断，退出")
                 return
             
-            # ⭐ 额外延迟确保音频设备释放
+            # ⭐ 4. 只保留必要延迟（等音频设备释放）
             time.sleep(0.3)
             
-            # ⭐ 再次检查是否被打断
             if not is_session_valid():
-                print(f"[VoiceManager] [会话{session_id}] 延迟后被打断，退出")
                 return
         else:
-            # 没有回应语（点击按钮触发），直接进入聆听状态
-            print(f"[VoiceManager] [会话{session_id}] 跳过回应语，直接进入聆听状态")
+            self._pause_kws()
         
-        # ⭐ 检查是否被打断
-        if not is_session_valid():
-            print(f"[VoiceManager] [会话{session_id}] 已被打断，退出")
-            return
+        # ⭐ 5. 清空KWS队列（可能积累了播放期间的残留）
+        while not self.audio_queue.empty():
+            try:
+                self.audio_queue.get_nowait()
+            except queue.Empty:
+                break
         
-        # ⭐ 额外延迟确保音频设备释放和回声消除
-        time.sleep(0.5)
-        
-        # ⭐ 再次检查是否被打断
-        if not is_session_valid():
-            print(f"[VoiceManager] [会话{session_id}] 延迟后被打断，退出")
-            return
-        
-        # ⭐ 确保播放状态已完全结束
-        self.is_playing = False
-        
-        # ⭐ 再等待一小段时间确保系统稳定
-        time.sleep(0.2)
+        # ⭐ 6. 延迟恢复KWS（等待回声完全消失）
+        threading.Timer(0.5, self._resume_kws).start()
         
         # 进入聆听状态
         self._set_state("LISTENING")
@@ -853,11 +884,12 @@ class VoiceManager:
                     'session_id': session_id
                 })
                 
-                # ⭐ 通过回调让app.py处理LLM调用和语音播报
-                if self.on_speech_recognized:
-                    self.on_speech_recognized(text)
-                elif self.system_core:
+                # ⭐ 直接处理语音命令（不再通过回调，避免重复）
+                if self.system_core:
                     self._call_llm_and_respond(text, session_id)
+                elif self.on_speech_recognized:
+                    # 回退到旧的回调方式
+                    self.on_speech_recognized(text)
                 else:
                     self._back_to_standby()
             else:
@@ -871,7 +903,7 @@ class VoiceManager:
             self._back_to_standby()
     
     def _call_llm_and_respond(self, user_text, session_id=None):
-        """调用LLM并回应"""
+        """调用LLM并回应 - 添加意图识别"""
         # 检查会话是否有效
         def is_session_valid():
             with self._session_lock:
@@ -883,11 +915,90 @@ class VoiceManager:
                 print(f"[VoiceManager] [会话{session_id}] 调用LLM前被打断，退出")
                 return
             
-            # 调用系统核心的LLM
-            if hasattr(self.system_core, 'process_message'):
-                response = self.system_core.process_message(user_text)
+            # ⭐ 意图识别 - 优先处理天气和时间（直接播报，不经过AI）
+            intent_result = self._recognize_intent(user_text)
+            
+            if intent_result['intent'] == 'emergency':
+                # ⚡ 紧急呼救 - 直接跳转呼叫页面并播报
+                print(f"[VoiceManager] [会话{session_id}] ⚡ 紧急呼救: {user_text}")
+                # 跳转到呼叫页面（紧急模式）
+                self.socketio.emit('navigate_to', {'page': '/call?emergency=true'})
+                self.socketio.emit('voice_llm_response', {
+                    'text': intent_result['response'],
+                    'state': 'PROCESSING',
+                    'session_id': session_id
+                })
+                self._speak(intent_result['response'])
+                return  # ⚡ 直接返回，不调用LLM
+                
+            elif intent_result['intent'] == 'weather':
+                # ⚡ 直接播报天气 - 不交给AI思考
+                weather_text = intent_result['response']
+                print(f"[VoiceManager] [会话{session_id}] ⚡ 天气查询（跳过AI）: {weather_text}")
+                self.socketio.emit('voice_llm_response', {
+                    'text': weather_text,
+                    'state': 'PROCESSING',
+                    'session_id': session_id
+                })
+                self._speak(weather_text)
+                return  # ⚡ 直接返回，不调用LLM
+                
+            elif intent_result['intent'] == 'time':
+                # ⚡ 直接播报时间 - 不交给AI思考
+                time_text = intent_result['response']
+                print(f"[VoiceManager] [会话{session_id}] ⚡ 时间查询（跳过AI）: {time_text}")
+                self.socketio.emit('voice_llm_response', {
+                    'text': time_text,
+                    'state': 'PROCESSING',
+                    'session_id': session_id
+                })
+                self._speak(time_text)
+                return  # ⚡ 直接返回，不调用LLM
+                
+            elif intent_result['intent'] == 'navigate':
+                # ⚡ 页面跳转 - 不交给AI思考
+                page = intent_result['page']
+                print(f"[VoiceManager] [会话{session_id}] ⚡ 页面跳转（跳过AI）: {page}")
+                self.socketio.emit('navigate_to', {'page': page})
+                self.socketio.emit('voice_llm_response', {
+                    'text': intent_result['response'],
+                    'state': 'PROCESSING',
+                    'session_id': session_id
+                })
+                self._speak(intent_result['response'])
+                return  # ⚡ 直接返回，不调用LLM
+                
+            elif intent_result['intent'] == 'call_contact':
+                # ⚡ 打电话给特定联系人 - 直接跳转通话页面
+                contact = intent_result['contact']
+                print(f"[VoiceManager] [会话{session_id}] ⚡ 打电话给: {contact}")
+                # 跳转到呼叫页面（指定联系人）
+                self.socketio.emit('navigate_to', {'page': f'/call?contact={contact}'})
+                self.socketio.emit('voice_llm_response', {
+                    'text': intent_result['response'],
+                    'state': 'PROCESSING',
+                    'session_id': session_id
+                })
+                self._speak(intent_result['response'])
+                return  # ⚡ 直接返回，不调用LLM
+            
+            # ⭐ 只有其他情况才交给LLM处理
+            # 使用 ask_akon 函数调用LLM
+            try:
+                print(f"[VoiceManager] [会话{session_id}] ⭐ 调用LLM处理: {user_text}")
+                from core.core_agent import ask_akon
+                
+                # 获取当前系统状态作为上下文
+                system_state = self.system_core.get_state() if self.system_core else {}
+                print(f"[VoiceManager] [会话{session_id}] 系统状态: {system_state}")
+                
+                # 调用LLM
+                response, action = ask_akon(user_text, system_state)
+                print(f"[VoiceManager] [会话{session_id}] LLM返回: response={response}, action={action}")
                 
                 if response:
+                    # ⭐ 限制回答长度在20字以内，去除emoji和颜文字
+                    response = self._clean_response(response)
                     print(f"[VoiceManager] [会话{session_id}] LLM回复: {response}")
                     
                     # ⭐ 检查是否被打断
@@ -895,27 +1006,216 @@ class VoiceManager:
                         print(f"[VoiceManager] [会话{session_id}] 获取LLM回复后被打断，退出")
                         return
                     
-                    # 通知前端显示LLM回复
+                    # 通知前端显示LLM回复（⭐ 不再让前端播放语音，由后端统一播放）
                     self.socketio.emit('voice_llm_response', {
                         'text': response,
                         'state': 'PROCESSING',
                         'session_id': session_id
                     })
                     
-                    # 不在这里播报，由speak_text事件统一处理
-            else:
-                # 如果没有process_message方法，直接复述
-                self._speak(f"您说: {user_text}")
-                
-        except Exception as e:
-            print(f"[VoiceManager] [会话{session_id}] LLM调用出错: {e}")
-            self._speak("抱歉，处理您的请求时出错了")
+                    # ⭐ 后端统一播报（_speak内部已处理KWS暂停）
+                    self._speak(response)
+                else:
+                    self._speak("抱歉，我没听明白")
+            except Exception as llm_error:
+                print(f"[VoiceManager] [会话{session_id}] LLM调用出错: {llm_error}")
+                self._speak("抱歉，网络有点问题，请稍等")
+                # 继续执行finally回到待机
+                raise
         finally:
             # ⭐ 只有当前会话有效时才回到待机
             if not session_id or is_session_valid():
+                # ⭐ 延迟回到待机，等播报完成
+                time.sleep(1.0)
                 self._back_to_standby()
             else:
                 print(f"[VoiceManager] [会话{session_id}] 已被新会话取代，不回到待机")
+
+    def _clean_response(self, text):
+        """清理LLM回复 - 限制长度在20字以内，去除emoji和颜文字"""
+        if not text:
+            return ""
+        
+        # 去除emoji和特殊字符
+        import re
+        # 匹配emoji的正则表达式
+        emoji_pattern = re.compile(
+            "["
+            u"\U0001F600-\U0001F64F"  # emoticons
+            u"\U0001F300-\U0001F5FF"  # symbols & pictographs
+            u"\U0001F680-\U0001F6FF"  # transport & map symbols
+            u"\U0001F1E0-\U0001F1FF"  # flags (iOS)
+            u"\U00002500-\U00002BEF"  # chinese char
+            u"\U00002702-\U000027B0"
+            u"\U00002702-\U000027B0"
+            u"\U000024C2-\U0001F251"
+            u"\U0001f926-\U0001f937"
+            u"\U00010000-\U0010ffff"
+            u"\u2640-\u2642"
+            u"\u2600-\u2B55"
+            u"\u200d"
+            u"\u23cf"
+            u"\u23e9"
+            u"\u231a"
+            u"\ufe0f"  # variation selectors-16
+            u"\u3030"
+            "]+",
+            flags=re.UNICODE
+        )
+        
+        # 去除颜文字（简单匹配）
+        text = emoji_pattern.sub(r'', text)
+        text = re.sub(r'[^\w\s，。！？、；：（）【】—…·]+', '', text)
+        
+        # 限制长度在20字以内
+        text = text.strip()[:20]
+        
+        # 确保以完整句子结尾
+        if len(text) > 0 and text[-1] not in ['，', '。', '！', '？']:
+            text += '。'
+        
+        return text
+
+    def _recognize_intent(self, text):
+        """意图识别 - 支持紧急呼救、天气、时间查询和页面跳转"""
+        text = text.lower().strip()
+        
+        # ⭐ 紧急呼救关键词（最高优先级）
+        emergency_keywords = ['救命', '救救我', '救命啊', '不舒服', '好痛', '难受', '疼', '晕倒', '心脏病', '呼吸困难']
+        if any(keyword in text for keyword in emergency_keywords):
+            return {
+                'intent': 'emergency',
+                'response': '正在为您紧急呼救'
+            }
+        
+        # ⭐ 天气查询关键词
+        weather_keywords = ['天气', '气温', '温度', '晴', '雨', '雪', '云']
+        if any(keyword in text for keyword in weather_keywords):
+            return {
+                'intent': 'weather',
+                'response': self._fetch_weather()
+            }
+        
+        # ⭐ 时间查询关键词（排除"不舒服"等情况）
+        time_keywords = ['现在几点', '几点了', '几点钟', '现在时间', '当前时间', '几点了', '几点钟']
+        if any(keyword in text for keyword in time_keywords):
+            return {
+                'intent': 'time',
+                'response': self._get_current_time()
+            }
+        
+        # ⭐ 页面跳转关键词（严格限制在三个页面）
+        # 健康页面
+        health_keywords = ['健康', '身体', '心率', '监测', '生理', '运动', '血压']
+        if any(keyword in text for keyword in health_keywords):
+            return {
+                'intent': 'navigate',
+                'page': '/health',
+                'response': '好的，我带您查看健康数据'
+            }
+        
+        # 娱乐页面
+        entertainment_keywords = ['娱乐', '音乐', '视频', '电影', '放松']
+        if any(keyword in text for keyword in entertainment_keywords):
+            return {
+                'intent': 'navigate',
+                'page': '/entertainment',
+                'response': '好的，我带您进入娱乐页面'
+            }
+        
+        # 益智/学习页面
+        learning_keywords = ['益智', '学习', '游戏', '训练', '任务', '挑战']
+        if any(keyword in text for keyword in learning_keywords):
+            return {
+                'intent': 'navigate',
+                'page': '/learning',
+                'response': '好的，我带您进行益智训练'
+            }
+        
+        # ⭐ 打电话给特定联系人
+        # 支持：打电话给儿子、给女儿打电话、呼叫老伴等
+        contact_names = ['儿子', '女儿', '老伴', '医生', '张三', '李四', '王五', '赵六']
+        for name in contact_names:
+            if f'打电话给{name}' in text or f'给{name}打电话' in text or f'呼叫{name}' in text:
+                return {
+                    'intent': 'call_contact',
+                    'contact': name,
+                    'response': f'好的，正在拨打{name}的电话'
+                }
+        
+        # 呼叫/紧急页面
+        call_keywords = ['呼叫', '打电话', '视频', '通话', '紧急', '求救', '呼救']
+        if any(keyword in text for keyword in call_keywords):
+            return {
+                'intent': 'navigate',
+                'page': '/call',
+                'response': '好的，我带您进入呼叫页面'
+            }
+        
+        # 默认：交给LLM处理
+        return {
+            'intent': 'llm',
+            'response': None
+        }
+
+    def _fetch_weather(self):
+        """获取天气信息 - 优先从system_core获取，失败则调用API"""
+        # ⭐ 优先从system_core获取（与首页保持一致）
+        if self.system_core:
+            try:
+                state = self.system_core.get_state()
+                perception = state.get('perception', {})
+                # 尝试从不同的位置获取天气数据
+                weather_data = perception.get('weather') or state.get('weather')
+                
+                if weather_data:
+                    city = weather_data.get('city', '')
+                    temp = weather_data.get('temperature', '')
+                    weather = weather_data.get('weather', '')
+                    
+                    if city and temp:
+                        if weather:
+                            return f"{city}今天{temp}度，{weather}"
+                        else:
+                            return f"{city}今天{temp}度"
+            except Exception as e:
+                print(f"[VoiceManager] 从system_core获取天气失败: {e}")
+        
+        # ⭐ 回退到直接调用API（与首页使用相同的API）
+        try:
+            import requests
+            res = requests.get('https://uapis.cn/api/v1/misc/weather?lang=zh', timeout=5)
+            data = res.json()
+            
+            if data.get('code') == 0 and data.get('data'):
+                city = data['data']['city']
+                temp = data['data']['temperature']
+                weather = data['data']['weather']
+                return f"{city}今天{temp}度，{weather}"
+            elif data.get('city'):
+                return f"{data['city']}今天{data['temperature']}度，{data['weather']}"
+            else:
+                return "暂时无法获取天气信息"
+        except Exception as e:
+            print(f"[VoiceManager] 获取天气失败: {e}")
+            return "暂时无法获取天气信息"
+
+    def _get_current_time(self):
+        """获取当前时间"""
+        now = datetime.now()
+        hour = now.hour
+        minute = now.minute
+        
+        # 中文时间播报格式
+        hour_text = str(hour)
+        minute_text = str(minute) if minute > 0 else '整'
+        
+        if minute == 0:
+            return f"现在是{hour_text}点整"
+        elif minute < 10:
+            return f"现在是{hour_text}点零{minute_text}分"
+        else:
+            return f"现在是{hour_text}点{minute_text}分"
     
     def _set_state(self, new_state):
         """设置状态并上报"""
@@ -945,6 +1245,8 @@ class VoiceManager:
     
     def _back_to_standby(self):
         """回到待机状态"""
+        # ⭐ 确保KWS恢复
+        self._resume_kws()
         self._set_state("STANDBY")
         print("[VoiceManager] 状态: STANDBY -> 等待唤醒...")
         
@@ -981,8 +1283,60 @@ class VoiceManager:
         except:
             pass
     
+    def _speak_sync(self, text):
+        """同步语音合成并播放（阻塞直到完成）"""
+        if not text:
+            return
+        
+        # ⭐ 优先使用预合成音频（更快响应）
+        if self._prevoice_loaded and text in self._prevoice_cache:
+            self._pause_kws()
+            self.is_playing = True
+            try:
+                self._play_prevoice(text)
+                print(f"[VoiceManager] 使用预合成音频播放: {text}")
+            except Exception as e:
+                print(f"[VoiceManager] 播放预合成音频失败: {e}")
+            finally:
+                self.is_playing = False
+                threading.Timer(0.5, self._resume_kws).start()
+            return
+        
+        # ⭐ 回退到实时合成
+        self._pause_kws()
+        self.is_playing = True
+        
+        try:
+            if self.tts_engine_type == 'vits' and self.tts_engine:
+                audio = self.tts_engine.generate(
+                    text, sid=self.tts_sid, speed=max(1.2, self.tts_speed)
+                )
+                samples = np.array(audio.samples, dtype=np.float32) * self.tts_volume
+                sd.play(samples, samplerate=audio.sample_rate)
+                sd.wait()
+            elif self.tts_engine_type == 'pytts' and self.pytts_engine:
+                import pyttsx3
+                engine = pyttsx3.init()
+                engine.setProperty('rate', int(150 * self.tts_speed))
+                engine.setProperty('volume', min(1.0, self.tts_volume))
+                engine.say(text)
+                engine.runAndWait()
+                engine.stop()
+            else:
+                if self.tts_engine:
+                    audio = self.tts_engine.generate(text, sid=self.tts_sid, speed=max(1.2, self.tts_speed))
+                    samples = np.array(audio.samples, dtype=np.float32) * self.tts_volume
+                    sd.play(samples, samplerate=audio.sample_rate)
+                    sd.wait()
+        except Exception as e:
+            print(f"[VoiceManager] 同步播报错误: {e}")
+        finally:
+            self.is_playing = False
+            # ⭐ 播报结束后延迟恢复KWS
+            threading.Timer(0.5, self._resume_kws).start()
+    
     def _speak(self, text):
-        """语音合成并播放（非阻塞）- 支持VITS和pytts"""
+        """语音合成并播放（非阻塞）- 支持VITS和pytts，播报期间暂停KWS"""
         if not text:
             return
         
@@ -995,7 +1349,8 @@ class VoiceManager:
         
         # 在后台线程中播放，避免阻塞主线程
         def play_thread():
-            # 标记开始播放
+            # ⭐ 播报前暂停KWS
+            self._pause_kws()
             self.is_playing = True
             
             try:
@@ -1119,6 +1474,8 @@ class VoiceManager:
             finally:
                 # 确保播放状态被重置
                 self.is_playing = False
+                # ⭐ 播报结束后延迟恢复KWS
+                threading.Timer(0.5, self._resume_kws).start()
                 print(f"[VoiceManager] 播报完成 [会话{current_session}]")
         
         # 启动播放线程

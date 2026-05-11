@@ -29,7 +29,7 @@
         <!-- 游戏状态 -->
         <div class="sys-card" :class="'game-' + systemState.game?.status.toLowerCase()">
           <div class="sys-label">游戏状态</div>
-          <div class="sys-value">{{ gameStatusText }}</div>
+          <div class="sys-value">{{ systemGameStatusText }}</div>
           <div class="sys-desc">{{ systemState.game?.currentGame || '无' }}</div>
         </div>
         
@@ -83,146 +83,184 @@
       </div>
     </section>
 
-    <!-- ⭐ 核心状态卡片 -->
-    <section class="core-status">
-      <!-- 有人/无人 -->
-      <div class="person-card" :class="personDetected ? 'detected' : 'not-detected'">
-        <div class="person-icon">{{ personDetected ? '👤' : '🚫' }}</div>
-        <div class="person-text">{{ personDetected ? '有人' : '无人' }}</div>
-        <div class="person-detail" v-if="personDetected">
-          人脸: {{ userState.face_count }} | 骨骼: {{ userState.body_detected ? '✓' : '✗' }}
-        </div>
-        <div class="person-detail" v-else>
-          等待检测...
-        </div>
-      </div>
-      
-      <!-- 三维指标 -->
-      <div class="indicator-cards">
-        <!-- 身体负荷 -->
-        <div class="indicator-card physical">
-          <div class="ind-header">
-            <span class="ind-icon">💪</span>
-            <span class="ind-title">身体负荷</span>
-          </div>
-          <div class="ind-value">{{ personDetected ? Math.round(userState.physical_load?.value * 100) : '--' }}%</div>
-          <div class="ind-bar">
-            <div class="ind-fill physical-fill" :style="{ width: (personDetected ? userState.physical_load?.value * 100 : 0) + '%' }"></div>
-          </div>
-          <div class="ind-details">
-            <div class="ind-row">
-              <span>心率</span>
-              <span>{{ personDetected && userState.physical_load?.heart_rate ? userState.physical_load.heart_rate + ' BPM' : '--' }}</span>
-            </div>
-            <div class="ind-row">
-              <span>运动强度</span>
-              <span>{{ personDetected ? Math.round(userState.physical_load?.movement_intensity * 100) + '%' : '--' }}</span>
-            </div>
-            <div class="ind-row" :class="{ 'warning': userState.physical_load?.fall_detected }">
-              <span>摔倒</span>
-              <span>{{ userState.physical_load?.fall_detected ? '⚠️ 检测到!' : '无' }}</span>
+    <!-- ⭐ 综合情绪与生理监测 -->
+    <div class="main-container">
+      <div class="left-panel">
+        <!-- 生理卡片 -->
+        <div class="panel-card" style="flex:0 0 auto">
+          <div class="panel-header">
+            <span class="panel-title">生理监测</span>
+            <div class="status-bar">
+              <span><span class="status-dot" :class="physioConnected ? 'on' : 'off'"></span> 心率呼吸率</span>
+              <span>最后更新: <span>{{ lastUpdateTime }}</span></span>
+              <div class="model-toggle">
+                <button class="model-toggle-btn" :class="{ active: currentModel === 'deepface' }" @click="setModel('deepface')">DeepFace</button>
+                <button class="model-toggle-btn" :class="{ active: currentModel === 'onnx' }" @click="setModel('onnx')">ONNX</button>
+              </div>
             </div>
           </div>
-        </div>
-        
-        <!-- 认知负荷 -->
-        <div class="indicator-card cognitive">
-          <div class="ind-header">
-            <span class="ind-icon">🧠</span>
-            <span class="ind-title">认知负荷</span>
-          </div>
-          <div class="ind-value">{{ personDetected ? Math.round(userState.cognitive_load?.value * 100) : '--' }}%</div>
-          <div class="ind-bar">
-            <div class="ind-fill cognitive-fill" :style="{ width: (personDetected ? userState.cognitive_load?.value * 100 : 0) + '%' }"></div>
-          </div>
-          <div class="ind-details">
-            <div class="ind-row">
-              <span>错误率</span>
-              <span>{{ personDetected ? Math.round(userState.cognitive_load?.error_rate * 100) + '%' : '--' }}</span>
+          <div class="panel-body">
+            <div class="row-3cards">
+              <div class="mini-card">
+                <span class="mini-card-title">心率</span>
+                <span class="mini-card-value heart">{{ physioData.heart || '--' }} <span style="font-size:12px">bpm</span></span>
+                <span class="mini-card-sub" :style="{ color: physioData.hr_valid ? '#34A853' : '#EA4335' }">{{ physioData.hr_valid ? 'HR信号: 正常' : 'HR信号: 异常' }}</span>
+              </div>
+              <div class="mini-card">
+                <span class="mini-card-title">HRR</span>
+                <span class="mini-card-value hrr">{{ physioData.hrr_pct !== undefined ? physioData.hrr_pct.toFixed(1) : '--' }}<span style="font-size:12px">%</span></span>
+                <span class="mini-card-sub">{{ hrrStatus }}</span>
+              </div>
+              <div class="mini-card">
+                <span class="mini-card-title">斜率</span>
+                <span class="mini-card-value slope" :style="{ color: hrSlopeColor }">{{ physioData.hr_slope !== undefined ? physioData.hr_slope.toFixed(2) : '--' }}</span>
+                <span class="mini-card-sub">{{ hrSlopeStatus }}</span>
+              </div>
             </div>
-            <div class="ind-row">
-              <span>注意力稳定性</span>
-              <span>{{ personDetected ? Math.round(userState.cognitive_load?.attention_stability * 100) + '%' : '--' }}</span>
+            <div class="person-info">
+              <div class="info-item">
+                <div class="info-label">是否有人</div>
+                <div class="info-value">{{ humanText }}</div>
+                <span class="info-conf">{{ poseText }}</span>
+              </div>
+              <div class="info-item">
+                <span class="info-label">性别</span>
+                <span class="info-value">{{ genderText }}</span>
+                <span class="info-conf">{{ genderConfText }}</span>
+                <span class="info-sub">{{ hlkkGenderText }}</span>
+              </div>
+              <div class="info-item">
+                <span class="info-label">年龄</span>
+                <span class="info-value">{{ ageText }}</span>
+                <span class="info-conf">{{ ageConfText }}</span>
+                <span class="info-sub">{{ hlkkAgeText }}</span>
+              </div>
             </div>
           </div>
         </div>
-        
-        <!-- 参与意愿 -->
-        <div class="indicator-card engagement">
-          <div class="ind-header">
-            <span class="ind-icon">❤️</span>
-            <span class="ind-title">参与意愿</span>
-          </div>
-          <div class="ind-value">{{ personDetected ? Math.round(userState.engagement?.value * 100) : '--' }}%</div>
-          <div class="ind-bar">
-            <div class="ind-fill engagement-fill" :style="{ width: (personDetected ? userState.engagement?.value * 100 : 0) + '%' }"></div>
-          </div>
-          <div class="ind-details">
-            <div class="ind-row">
-              <span>正面情绪</span>
-              <span>{{ personDetected ? Math.round(userState.engagement?.emotion_positive * 100) + '%' : '--' }}</span>
+
+        <!-- 心理卡片 -->
+        <div class="panel-card" style="flex:1">
+          <div class="panel-body" style="flex:1;padding:12px">
+            <div class="psychology-layout">
+              <div class="psych-left">
+                <div class="emotion-chart-box">
+                  <canvas ref="emotionChart"></canvas>
+                </div>
+              </div>
+              <div class="psych-right">
+                <div class="emotion-3cards">
+                  <div class="emotion-item positive">
+                    <span class="emotion-item-label">积极</span>
+                    <span class="emotion-item-value">{{ Math.round((emotionData.positive || 0) * 100) }}%</span>
+                  </div>
+                  <div class="emotion-item neutral">
+                    <span class="emotion-item-label">中性</span>
+                    <span class="emotion-item-value">{{ Math.round((emotionData.neutral || 0) * 100) }}%</span>
+                  </div>
+                  <div class="emotion-item negative">
+                    <span class="emotion-item-label">消极</span>
+                    <span class="emotion-item-value">{{ Math.round((emotionData.negative || 0) * 100) }}%</span>
+                  </div>
+                </div>
+                <div class="psych-bottom">
+                  <button class="gate-button" :class="{ disabled: !gateEnabled }" @click="toggleGate">
+                    <div class="gate-label">情绪势场</div>
+                    <div class="gate-status">
+                      <span class="gate-dot" :class="gateEnabled ? 'gate-dot-on' : 'gate-dot-off'"></span>
+                      <span class="gate-status-text">{{ gateEnabled ? '已开启' : '已关闭' }}</span>
+                    </div>
+                  </button>
+                  <div class="emotion-card" :class="emotionCardClass">
+                    <div class="emotion-card-label">情绪状态</div>
+                    <div class="emotion-card-value">{{ emotionLabelText }}</div>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div class="ind-row">
-              <span>主动性</span>
-              <span>{{ personDetected ? Math.round(userState.engagement?.initiative_level * 100) + '%' : '--' }}</span>
+          </div>
+        </div>
+
+        <!-- 认知卡片 - 游戏状态 -->
+        <div class="panel-card" style="flex:1">
+          <div class="cognitive-panel" style="border:none;border-radius:0">
+            <div class="game-stats-left">
+              <div class="mini-card">
+                <span class="mini-card-title">剩余时间</span>
+                <span class="mini-card-value" style="color:#EA4335">{{ gameTimeText }}</span>
+                <span class="mini-card-sub">{{ gameStatusText }}</span>
+              </div>
+              <div class="mini-card">
+                <span class="mini-card-title">得分</span>
+                <span class="mini-card-value" style="color:#34A853">{{ gameData.score || 0 }}</span>
+                <span class="mini-card-sub">当前分数</span>
+              </div>
+              <div class="mini-card">
+                <span class="mini-card-title">难度</span>
+                <span class="mini-card-value" style="color:#4285F4">{{ gameData.difficulty || 1 }}</span>
+                <span class="mini-card-sub">{{ gameDiffName }}</span>
+              </div>
+              <div class="mini-card">
+                <span class="mini-card-title">准确率</span>
+                <span class="mini-card-value" style="color:#64ffda">{{ gameData.accuracy || '--' }}%</span>
+                <span class="mini-card-sub">总体表现</span>
+              </div>
+            </div>
+            <div class="game-records-right">
+              <div class="game-records-list">
+                <div v-for="(record, index) in gameRecords" :key="index" class="game-record-item">
+                  <span :class="record.typeClass">{{ record.typeText }}</span>
+                  <span class="game-record-time">{{ record.time === '--' ? '--' : record.time + 'ms' }}</span>
+                  <span class="game-record-diff">Lv.{{ record.difficulty }}</span>
+                  <span class="game-record-score">{{ record.score > 0 ? '+' : '' }}{{ record.score }}</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </div>
-    </section>
-    
-    <!-- 详细数据 -->
-    <section class="detail-section">
-      <h3>📊 详细数据</h3>
-      <div class="detail-grid">
-        <div class="detail-card">
-          <span class="d-label">情绪</span>
-          <span class="d-value">{{ personDetected ? userState.emotion?.primary : '--' }}</span>
-        </div>
-        <div class="detail-card">
-          <span class="d-label">姿态</span>
-          <span class="d-value" :class="{ 'falling': userState.posture?.type === 'falling' }">{{ personDetected ? userState.posture?.type : '--' }}</span>
-        </div>
-        <div class="detail-card">
-          <span class="d-label">姿态稳定性</span>
-          <span class="d-value">{{ personDetected ? Math.round(userState.posture?.stability * 100) + '%' : '--' }}</span>
-        </div>
-        <div class="detail-card">
-          <span class="d-label">活动水平</span>
-          <span class="d-value">{{ personDetected ? Math.round(userState.activity?.level * 100) + '%' : '--' }}</span>
-        </div>
-        <div class="detail-card">
-          <span class="d-label">亮度</span>
-          <span class="d-value">{{ lightText[userState.environment?.light_level] || '--' }}</span>
-        </div>
-        <div class="detail-card">
-          <span class="d-label">状态总结</span>
-          <span class="d-value">{{ summaryText[userState.overall?.state_summary] || '--' }}</span>
+
+      <div class="right-panel">
+        <!-- DDA难度调整中枢 -->
+        <div class="panel-card" style="flex:1">
+          <div class="panel-header">
+            <span class="panel-title">DDA难度调整中枢</span>
+          </div>
+          <div class="panel-body dda-panel">
+            <div class="dda-section">
+              <div class="dda-section-title">📊 生理数据 → DDA</div>
+              <div class="dda-item"><span class="dda-label">hrr_pct:</span><span class="dda-value">{{ ddaData.hrr_pct !== undefined ? ddaData.hrr_pct.toFixed(1) + '%' : '--' }}</span></div>
+              <div class="dda-item"><span class="dda-label">hrr:</span><span class="dda-value">{{ ddaData.hrr || '--' }}</span></div>
+              <div class="dda-item"><span class="dda-label">hr_slope:</span><span class="dda-value">{{ ddaData.hr_slope !== undefined ? ddaData.hr_slope.toFixed(2) : '--' }}</span></div>
+              <div class="dda-item"><span class="dda-label">slope_label:</span><span class="dda-value">{{ ddaData.slope_label || '--' }}</span></div>
+            </div>
+            <div class="dda-section">
+              <div class="dda-section-title">😊 情绪数据 → DDA</div>
+              <div class="dda-item"><span class="dda-label">emotion_cn:</span><span class="dda-value">{{ ddaData.emotion_cn || '--' }}</span></div>
+              <div class="dda-item"><span class="dda-label">confidence:</span><span class="dda-value">{{ ddaData.confidence !== undefined ? (ddaData.confidence * 100).toFixed(0) + '%' : '--' }}</span></div>
+            </div>
+            <div class="dda-section">
+              <div class="dda-section-title">🎮 游戏数据 → DDA</div>
+              <div class="dda-item"><span class="dda-label">timeLeft:</span><span class="dda-value">{{ ddaTimeLeftText }}</span></div>
+              <div class="dda-item"><span class="dda-label">score:</span><span class="dda-value">{{ ddaData.score !== undefined ? ddaData.score : '--' }}</span></div>
+              <div class="dda-item"><span class="dda-label">difficulty:</span><span class="dda-value">{{ ddaData.difficulty !== undefined ? ddaData.difficulty : '--' }}</span></div>
+              <div class="dda-item"><span class="dda-label">accuracy:</span><span class="dda-value">{{ ddaData.accuracy || '--' }}</span></div>
+            </div>
+            <div class="dda-section">
+              <div class="dda-section-title">🎯 最新结果 → DDA</div>
+              <div class="dda-item"><span class="dda-label">type:</span><span class="dda-value">{{ ddaData.last_result?.type || '--' }}</span></div>
+              <div class="dda-item"><span class="dda-label">time:</span><span class="dda-value">{{ ddaData.last_result?.time ? ddaData.last_result.time + 'ms' : '--' }}</span></div>
+            </div>
+            <div class="dda-section">
+              <div class="dda-section-title">⚙️ DDA 输出</div>
+              <div class="dda-item"><span class="dda-label">建议难度:</span><span class="dda-value highlight">{{ ddaOutputDiff }}</span></div>
+              <div class="dda-item"><span class="dda-label">flow_state:</span><span class="dda-value">{{ ddaOutputFlow }}</span></div>
+              <div class="dda-item"><span class="dda-label">adjustment:</span><span class="dda-value">{{ ddaOutputAdj }}</span></div>
+            </div>
+          </div>
         </div>
       </div>
-    </section>
-    
-    <!-- 游戏状态 -->
-    <section class="status-row">
-      <div class="stat-card">
-        <span class="label">游戏</span>
-        <span class="val" :class="'s-' + gameState.status">{{ gameStateText }}</span>
-      </div>
-      <div class="stat-card">
-        <span class="label">得分</span>
-        <span class="val">{{ gameState.score }}</span>
-      </div>
-      <div class="stat-card">
-        <span class="label">时间</span>
-        <span class="val">{{ gameState.timer }}s</span>
-      </div>
-      <div class="stat-card">
-        <span class="label">脚部</span>
-        <span class="val" :class="status.feet_detected ? 'ok' : 'err'">
-          {{ status.feet_detected ? '✓' : '✗' }}
-        </span>
-      </div>
-    </section>
+    </div>
     
     <!-- 摄像头 -->
     <section class="cam-row">
@@ -426,7 +464,7 @@ const currentPageText = computed(() => {
   return pageMap[systemState.currentPage] || systemState.currentPage
 })
 
-const gameStatusText = computed(() => {
+const systemGameStatusText = computed(() => {
   const t = { 'IDLE': '待机', 'READY': '预备', 'PLAYING': '游戏中', 'PAUSED': '暂停', 'SETTLING': '结算' }
   return t[systemState.game?.status] || '未知'
 })
@@ -454,6 +492,572 @@ const toast = reactive({ show: false, msg: '' })
 const dragging = ref(-1)
 const mouseDown = ref(false)
 let interval = null
+
+// ⭐ 综合情绪与生理监测数据
+const physioConnected = ref(false)
+const lastUpdateTime = ref('--')
+const currentModel = ref('deepface')
+const gateEnabled = ref(true)
+const emotionChart = ref(null)
+
+const physioData = reactive({
+  heart: '--',
+  hrr_pct: 0,
+  hr_slope: 0,
+  hr_valid: false
+})
+
+const emotionData = reactive({
+  positive: 0,
+  neutral: 0,
+  negative: 0
+})
+
+const processedEmotion = reactive({
+  label: 'neutral',
+  value: 0
+})
+
+const personData = reactive({
+  face_count: 0,
+  face_detected: false,
+  gender: '--',
+  gender_confidence: undefined,
+  age: '--',
+  age_confidence: undefined,
+  pose: '--'
+})
+
+const hlkkData = reactive({
+  gender: '--',
+  age: '--'
+})
+
+const gameData = reactive({
+  timeLeft: 0,
+  status: 'idle',
+  score: 0,
+  difficulty: 1,
+  difficultyName: '简单',
+  accuracy: '--',
+  results: []
+})
+
+const ddaData = reactive({
+  hrr_pct: undefined,
+  hrr: undefined,
+  hr_slope: undefined,
+  slope_label: '--',
+  emotion_cn: '--',
+  confidence: undefined,
+  timeLeft: undefined,
+  score: undefined,
+  difficulty: undefined,
+  accuracy: '--',
+  last_result: null,
+  game_status: 'idle',
+  dda_output: {}
+})
+
+// ⭐ 计算属性
+const hrrStatus = computed(() => {
+  const hrr = physioData.hrr_pct || 0
+  if (hrr < 40) return '低强度'
+  else if (hrr <= 60) return '中强度'
+  else return '高强度'
+})
+
+const hrSlopeColor = computed(() => {
+  const slope = physioData.hr_slope || 0
+  if (slope > 2.0) return '#EA4335'
+  else if (slope > 0.5) return '#f59e0b'
+  else if (slope < -0.5) return '#34A853'
+  else return '#4285F4'
+})
+
+const hrSlopeStatus = computed(() => {
+  const slope = physioData.hr_slope || 0
+  if (slope > 2.0) return '快速上升'
+  else if (slope > 0.5) return '缓慢上升'
+  else if (slope < -0.5) return '快速下降'
+  else return '平稳'
+})
+
+const humanText = computed(() => {
+  const faceCount = personData.face_count !== undefined ? personData.face_count : (personData.face_detected ? 1 : 0)
+  if (faceCount === 0) return '无人'
+  else if (faceCount === 1) return '1人'
+  else return faceCount + '人'
+})
+
+const poseText = computed(() => {
+  const poseMap = {
+    'front': '正脸',
+    'up': '抬头',
+    'down': '低头',
+    'side_left': '左侧脸',
+    'side_right': '右侧脸',
+    '-': '--',
+    'unknown': '--'
+  }
+  return poseMap[personData.pose] || personData.pose || '--'
+})
+
+const genderText = computed(() => {
+  const isFrontFace = personData.pose === 'front' && (!isNaN(personData.age) && personData.age > 0)
+  const gender = isFrontFace ? (personData.gender || '--') : '--'
+  return gender.toLowerCase() === 'man' ? '男' : gender.toLowerCase() === 'woman' ? '女' : gender
+})
+
+const genderConfText = computed(() => {
+  const isFrontFace = personData.pose === 'front' && (!isNaN(personData.age) && personData.age > 0)
+  const genderConf = isFrontFace ? personData.gender_confidence : undefined
+  if (genderConf === undefined) return '--%'
+  let conf = genderConf
+  if (conf > 1.5) {
+    conf = Math.min(100, Math.round(conf))
+  } else {
+    conf = Math.min(100, Math.round(conf * 100))
+  }
+  return conf + '%'
+})
+
+const ageText = computed(() => {
+  const isFrontFace = personData.pose === 'front' && (!isNaN(personData.age) && personData.age > 0)
+  return isFrontFace ? personData.age : '--'
+})
+
+const ageConfText = computed(() => {
+  const isFrontFace = personData.pose === 'front' && (!isNaN(personData.age) && personData.age > 0)
+  const ageConf = isFrontFace ? personData.age_confidence : undefined
+  if (ageConf === undefined) return '--%'
+  let conf = ageConf
+  if (conf > 1.5) {
+    conf = Math.min(100, Math.round(conf))
+  } else {
+    conf = Math.min(100, Math.round(conf * 100))
+  }
+  return conf + '%'
+})
+
+const hlkkGenderText = computed(() => {
+  const gender = hlkkData.gender || '--'
+  return gender === 'male' ? '男' : gender === 'female' ? '女' : '--'
+})
+
+const hlkkAgeText = computed(() => {
+  return hlkkData.age > 0 ? hlkkData.age + '岁' : '--'
+})
+
+const emotionCardClass = computed(() => {
+  const label = processedEmotion.label || 'neutral'
+  const specialStates = ['no_face', 'out_of_range', 'speaking', 'uncalibrated']
+  if (specialStates.includes(label)) return 'neutral'
+  
+  const classMap = {
+    'positive_high': 'positive',
+    'positive_low': 'positive',
+    'negative_high': 'negative',
+    'negative_low': 'negative',
+    'neutral_high': 'neutral',
+    'neutral': 'neutral',
+    'positive': 'positive',
+    'negative': 'negative'
+  }
+  return classMap[label] || 'neutral'
+})
+
+const emotionLabelText = computed(() => {
+  const label = processedEmotion.label || 'neutral'
+  const specialStates = ['no_face', 'out_of_range', 'speaking', 'uncalibrated']
+  if (specialStates.includes(label)) return '中性'
+  
+  const labelMap = {
+    'positive_high': '积极高信度',
+    'positive_low': '积极低信度',
+    'negative_high': '消极高信度',
+    'negative_low': '消极低信度',
+    'neutral_high': '中性高信度',
+    'neutral': '中性',
+    'positive': '积极',
+    'negative': '消极'
+  }
+  return labelMap[label] || '中性'
+})
+
+const gameTimeText = computed(() => {
+  const mins = Math.floor((gameData.timeLeft || 0) / 60)
+  const secs = (gameData.timeLeft || 0) % 60
+  return `${mins}:${secs.toString().padStart(2, '0')}`
+})
+
+const gameStatusText = computed(() => {
+  const statusMap = {
+    'idle': '未开始',
+    'playing': '进行中',
+    'paused': '已暂停'
+  }
+  return statusMap[gameData.status] || (gameData.running ? '进行中' : '未开始')
+})
+
+const gameDiffName = computed(() => {
+  const diffMap = {
+    1: '简单',
+    2: '较简单',
+    3: '中等',
+    4: '较困难',
+    5: '困难',
+    6: '较难',
+    7: '非常困难',
+    8: '极限'
+  }
+  return diffMap[gameData.difficulty] || '简单'
+})
+
+const gameRecords = computed(() => {
+  return (gameData.results || []).reverse().map(r => {
+    let typeClass = 'game-record-hit'
+    let typeText = '✓ 打中'
+    if (r.type === 'miss') {
+      typeClass = 'game-record-miss'
+      typeText = '○ 漏打'
+    } else if (r.type === 'error') {
+      typeClass = 'game-record-error'
+      typeText = '✗ 打错'
+    } else if (r.type === 'bomb') {
+      typeClass = 'game-record-bomb'
+      typeText = '💣 炸弹'
+    }
+    return {
+      typeClass,
+      typeText,
+      time: r.time,
+      difficulty: r.difficulty || 1,
+      score: r.score || 0
+    }
+  })
+})
+
+const ddaTimeLeftText = computed(() => {
+  const tl = ddaData.timeLeft || 0
+  const mins = Math.floor(tl / 60)
+  const secs = tl % 60
+  return `${mins}:${secs.toString().padStart(2, '0')}`
+})
+
+const ddaOutputDiff = computed(() => {
+  const gameStatus = ddaData.game_status || 'idle'
+  const isGamePlaying = gameStatus === 'playing'
+  const ddaOutput = ddaData.dda_output || {}
+  
+  if (isGamePlaying && ddaOutput) {
+    return ddaOutput.current_difficulty !== undefined ? ddaOutput.current_difficulty : '--'
+  } else {
+    return gameStatus === 'idle' ? '等待游戏开始' : (gameStatus === 'paused' ? '游戏已暂停' : '--')
+  }
+})
+
+const ddaOutputFlow = computed(() => {
+  const gameStatus = ddaData.game_status || 'idle'
+  const isGamePlaying = gameStatus === 'playing'
+  const ddaOutput = ddaData.dda_output || {}
+  
+  if (isGamePlaying && ddaOutput) {
+    return ddaOutput.flow_state || '--'
+  } else {
+    return gameStatus === 'idle' ? '等待游戏开始' : (gameStatus === 'paused' ? '游戏已暂停' : '--')
+  }
+})
+
+const ddaOutputAdj = computed(() => {
+  const gameStatus = ddaData.game_status || 'idle'
+  const isGamePlaying = gameStatus === 'playing'
+  const ddaOutput = ddaData.dda_output || {}
+  
+  if (isGamePlaying && ddaOutput) {
+    return ddaOutput.adjustment !== undefined ? (ddaOutput.adjustment > 0 ? '+' + ddaOutput.adjustment : ddaOutput.adjustment) : '--'
+  } else {
+    return gameStatus === 'idle' ? '等待游戏开始' : (gameStatus === 'paused' ? '游戏已暂停' : '--')
+  }
+})
+
+// ⭐ 方法
+let emotionHistory = []
+let chartInstance = null
+let chartInitAttempts = 0
+const maxChartInitAttempts = 10
+let chartLoaded = false
+
+function loadChartLibrary(callback) {
+  if (window.Chart) {
+    chartLoaded = true
+    callback(true)
+    return
+  }
+  
+  const script = document.createElement('script')
+  script.src = '/js/chart.min.js'
+  script.onload = () => {
+    chartLoaded = true
+    callback(true)
+  }
+  script.onerror = () => {
+    console.error('[developer] Chart.js 加载失败')
+    callback(false)
+  }
+  document.head.appendChild(script)
+}
+
+function initEmotionChart() {
+  const ctx = emotionChart.value?.getContext('2d')
+  if (!ctx) {
+    chartInitAttempts++
+    if (chartInitAttempts < maxChartInitAttempts) {
+      setTimeout(initEmotionChart, 100)
+    }
+    return
+  }
+  
+  if (!window.Chart) {
+    loadChartLibrary((success) => {
+      if (success) {
+        initEmotionChart()
+      }
+    })
+    return
+  }
+  
+  if (chartInstance) {
+    chartInstance.destroy()
+  }
+  
+  chartInstance = new window.Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [{
+        label: '情绪值',
+        data: [],
+        borderColor: '#4285F4',
+        backgroundColor: 'rgba(66,133,244,0.1)',
+        fill: true,
+        tension: 0.3,
+        borderWidth: 2,
+        pointRadius: 0
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 0 },
+      scales: {
+        x: { display: false, type: 'linear' },
+        y: { min: -1.2, max: 1.2, ticks: { display: false }, grid: { color: '#1a2236' } }
+      },
+      plugins: { legend: { display: false } }
+    }
+  })
+  
+  console.log('[developer] 情绪图表初始化成功')
+}
+
+function updateEmotionChart(value) {
+  emotionHistory.push(value)
+  if (emotionHistory.length > 100) emotionHistory.shift()
+  
+  if (chartInstance) {
+    chartInstance.data.datasets[0].data = emotionHistory
+    chartInstance.data.labels = Array.from({length: emotionHistory.length}, (_, i) => i)
+    chartInstance.options.scales.x.max = Math.max(emotionHistory.length - 1, 0)
+    chartInstance.update('none')
+  }
+}
+
+async function fetchPerceptionData() {
+  try {
+    const resp = await fetch(`${baseUrl}/api/current`)
+    if (!resp.ok) {
+      console.error('Perception API 响应失败:', resp.status)
+      physioConnected.value = false
+      return
+    }
+    
+    const data = await resp.json()
+    
+    if (data && data.physio) {
+      physioData.heart = data.physio.heart !== undefined && data.physio.heart !== null ? data.physio.heart : '--'
+      physioData.hrr_pct = typeof data.physio.hrr_pct === 'number' ? data.physio.hrr_pct : 0
+      physioData.hr_slope = typeof data.physio.hr_slope === 'number' ? data.physio.hr_slope : 0
+      physioData.hr_valid = !!data.physio.hr_valid
+      physioConnected.value = true
+    }
+    
+    if (data) {
+      emotionData.positive = typeof data.emotion?.positive === 'number' ? data.emotion.positive : 0
+      emotionData.neutral = typeof data.emotion?.neutral === 'number' ? data.emotion.neutral : 0
+      emotionData.negative = typeof data.emotion?.negative === 'number' ? data.emotion.negative : 0
+      
+      if (data.processed) {
+        processedEmotion.label = data.processed.label || 'neutral'
+        processedEmotion.value = typeof data.processed.value === 'number' ? data.processed.value : 0
+        updateEmotionChart(processedEmotion.value)
+      }
+    }
+    
+    lastUpdateTime.value = new Date().toLocaleTimeString()
+    
+    await fetchDDAData()
+  } catch (e) {
+    console.error('Perception API Error:', e)
+    physioConnected.value = false
+  }
+}
+
+async function fetchPersonData() {
+  try {
+    const resp = await fetch(`${baseUrl}/api/data`)
+    if (!resp.ok) {
+      console.error('Person API 响应失败:', resp.status)
+      return
+    }
+    
+    const data = await resp.json()
+    
+    personData.face_count = data.face_count !== undefined ? data.face_count : (data.face_detected ? 1 : 0)
+    personData.face_detected = data.face_detected || false
+    personData.pose = data.pose || '--'
+    personData.gender = data.gender || '--'
+    personData.gender_confidence = data.gender_confidence
+    personData.age = data.age || '--'
+    personData.age_confidence = data.age_confidence
+    
+    await fetchHlkkData()
+  } catch (e) {
+    console.error('Person API Error:', e)
+  }
+}
+
+function formatConfidence(conf) {
+  if (conf === undefined || conf === null) return '--%'
+  let value = conf
+  if (value > 1.5) {
+    value = Math.min(100, Math.round(value))
+  } else {
+    value = Math.min(100, Math.round(value * 100))
+  }
+  return value + '%'
+}
+
+async function fetchHlkkData() {
+  try {
+    const resp = await fetch(`${baseUrl}/api/hlkk`)
+    if (!resp.ok) {
+      console.error('HLKK API 响应失败:', resp.status)
+      return
+    }
+    
+    const data = await resp.json()
+    const profile = data.profile || {}
+    
+    hlkkData.gender = profile.gender || '--'
+    hlkkData.age = profile.age > 0 ? profile.age : '--'
+  } catch (e) {
+    console.error('HLKK API Error:', e)
+  }
+}
+
+async function fetchGameData() {
+  try {
+    const resp = await fetch(`${baseUrl}/api/game`)
+    if (!resp.ok) {
+      console.error('Game API 响应失败:', resp.status)
+      return
+    }
+    
+    const data = await resp.json()
+    
+    if (data) {
+      gameData.timeLeft = typeof data.timeLeft === 'number' ? data.timeLeft : 0
+      gameData.status = data.status || 'idle'
+      gameData.score = typeof data.score === 'number' ? data.score : 0
+      gameData.difficulty = typeof data.difficulty === 'number' ? data.difficulty : 1
+      gameData.difficultyName = data.difficultyName || '简单'
+      gameData.accuracy = data.accuracy || '--'
+      gameData.results = Array.isArray(data.results) ? data.results : []
+    }
+  } catch (e) {
+    console.error('Game API Error:', e)
+  }
+}
+
+async function fetchDDAData() {
+  try {
+    const resp = await fetch(`${baseUrl}/api/dda/input`)
+    if (!resp.ok) {
+      console.error('DDA API 响应失败:', resp.status)
+      return
+    }
+    const data = await resp.json()
+    
+    if (data) {
+      ddaData.hrr_pct = typeof data.hrr_pct === 'number' ? data.hrr_pct : undefined
+      ddaData.hrr = data.hrr
+      ddaData.hr_slope = typeof data.hr_slope === 'number' ? data.hr_slope : undefined
+      ddaData.slope_label = data.slope_label || '--'
+      ddaData.emotion_cn = data.emotion_cn || '--'
+      ddaData.confidence = typeof data.confidence === 'number' ? data.confidence : undefined
+      ddaData.timeLeft = typeof data.timeLeft === 'number' ? data.timeLeft : undefined
+      ddaData.score = typeof data.score === 'number' ? data.score : undefined
+      ddaData.difficulty = typeof data.difficulty === 'number' ? data.difficulty : undefined
+      ddaData.accuracy = data.accuracy || '--'
+      ddaData.last_result = data.last_result || null
+      ddaData.game_status = data.game_status || 'idle'
+      ddaData.dda_output = data.dda_output || {}
+    }
+  } catch (e) {
+    console.error('DDA API Error:', e)
+  }
+}
+
+async function fetchCurrentModel() {
+  try {
+    const resp = await fetch(`${baseUrl}/api/model`)
+    const data = await resp.json()
+    currentModel.value = data.model || 'deepface'
+  } catch (e) {
+    console.error('Model API Error', e)
+  }
+}
+
+async function setModel(model) {
+  try {
+    const resp = await fetch(`${baseUrl}/api/model`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({model: model})
+    })
+    const data = await resp.json()
+    if (data.ok) {
+      currentModel.value = model
+    }
+  } catch (e) {
+    console.error('切换模型失败', e)
+  }
+}
+
+async function toggleGate() {
+  gateEnabled.value = !gateEnabled.value
+  
+  try {
+    await fetch(`${baseUrl}/api/gate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: gateEnabled.value })
+    })
+  } catch (e) {
+    console.error('Failed to update gate', e)
+  }
+}
 
 function showToast(msg) {
   toast.msg = msg
@@ -789,9 +1393,21 @@ onMounted(async () => {
     console.log('[developer] 系统状态更新')
   })
   
+  // ⭐ 初始化情绪图表
+  initEmotionChart()
+  
+  // ⭐ 启动数据轮询
+  await fetchPerceptionData()
+  await fetchPersonData()
+  await fetchCurrentModel()
+  await fetchGameData()
+  
+  setInterval(fetchPerceptionData, 200)
+  setInterval(fetchPersonData, 1000)
+  setInterval(fetchGameData, 500)
+  
   resize()
   requestAnimationFrame(draw)
-  // 移除定期API请求，改为完全依赖Socket.IO实时更新
   window.addEventListener('resize', resize)
 })
 
@@ -978,92 +1594,93 @@ onUnmounted(() => {
 .conn-badge.ok { background: rgba(51, 181, 85, 0.2); color: #33B555; }
 .conn-badge.err { background: rgba(255, 68, 68, 0.2); color: #ff6b6b; }
 
-/* 核心状态 */
-.core-status { display: flex; gap: 15px; margin-bottom: 25px; flex-wrap: wrap; }
-
-.person-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 20px 30px;
-  border-radius: 16px;
-  min-width: 140px;
-  transition: all 0.3s;
-}
-
-.person-card.detected {
-  background: linear-gradient(135deg, #33B555 0%, #228B22 100%);
-  box-shadow: 0 4px 20px rgba(51, 181, 85, 0.3);
-}
-
-.person-card.not-detected {
-  background: rgba(255,255,255,0.05);
-  border: 2px dashed rgba(255,255,255,0.2);
-}
-
-.person-icon { font-size: 48px; margin-bottom: 8px; }
-.person-text { font-size: 20px; font-weight: 700; }
-.person-detail { font-size: 12px; margin-top: 8px; opacity: 0.8; }
-
-/* 指标卡片 */
-.indicator-cards { display: flex; flex-wrap: wrap; gap: 15px; flex: 1; }
-
-.indicator-card {
-  background: rgba(255,255,255,0.05);
-  border-radius: 16px;
-  padding: 16px;
-  min-width: 200px;
-  flex: 1;
-}
-
-.ind-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
-.ind-icon { font-size: 24px; }
-.ind-title { font-size: 14px; font-weight: 600; }
-.ind-value { font-size: 32px; font-weight: 700; margin-bottom: 8px; }
-
-.ind-bar { height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; overflow: hidden; margin-bottom: 12px; }
-.ind-fill { height: 100%; border-radius: 4px; transition: width 0.3s; }
-.physical-fill { background: linear-gradient(90deg, #33B555, #FFD700, #ff6b6b); }
-.cognitive-fill { background: linear-gradient(90deg, #2196F3, #9C27B0, #ff6b6b); }
-.engagement-fill { background: linear-gradient(90deg, #ff6b6b, #FFD700, #33B555); }
-
-.ind-details { display: flex; flex-direction: column; gap: 6px; }
-.ind-row { display: flex; justify-content: space-between; font-size: 12px; }
-.ind-row span:first-child { color: #888; }
-.ind-row.warning { color: #ff6b6b; font-weight: bold; }
-
-/* 详细数据 */
-.detail-section { margin-bottom: 25px; }
-.detail-section h3 { font-size: 16px; margin-bottom: 12px; color: #888; }
-.detail-grid { display: flex; flex-wrap: wrap; gap: 10px; }
-
-.detail-card {
-  background: rgba(255,255,255,0.05);
-  border-radius: 12px;
-  padding: 12px 16px;
-  min-width: 100px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.d-label { font-size: 12px; color: #888; margin-bottom: 4px; }
-.d-value { font-size: 16px; font-weight: 600; }
-.d-value.falling { color: #ff6b6b; }
-
-/* 状态卡片 */
-.status-row { display: flex; gap: 15px; margin-bottom: 25px; flex-wrap: wrap; }
-.stat-card { background: rgba(255,255,255,0.05); padding: 15px 20px; border-radius: 12px; min-width: 100px; flex: 1; }
-.stat-card .label { display: block; font-size: 12px; color: #888; margin-bottom: 5px; }
-.stat-card .val { font-size: 20px; font-weight: 600; }
-.ok { color: #33B555; }
-.err { color: #ff6b6b; }
-.s-IDLE { color: #888; }
-.s-READY { color: #FF7222; }
-.s-PLAYING { color: #33B555; }
-.s-PAUSED { color: #FFD111; }
-.s-SETTLING { color: #9C27B0; }
+/* ⭐ 综合情绪与生理监测样式 */
+.main-container{display:flex;height:calc(100vh - 120px);padding:12px;gap:12px}
+.left-panel{flex:0 0 70%;display:flex;flex-direction:column;gap:8px}
+.right-panel{flex:1;display:flex;flex-direction:column;gap:12px}
+.panel-card{background:linear-gradient(135deg,#151c2c,#1a2236);border-radius:12px;border:1px solid #232e44;overflow:hidden;display:flex;flex-direction:column}
+.panel-header{padding:10px 16px;background:rgba(0,0,0,0.2);border-bottom:1px solid #232e44;display:flex;align-items:center;justify-content:space-between}
+.panel-title{font-size:13px;font-weight:600;color:#64ffda;letter-spacing:0.5px}
+.panel-body{flex:1;padding:8px;display:flex;flex-direction:column;gap:10px}
+.mini-card{background:rgba(0,0,0,0.3);border-radius:8px;padding:10px 12px;border:1px solid #232e44;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px;min-height:0}
+.mini-card-title{font-size:10px;color:#6b7a94;text-transform:uppercase;letter-spacing:0.5px}
+.mini-card-value{font-size:20px;font-weight:700;color:#fff}
+.mini-card-value.heart{color:#EA4335}
+.mini-card-value.hrr{color:#34A853}
+.mini-card-value.slope{color:#4285F4}
+.mini-card-sub{font-size:10px;color:#4a5570}
+.row-3cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.person-info{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.info-item{background:rgba(0,0,0,0.3);border-radius:8px;padding:8px 10px;border:1px solid #232e44;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.info-label{font-size:10px;color:#6b7a94;text-transform:uppercase}
+.info-value{font-size:16px;font-weight:600;color:#fff}
+.info-conf{font-size:11px;color:#4a5570}
+.info-sub{font-size:10px;color:#6b7a94;margin-left:auto}
+.psychology-layout{display:flex;flex:1;gap:12px;min-height:0;height:100%}
+.psych-left{flex:0 0 40%;display:flex;flex-direction:column;gap:8px;min-height:0;height:100%}
+.psych-right{flex:1;display:grid;grid-template-rows:1fr 1fr;gap:6px;min-height:0;height:100%}
+.emotion-chart-box{flex:1;min-height:0;max-height:200px;background:#050a12;border-radius:8px;overflow:hidden;border:1px solid #232e44;padding:8px}
+.emotion-chart-box canvas{width:100%!important;height:100%!important;max-height:180px}
+.emotion-3cards{display:flex;gap:8px;height:100%}
+.emotion-item{flex:1;padding:4px;border-radius:8px;border:1px solid #232e44;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-height:0;overflow:hidden}
+.emotion-item.positive{background:rgba(52,168,83,0.15);border-color:#34A853}
+.emotion-item.neutral{background:rgba(107,122,148,0.15);border-color:#6b7a94}
+.emotion-item.negative{background:rgba(234,67,53,0.15);border-color:#EA4335}
+.emotion-item-label{font-size:8px;color:#6b7a94;text-transform:uppercase}
+.emotion-item-value{font-size:18px;font-weight:700}
+.emotion-item.positive .emotion-item-value{color:#34A853}
+.emotion-item.neutral .emotion-item-value{color:#6b7a94}
+.emotion-item.negative .emotion-item-value{color:#EA4335}
+.psych-bottom{display:flex;gap:8px;height:100%}
+.gate-button{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:6px;background:rgba(0,0,0,0.3);border:1px solid #374151;border-radius:10px;color:#6b7a94;font-size:10px;font-weight:500;cursor:pointer;transition:all 0.2s ease;min-height:0;overflow:hidden}
+.gate-button:hover{background:rgba(55,65,81,0.5);border-color:#4b5563}
+.gate-button.disabled{background:rgba(0,0,0,0.2);border-color:#1f2937;color:#374151}
+.gate-label{font-size:9px;color:#6b7a94;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px}
+.gate-status{display:flex;align-items:center;gap:5px}
+.gate-dot{width:7px;height:7px;border-radius:50%}
+.gate-dot-on{background:#34A853;box-shadow:0 0 8px rgba(52,168,83,0.5)}
+.gate-dot-off{background:#4b5563}
+.gate-status-text{font-size:10px;color:#6b7a94}
+.gate-button.disabled .gate-status-text{color:#374151}
+.emotion-card{flex:1;background:linear-gradient(135deg,#1a1f35,#252b42);border-radius:10px;border:1px solid #3b82f6;padding:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:0;overflow:hidden}
+.emotion-card-label{font-size:8px;color:#6b7a94;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px}
+.emotion-card-value{font-size:18px;font-weight:700;color:#fff}
+.emotion-card.positive{border-color:#34A853;background:linear-gradient(135deg,rgba(52,168,83,0.15),rgba(52,168,83,0.05))}
+.emotion-card.positive .emotion-card-value{color:#34A853}
+.emotion-card.negative{border-color:#EA4335;background:linear-gradient(135deg,rgba(234,67,53,0.15),rgba(234,67,53,0.05))}
+.emotion-card.negative .emotion-card-value{color:#EA4335}
+.emotion-card.neutral{border-color:#6b7a94;background:linear-gradient(135deg,rgba(107,122,148,0.15),rgba(107,122,148,0.05))}
+.emotion-card.neutral .emotion-card-value{color:#6b7a94}
+.cognitive-panel{flex:1;display:flex;border:1px solid #232e44;border-radius:10px;overflow:hidden}
+.game-stats-left{flex:0 0 40%;display:grid;grid-template-columns:repeat(2,1fr);grid-template-rows:repeat(2,1fr);gap:10px;padding:12px;background:rgba(0,0,0,0.2)}
+.game-records-right{flex:1;display:flex;flex-direction:column;padding:12px;background:rgba(0,0,0,0.15);border-left:1px solid #232e44}
+.game-records-list{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:6px}
+.game-records-list::-webkit-scrollbar{width:4px}
+.game-records-list::-webkit-scrollbar-track{background:#0c1018}
+.game-records-list::-webkit-scrollbar-thumb{background:#232e44}
+.game-record-item{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:rgba(0,0,0,0.25);border-radius:6px;font-size:11px}
+.game-record-hit{color:#34A853;font-weight:600}
+.game-record-miss{color:#f59e0b;font-weight:600}
+.game-record-error{color:#EA4335;font-weight:600}
+.game-record-bomb{color:#EA4335;font-weight:600}
+.game-record-time{color:#6b7a94}
+.game-record-diff{color:#4285F4}
+.game-record-score{color:#f59e0b;font-weight:700}
+.dda-panel{flex:1;display:flex;flex-direction:column;gap:8px;overflow-y:auto;padding:8px}
+.dda-section{background:#1a2236;border-radius:8px;padding:8px}
+.dda-section-title{font-size:11px;color:#64ffda;margin-bottom:6px;font-weight:600}
+.dda-item{display:flex;justify-content:space-between;padding:3px 0;font-size:11px}
+.dda-label{color:#8892a4}
+.dda-value{color:#e6edf3;font-family:monospace}
+.dda-value.highlight{color:#ffd700;font-weight:bold;font-size:14px}
+.status-bar{display:flex;align-items:center;gap:16px;padding:8px 12px;background:rgba(0,0,0,0.3);border-radius:8px;font-size:11px;color:#6b7a94}
+.status-dot{width:6px;height:6px;border-radius:50%;display:inline-block}
+.status-dot.on{background:#34A853}
+.status-dot.off{background:#555}
+.model-toggle{display:flex;align-items:center;gap:8px;margin-left:auto}
+.model-toggle-btn{padding:4px 10px;border-radius:4px;border:1px solid #3a5570;background:#0c1018;color:#6b7a94;cursor:pointer;font-size:10px;transition:all 0.2s}
+.model-toggle-btn:hover{border-color:#64ffda;color:#64ffda}
+.model-toggle-btn.active{background:#1e3a5f;border-color:#64ffda;color:#64ffda}
 
 /* 摄像头 */
 .cam-row { display: flex; gap: 20px; margin-bottom: 25px; flex-wrap: wrap; }

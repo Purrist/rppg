@@ -1,40 +1,64 @@
 <template>
   <div class="page-body">
-    
     <div class="learning-layout">
-      <!-- 左侧游戏列表 -->
+      <!-- 左侧面板 -->
       <div class="left-panel">
-        <h3 class="panel-title">🎮 游戏列表</h3>
-        <div class="game-list">
-          <div class="l-card" @click="showGameInfo('whack_a_mole')">
-            <div class="l-icon">🐹</div>
-            <div class="l-text">
-              <h3>趣味打地鼠</h3>
-              <p>锻炼手眼协调与反应速度</p>
+        <!-- 卡片1：游戏列表 -->
+        <div class="left-card">
+          <h3 class="card-title">🎮 游戏列表</h3>
+          <div class="game-list">
+            <div class="game-item" @click="showGameInfo('whack_a_mole')">
+              <span class="game-icon">🐹</span>
+              <div class="game-info">
+                <div class="game-name">趣味打地鼠</div>
+                <div class="game-desc">锻炼手眼协调与反应速度</div>
+              </div>
+            </div>
+            <div class="game-item" @click="showGameInfo('processing_speed')">
+              <span class="game-icon">⚡</span>
+              <div class="game-info">
+                <div class="game-name">处理速度训练</div>
+                <div class="game-desc">科学提升认知处理速度</div>
+              </div>
             </div>
           </div>
-          
-          <div class="l-card" @click="showGameInfo('processing_speed')">
-            <div class="l-icon">⚡</div>
-            <div class="l-text">
-              <h3>处理速度训练</h3>
-              <p>科学提升认知处理速度</p>
+        </div>
+        
+        <!-- 卡片2：游戏记录 -->
+        <div class="left-card">
+          <h3 class="card-title">📝 游戏记录</h3>
+          <div class="record-list">
+            <div 
+              v-for="(session, index) in trainingHistory.slice(0, 5)" 
+              :key="index"
+              class="record-item"
+              @click="toggleExpand(session.session_id)"
+            >
+              <div class="record-info">
+                <div class="record-date">{{ formatDate(session.start_time) }}</div>
+                <div class="record-game">{{ formatGameType(session.game_type) }}</div>
+              </div>
+              <div class="record-accuracy" :class="getAccuracyClass(session.final_accuracy)">
+                {{ session.final_accuracy }}%
+              </div>
             </div>
           </div>
-          
-          <div class="l-card" @click="handleTodo">
-            <div class="l-icon">🎨</div>
-            <div class="l-text">
-              <h3>色词挑战</h3>
-              <p>提升认知抑制与注意力</p>
-            </div>
-          </div>
-          
-          <div class="l-card" @click="handleTodo">
-            <div class="l-icon">🧠</div>
-            <div class="l-text">
-              <h3>记忆配对</h3>
-              <p>提升图像记忆能力</p>
+        </div>
+        
+        <!-- 卡片3：训练激励 -->
+        <div class="left-card">
+          <h3 class="card-title">💪 训练激励</h3>
+          <div class="motivation-content">
+            <span class="motivation-icon">🏆</span>
+            <div class="motivation-text">
+              <div class="motivation-title">加油！坚持训练</div>
+              <div class="motivation-desc">每天坚持10分钟，认知能力显著提升！</div>
+              <div v-if="dailyStats.count >= 1" class="motivation-success">
+                ✅ 今日已完成 {{ dailyStats.count }} 次训练
+              </div>
+              <div v-else class="motivation-encourage">
+                📅 今天还没有训练，开始你的第一次挑战吧！
+              </div>
             </div>
           </div>
         </div>
@@ -135,86 +159,8 @@
             </div>
           </div>
         </div>
-        
-        <!-- ⭐ 最近训练记录 -->
-        <div class="history-section" v-if="trainingHistory.length > 0">
-          <h3 class="section-title">📝 最近训练记录</h3>
-          <div class="history-list">
-            <div 
-              v-for="(session, index) in trainingHistory" 
-              :key="index"
-              class="history-item"
-              @click="toggleExpand(session.session_id)"
-            >
-              <div class="history-info">
-                <span class="history-date">{{ formatDate(session.start_time) }}</span>
-                <span class="history-game">{{ formatGameType(session.game_type) }}</span>
-                <span class="expand-icon">{{ expandedRecords[session.session_id] ? '▼' : '▶' }}</span>
-              </div>
-              <div class="history-stats">
-                <span class="history-accuracy" :class="getAccuracyClass(session.final_accuracy)">
-                  准确率 {{ session.final_accuracy }}%
-                </span>
-                <span class="history-score">得分 {{ session.final_score }}</span>
-                <button class="delete-btn" @click.stop="deleteRecord(session.session_id)" title="删除记录">
-                  ✕
-                </button>
-              </div>
-              <!-- 展开的详细信息 -->
-              <div v-if="expandedRecords[session.session_id]" class="history-details">
-                <div class="detail-row">
-                  <span class="detail-label">总题数:</span>
-                  <span class="detail-value">{{ session.total_trials || 0 }}</span>
-                </div>
-                <div class="detail-row">
-                  <span class="detail-label">正确题数:</span>
-                  <span class="detail-value">{{ session.correct_trials || 0 }}</span>
-                </div>
-                <div class="detail-row">
-                  <span class="detail-label">错误题数:</span>
-                  <span class="detail-value">{{ (session.total_trials || 0) - (session.correct_trials || 0) }}</span>
-                </div>
-                <div class="detail-row">
-                  <span class="detail-label">平均反应时间:</span>
-                  <span class="detail-value">{{ session.avg_reaction_time_ms || 0 }}ms</span>
-                </div>
-                <div class="detail-row">
-                  <span class="detail-label">模块:</span>
-                  <span class="detail-value">{{ session.module || '默认' }}</span>
-                </div>
-                <div class="detail-row">
-                  <span class="detail-label">难度范围:</span>
-                  <span class="detail-value">{{ session.difficulty_range || '1-8' }}</span>
-                </div>
-                <div class="detail-row">
-                  <span class="detail-label">训练时长:</span>
-                  <span class="detail-value">{{ session.duration || 0 }}秒</span>
-                </div>
-              </div>
-            </div>
-          </div>
         </div>
         
-        <!-- ⭐ 训练激励 -->
-        <div class="motivation-section">
-          <h3 class="section-title">💪 训练激励</h3>
-          <div class="motivation-card">
-            <div class="motivation-content">
-              <div class="motivation-icon">🏆</div>
-              <div class="motivation-text">
-                <h4>加油！坚持训练</h4>
-                <p>每天坚持10分钟，认知能力显著提升！</p>
-                <p v-if="dailyStats.count >= 1" class="motivation-success">
-                  ✅ 今日已完成 {{ dailyStats.count }} 次训练
-                </p>
-                <p v-else class="motivation-encourage">
-                  📅 今天还没有训练，开始你的第一次挑战吧！
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
     
     <!-- 游戏信息弹窗 -->
@@ -549,68 +495,168 @@ const toggleExpand = (sessionId) => {
   align-items: flex-start;
 }
 
-/* 左侧游戏列表 */
+/* 左侧面板 */
 .left-panel {
-  width: 25%;
-  min-width: 220px;
+  width: 30%;
+  min-width: 300px;
   background: #FFF;
   border-radius: 30px;
   padding: 20px;
   box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-  height: fit-content;
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
 }
 
-.panel-title {
-  font-size: 28px;
+/* 左侧卡片样式 */
+.left-card {
+  background: #FFF;
+  border-radius: 20px;
+  padding: 20px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+  margin-bottom: 20px;
+}
+
+.card-title {
+  font-size: 20px;
   color: #333;
-  margin-bottom: 25px;
+  margin-bottom: 15px;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  font-weight: 600;
 }
 
+/* 游戏列表样式 */
 .game-list {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 12px;
 }
 
-.l-card { 
-  background: #FFF; 
-  border: 2px solid #EEE; 
-  border-radius: 20px;
-  padding: 20px;
-  display: flex; 
-  align-items: center; 
-  gap: 15px; 
+.game-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 15px;
+  background: #f8fafc;
+  border-radius: 12px;
   cursor: pointer;
-  transition: transform 0.2s, box-shadow 0.2s;
-  width: 100%;
-  box-sizing: border-box;
+  transition: all 0.2s;
 }
 
-.l-card:hover {
-  box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-  border-color: #667eea;
+.game-item:hover {
+  background: #e2e8f0;
+  transform: translateX(5px);
 }
 
-.l-card:active { 
-  transform: scale(0.98); 
+.game-icon {
+  font-size: 32px;
 }
 
-.l-icon { 
-  font-size: 40px; 
+.game-info {
+  flex: 1;
 }
 
-.l-text h3 { 
-  font-size: 20px; 
-  margin-bottom: 5px; 
-  color: #333; 
+.game-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
 }
 
-.l-text p { 
-  color: #888; 
-  font-size: 14px; 
+.game-desc {
+  font-size: 13px;
+  color: #888;
+  margin-top: 2px;
+}
+
+/* 游戏记录样式 */
+.record-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.record-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background: #f8fafc;
+  border-radius: 10px;
+}
+
+.record-info {
+  flex: 1;
+}
+
+.record-date {
+  font-size: 12px;
+  color: #999;
+}
+
+.record-game {
+  font-size: 14px;
+  color: #333;
+  margin-top: 2px;
+}
+
+.record-accuracy {
+  font-size: 16px;
+  font-weight: bold;
+  padding: 4px 10px;
+  border-radius: 15px;
+}
+
+.record-accuracy.accuracy-high {
+  background: #d4edda;
+  color: #155724;
+}
+
+.record-accuracy.accuracy-medium {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.record-accuracy.accuracy-low {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+/* 训练激励样式 */
+.motivation-content {
+  display: flex;
+  gap: 15px;
+}
+
+.motivation-icon {
+  font-size: 48px;
+}
+
+.motivation-text {
+  flex: 1;
+}
+
+.motivation-title {
+  font-size: 18px;
+  font-weight: bold;
+  color: #333;
+  margin-bottom: 8px;
+}
+
+.motivation-desc {
+  font-size: 14px;
+  color: #888;
+  margin-bottom: 10px;
+}
+
+.motivation-success, .motivation-encourage {
+  font-size: 14px;
+  font-weight: 600;
+  color: #22c55e;
+}
+
+.motivation-encourage {
+  color: #f59e0b;
 }
 
 /* 右侧训练激励和趋势 */

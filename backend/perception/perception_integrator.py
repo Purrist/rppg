@@ -20,6 +20,7 @@ from .dda import DDASystem
 # ========================================
 # 常量配置
 # ========================================
+AU_ALL_API = "http://127.0.0.1:5010/api/all"  # 获取完整的 AU/FER/Fusion 数据
 AU_EMOTION_API = "http://127.0.0.1:5010/api/fusion"
 AU_STATUS_API = "http://127.0.0.1:5010/api/status"
 HLKK_DATA_API = "http://127.0.0.1:5020/data"
@@ -71,12 +72,20 @@ class EmotionProcessor:
         self.history_max = 300
         self.start_time = time.time()
         self.startup_grace_period = 30
+        
+        # ⭐ 保存原始 API 数据
+        self._raw_physio_data = None
+        self._raw_au_data = None
+        self._raw_fer_data = None
+        self._raw_fusion_data = None
 
     def fetch_au_emotion(self):
         try:
             resp = requests.get(AU_EMOTION_API, timeout=0.5)
             if resp.status_code == 200:
                 d = resp.json()
+                # ⭐ 保存原始 fusion 数据
+                self._raw_fusion_data = d
                 scores = d.get("scores", {})
                 return {
                     "neutral": scores.get("neutral", 0),
@@ -96,6 +105,9 @@ class EmotionProcessor:
             resp = requests.get(AU_STATUS_API, timeout=0.5)
             if resp.status_code == 200:
                 d = resp.json()
+                # ⭐ 保存原始 AU 和 FER 数据
+                self._raw_au_data = d.get('au', d)
+                self._raw_fer_data = d.get('fer', None)
                 return {
                     "face_detected": d.get("face_detected", False),
                     "face_count": d.get("face_count", 0),
@@ -114,6 +126,8 @@ class EmotionProcessor:
             resp = requests.get(HLKK_DATA_API, timeout=0.5)
             if resp.status_code == 200:
                 d = resp.json()
+                # ⭐ 保存原始生理数据
+                self._raw_physio_data = d
                 raw = d.get("raw", {})
                 physiology = d.get("physiology", {})
                 return {
@@ -125,6 +139,23 @@ class EmotionProcessor:
                     "hrr_pct": physiology.get("hrr_pct", 0),
                     "hr_slope": physiology.get("hr_slope", 0)
                 }
+        except Exception as e:
+            pass
+        return None
+    
+    def fetch_all_emotion_data(self):
+        """
+        获取完整的 AU/FER/Fusion 数据（使用 /api/all 接口）
+        """
+        try:
+            resp = requests.get(AU_ALL_API, timeout=0.5)
+            if resp.status_code == 200:
+                d = resp.json()
+                # ⭐ 保存所有原始数据
+                self._raw_au_data = d.get('au', {})
+                self._raw_fer_data = d.get('fer', {})
+                self._raw_fusion_data = d.get('fusion', {})
+                return d
         except Exception as e:
             pass
         return None
@@ -239,9 +270,42 @@ class EmotionProcessor:
         return mapping.get(label, 0)
 
     def update(self):
-        au_data = self.fetch_au_emotion()
+        # ⭐ 优先使用 /api/all 获取完整数据
+        all_emotion_data = self.fetch_all_emotion_data()
+        au_data = None
+        face = None
+        
+        if all_emotion_data:
+            # 从完整数据中提取需要的部分
+            fusion_data = all_emotion_data.get('fusion', {})
+            au_info = all_emotion_data.get('au', {})
+            if fusion_data:
+                scores = fusion_data.get("scores", {})
+                au_data = {
+                    "neutral": scores.get("neutral", 0),
+                    "positive": scores.get("positive", 0),
+                    "negative": scores.get("negative", 0),
+                    "confidence": fusion_data.get("confidence", 0),
+                    "emotion": fusion_data.get("emotion", "neutral"),
+                    "engagement": fusion_data.get("tag", "None"),
+                    "timestamp": time.time()
+                }
+            if au_info:
+                face = {
+                    "face_detected": au_info.get("face_detected", False),
+                    "face_count": au_info.get("face_count", 0),
+                    "pitch": au_info.get("pitch", 0.0),
+                    "yaw": au_info.get("yaw", 0.0),
+                    "roll": au_info.get("roll", 0.0),
+                    "pose": au_info.get("pose", "-"),
+                    "is_front_face": abs(au_info.get("yaw", 0)) < 35 and abs(au_info.get("pitch", 0)) < 25
+                }
+        else:
+            # 回退到旧的方法
+            au_data = self.fetch_au_emotion()
+            face = self.fetch_face_status()
+        
         physio = self.fetch_physio_data()
-        face = self.fetch_face_status()
 
         with self.lock:
             if au_data:
@@ -333,6 +397,13 @@ class PerceptionIntegrator:
         """将感知数据更新到 system_core"""
         try:
             with self.emotion_processor.lock:
+                # 获取原始 API 数据
+                raw_physio_data = self.emotion_processor._raw_physio_data if hasattr(self.emotion_processor, '_raw_physio_data') else None
+                raw_au_data = self.emotion_processor._raw_au_data if hasattr(self.emotion_processor, '_raw_au_data') else None
+                raw_fer_data = self.emotion_processor._raw_fer_data if hasattr(self.emotion_processor, '_raw_fer_data') else None
+                raw_fusion_data = self.emotion_processor._raw_fusion_data if hasattr(self.emotion_processor, '_raw_fusion_data') else None
+                
+                # 获取原始处理后的数据
                 physio = self.emotion_processor.physio_data
                 emotion = self.emotion_processor.processed_emotion
                 face_data = self.emotion_processor.face_data
@@ -384,6 +455,19 @@ class PerceptionIntegrator:
                     'face_detected': face_detected,
                     'face_count': face_count
                 })
+                
+                # ⭐ 更新完整的生理数据（来自 hlkk.py）
+                if raw_physio_data:
+                    raw_data = raw_physio_data.get('raw', {})
+                    analysis_data = raw_physio_data.get('physiology', {})
+                    self.system_core.update_physiology_data(raw_data, analysis_data)
+                
+                # ⭐ 更新完整的面部/情绪数据（来自 emotion.py）
+                self.system_core.update_face_emotion_data(
+                    au_data=raw_au_data,
+                    fer_data=raw_fer_data,
+                    fusion_data=raw_fusion_data
+                )
 
         except Exception as e:
             print(f"[PerceptionIntegrator] 更新感知数据失败: {e}")

@@ -141,6 +141,65 @@ class SystemCore:
                 'activity': 'unknown',
                 'speaking': False,
                 'idleMinutes': 0,
+                # ⭐ 扩展：完整的 hlkk.py 生理数据
+                'physiology': {
+                    'raw': {
+                        'hr': None,
+                        'br': None,
+                        'hph': None,
+                        'bph': None,
+                        'is_human': 0,
+                        'distance': 0,
+                        'distance_valid': 0,
+                        'signal_state': 'INIT',
+                        'hr_valid': False,
+                        'br_valid': False,
+                        'phase_valid': False
+                    },
+                    'analysis': {
+                        'hrr': None,
+                        'hrr_label': None,
+                        'slope': None,
+                        'slope_label': None,
+                        'brv': None,
+                        'brv_label': None,
+                        'brel': None,
+                        'brel_label': None,
+                        'cr': None,
+                        'cr_label': None,
+                        'plv': None,
+                        'plv_label': None,
+                        'mean_phase_diff': None
+                    }
+                },
+                # ⭐ 扩展：完整的 emotion.py 面部/情绪数据
+                'face': {
+                    'au': {
+                        'emotion': 'no_face',
+                        'confidence': 0.0,
+                        'scores': {'neutral': 0, 'positive': 0, 'negative': 0},
+                        'pose': '-',
+                        'pitch': 0,
+                        'yaw': 0,
+                        'roll': 0,
+                        'au_features': {},
+                        'engagement': 'None',
+                        'face_detected': False,
+                        'face_count': 0,
+                        'speaking': False
+                    },
+                    'fer': {
+                        'label': 'neutral',
+                        'conf': 0.0,
+                        'probs_3': {'neutral': 0, 'positive': 0, 'negative': 0},
+                        'has_face': False
+                    },
+                    'fusion': {
+                        'emotion': 'no_face',
+                        'confidence': 0.0,
+                        'scores': {'neutral': 0, 'positive': 0, 'negative': 0}
+                    }
+                }
             },
             
             # 环境数据
@@ -431,7 +490,15 @@ class SystemCore:
     # ==================== 页面状态 ====================
     
     def set_page(self, page: str):
-        """设置当前页面"""
+        """设置当前页面 - 只允许跳转到健康、娱乐、益智、呼叫四个页面"""
+        # ⭐ 页面白名单：只允许这四个页面跳转
+        ALLOWED_PAGES = ['/health', '/entertainment', '/learning', '/call']
+        
+        # 如果不是允许的页面，直接忽略，不做任何操作
+        if page not in ALLOWED_PAGES:
+            print(f'[SystemCore] 忽略无效页面跳转: {page}')
+            return
+        
         with self._lock:
             old_page = self._state['currentPage']
             if old_page == page:
@@ -853,6 +920,92 @@ class SystemCore:
             self._state['perception']['speaking'] = speaking
         if speaking:
             self._last_activity_time = time.time()
+    
+    # ==================== 完整生理数据更新（来自 hlkk.py） ====================
+    
+    def update_physiology_data(self, raw_data: Dict[str, Any], analysis_data: Dict[str, Any] = None):
+        """
+        更新完整的生理数据（来自 hlkk.py）
+        
+        Args:
+            raw_data: 原始数据 (hr, br, hph, bph, is_human, distance, distance_valid, signal_state, hr_valid, br_valid, phase_valid)
+            analysis_data: 分析数据 (hrr, hrr_label, slope, slope_label, brv, brv_label, brel, brel_label, cr, cr_label, plv, plv_label, mean_phase_diff)
+        """
+        with self._lock:
+            if raw_data:
+                self._state['perception']['physiology']['raw'].update({
+                    'hr': raw_data.get('hr'),
+                    'br': raw_data.get('br'),
+                    'hph': raw_data.get('hph'),
+                    'bph': raw_data.get('bph'),
+                    'is_human': raw_data.get('is_human', 0),
+                    'distance': raw_data.get('distance', 0),
+                    'distance_valid': raw_data.get('distance_valid', 0),
+                    'signal_state': raw_data.get('signal_state', 'INIT'),
+                    'hr_valid': raw_data.get('hr_valid', False),
+                    'br_valid': raw_data.get('br_valid', False),
+                    'phase_valid': raw_data.get('phase_valid', False)
+                })
+            
+            if analysis_data:
+                self._state['perception']['physiology']['analysis'].update({
+                    'hrr': analysis_data.get('hrr'),
+                    'hrr_label': analysis_data.get('hrr_label'),
+                    'slope': analysis_data.get('slope'),
+                    'slope_label': analysis_data.get('slope_label'),
+                    'brv': analysis_data.get('brv'),
+                    'brv_label': analysis_data.get('brv_label'),
+                    'brel': analysis_data.get('brel'),
+                    'brel_label': analysis_data.get('brel_label'),
+                    'cr': analysis_data.get('cr'),
+                    'cr_label': analysis_data.get('cr_label'),
+                    'plv': analysis_data.get('plv'),
+                    'plv_label': analysis_data.get('plv_label'),
+                    'mean_phase_diff': analysis_data.get('mean_phase_diff')
+                })
+    
+    # ==================== 完整面部/情绪数据更新（来自 emotion.py） ====================
+    
+    def update_face_emotion_data(self, au_data: Dict[str, Any] = None, fer_data: Dict[str, Any] = None, fusion_data: Dict[str, Any] = None):
+        """
+        更新完整的面部/情绪数据（来自 emotion.py）
+        
+        Args:
+            au_data: AU 数据 (emotion, confidence, scores, pose, pitch, yaw, roll, au_features, engagement, face_detected, face_count, speaking)
+            fer_data: FER 数据 (label, conf, probs_3, has_face)
+            fusion_data: Fusion 数据 (emotion, confidence, scores)
+        """
+        with self._lock:
+            if au_data:
+                self._state['perception']['face']['au'].update({
+                    'emotion': au_data.get('emotion', 'no_face'),
+                    'confidence': au_data.get('confidence', 0.0),
+                    'scores': au_data.get('scores', {'neutral': 0, 'positive': 0, 'negative': 0}),
+                    'pose': au_data.get('pose', '-'),
+                    'pitch': au_data.get('pitch', 0),
+                    'yaw': au_data.get('yaw', 0),
+                    'roll': au_data.get('roll', 0),
+                    'au_features': au_data.get('au_features', {}),
+                    'engagement': au_data.get('engagement', 'None'),
+                    'face_detected': au_data.get('face_detected', False),
+                    'face_count': au_data.get('face_count', 0),
+                    'speaking': au_data.get('speaking', False)
+                })
+            
+            if fer_data:
+                self._state['perception']['face']['fer'].update({
+                    'label': fer_data.get('label', 'neutral'),
+                    'conf': fer_data.get('conf', 0.0),
+                    'probs_3': fer_data.get('probs_3', {'neutral': 0, 'positive': 0, 'negative': 0}),
+                    'has_face': fer_data.get('has_face', False)
+                })
+            
+            if fusion_data:
+                self._state['perception']['face']['fusion'].update({
+                    'emotion': fusion_data.get('emotion', 'no_face'),
+                    'confidence': fusion_data.get('confidence', 0.0),
+                    'scores': fusion_data.get('scores', {'neutral': 0, 'positive': 0, 'negative': 0})
+                })
     
     # ==================== 环境数据 ====================
     

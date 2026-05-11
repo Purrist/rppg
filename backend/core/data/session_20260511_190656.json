@@ -1,0 +1,330 @@
+{
+  "session_id": "processing_speed_20260511_190656",
+  "start_time": "2026-05-11T19:06:56.826196",
+  "end_time": null,
+  "game_type": "processing_speed",
+  "module": "go_no_go",
+  "difficulty_history": [
+    {
+      "timestamp": "2026-05-11T19:06:56.826196",
+      "difficulty": 4,
+      "reason": "基于历史表现的最佳初始难度"
+    },
+    {
+      "timestamp": "2026-05-11T19:07:41.475504",
+      "difficulty": 5,
+      "reason": "准确率 85.7%，自动调整"
+    },
+    {
+      "timestamp": "2026-05-11T19:07:50.068298",
+      "difficulty": 5,
+      "reason": "准确率 87.5%，自动调整"
+    },
+    {
+      "timestamp": "2026-05-11T19:08:24.390572",
+      "difficulty": 3,
+      "reason": "准确率 50.0%，自动调整"
+    },
+    {
+      "timestamp": "2026-05-11T19:08:32.956567",
+      "difficulty": 3,
+      "reason": "准确率 40.0%，自动调整"
+    },
+    {
+      "timestamp": "2026-05-11T19:08:41.549118",
+      "difficulty": 3,
+      "reason": "准确率 30.0%，自动调整"
+    },
+    {
+      "timestamp": "2026-05-11T19:08:50.098167",
+      "difficulty": 2,
+      "reason": "准确率 30.0%，自动调整"
+    },
+    {
+      "timestamp": "2026-05-11T19:08:59.184105",
+      "difficulty": 2,
+      "reason": "准确率 20.0%，自动调整"
+    },
+    {
+      "timestamp": "2026-05-11T19:09:08.228916",
+      "difficulty": 2,
+      "reason": "准确率 10.0%，自动调整"
+    },
+    {
+      "timestamp": "2026-05-11T19:09:17.305989",
+      "difficulty": 2,
+      "reason": "准确率 0.0%，自动调整"
+    },
+    {
+      "timestamp": "2026-05-11T19:09:26.377849",
+      "difficulty": 2,
+      "reason": "准确率 0.0%，自动调整"
+    },
+    {
+      "timestamp": "2026-05-11T19:09:35.465792",
+      "difficulty": 1,
+      "reason": "准确率 0.0%，自动调整"
+    },
+    {
+      "timestamp": "2026-05-11T19:09:42.385200",
+      "difficulty": 1,
+      "reason": "准确率 10.0%，自动调整"
+    },
+    {
+      "timestamp": "2026-05-11T19:09:51.967645",
+      "difficulty": 1,
+      "reason": "准确率 10.0%，自动调整"
+    }
+  ],
+  "trials": [
+    {
+      "trial_id": 1,
+      "timestamp": "2026-05-11T19:07:01.964999",
+      "module": "go_no_go",
+      "difficulty": 4,
+      "question_type": "go",
+      "is_correct": true,
+      "reaction_time_ms": 3106.0428619384766,
+      "target_zone": 6,
+      "selected_zone": 6
+    },
+    {
+      "trial_id": 2,
+      "timestamp": "2026-05-11T19:07:07.105462",
+      "module": "go_no_go",
+      "difficulty": 4,
+      "question_type": "no_go",
+      "is_correct": true,
+      "reaction_time_ms": 3087.087869644165,
+      "target_zone": 5,
+      "selected_zone": 6
+    },
+    {
+      "trial_id": 3,
+      "timestamp": "2026-05-11T19:07:12.244129",
+      "module": "go_no_go",
+      "difficulty": 4,
+      "question_type": "no_go",
+      "is_correct": true,
+      "reaction_time_ms": 3092.2837257385254,
+      "target_zone": 4,
+      "selected_zone": 6
+    },
+    {
+      "trial_id": 4,
+      "timestamp": "2026-05-11T19:07:17.318419",
+      "module": "go_no_go",
+      "difficulty": 4,
+      "question_type": "no_go",
+      "is_correct": true,
+      "reaction_time_ms": 3047.307014465332,
+      "target_zone": 3,
+      "selected_zone": 6
+    },
+    {
+      "trial_id": 5,
+      "timestamp": "2026-05-11T19:07:25.894451",
+      "module": "go_no_go",
+      "difficulty": 4,
+      "question_type": "go",
+      "is_correct": false,
+      "reaction_time_ms": 6530.399560928345,
+      "target_zone": 4,
+      "selected_zone": null
+    },
+    {
+      "trial_id": 6,
+      "timestamp": "2026-05-11T19:07:33.661219",
+      "module": "go_no_go",
+      "difficulty": 4,
+      "question_type": "go",
+      "is_correct": true,
+      "reaction_time_ms": 5727.721929550171,
+      "target_zone": 2,
+      "selected_zone": 2
+    },
+    {
+      "trial_id": 7,
+      "timestamp": "2026-05-11T19:07:41.475504",
+      "module": "go_no_go",
+      "difficulty": 4,
+      "question_type": "go",
+      "is_correct": true,
+      "reaction_time_ms": 5782.307863235474,
+      "target_zone": 2,
+      "selected_zone": 2
+    },
+    {
+      "trial_id": 8,
+      "timestamp": "2026-05-11T19:07:50.067302",
+      "module": "go_no_go",
+      "difficulty": 4,
+      "question_type": "no_go",
+      "is_correct": true,
+      "reaction_time_ms": 6528.064966201782,
+      "target_zone": 1,
+      "selected_zone": null
+    },
+    {
+      "trial_id": 9,
+      "timestamp": "2026-05-11T19:07:58.674597",
+      "module": "go_no_go",
+      "difficulty": 4,
+      "question_type": "go",
+      "is_correct": false,
+      "reaction_time_ms": 6537.957429885864,
+      "target_zone": 5,
+      "selected_zone": null
+    },
+    {
+      "trial_id": 10,
+      "timestamp": "2026-05-11T19:08:07.260185",
+      "module": "choice_reaction",
+      "difficulty": 4,
+      "question_type": "no_go",
+      "is_correct": false,
+      "reaction_time_ms": 6528.900623321533,
+      "target_zone": 8,
+      "selected_zone": null
+    },
+    {
+      "trial_id": 11,
+      "timestamp": "2026-05-11T19:08:15.809268",
+      "module": "choice_reaction",
+      "difficulty": 4,
+      "question_type": "no_go",
+      "is_correct": false,
+      "reaction_time_ms": 6524.841547012329,
+      "target_zone": 4,
+      "selected_zone": null
+    },
+    {
+      "trial_id": 12,
+      "timestamp": "2026-05-11T19:08:24.389575",
+      "module": "choice_reaction",
+      "difficulty": 4,
+      "question_type": "no_go",
+      "is_correct": false,
+      "reaction_time_ms": 6540.567636489868,
+      "target_zone": 8,
+      "selected_zone": null
+    },
+    {
+      "trial_id": 13,
+      "timestamp": "2026-05-11T19:08:32.954573",
+      "module": "choice_reaction",
+      "difficulty": 4,
+      "question_type": "no_go",
+      "is_correct": false,
+      "reaction_time_ms": 6532.781362533569,
+      "target_zone": 4,
+      "selected_zone": null
+    },
+    {
+      "trial_id": 14,
+      "timestamp": "2026-05-11T19:08:41.548121",
+      "module": "choice_reaction",
+      "difficulty": 4,
+      "question_type": "no_go",
+      "is_correct": false,
+      "reaction_time_ms": 6542.438983917236,
+      "target_zone": 2,
+      "selected_zone": null
+    },
+    {
+      "trial_id": 15,
+      "timestamp": "2026-05-11T19:08:50.097654",
+      "module": "choice_reaction",
+      "difficulty": 3,
+      "question_type": "no_go",
+      "is_correct": false,
+      "reaction_time_ms": 6507.639169692993,
+      "target_zone": 1,
+      "selected_zone": null
+    },
+    {
+      "trial_id": 16,
+      "timestamp": "2026-05-11T19:08:59.184105",
+      "module": "choice_reaction",
+      "difficulty": 3,
+      "question_type": "no_go",
+      "is_correct": false,
+      "reaction_time_ms": 7020.409345626831,
+      "target_zone": 7,
+      "selected_zone": null
+    },
+    {
+      "trial_id": 17,
+      "timestamp": "2026-05-11T19:09:08.227921",
+      "module": "choice_reaction",
+      "difficulty": 3,
+      "question_type": "no_go",
+      "is_correct": false,
+      "reaction_time_ms": 7005.810976028442,
+      "target_zone": 2,
+      "selected_zone": null
+    },
+    {
+      "trial_id": 18,
+      "timestamp": "2026-05-11T19:09:17.304991",
+      "module": "choice_reaction",
+      "difficulty": 3,
+      "question_type": "no_go",
+      "is_correct": false,
+      "reaction_time_ms": 7012.217283248901,
+      "target_zone": 2,
+      "selected_zone": null
+    },
+    {
+      "trial_id": 19,
+      "timestamp": "2026-05-11T19:09:26.376853",
+      "module": "choice_reaction",
+      "difficulty": 3,
+      "question_type": "no_go",
+      "is_correct": false,
+      "reaction_time_ms": 7018.331289291382,
+      "target_zone": 1,
+      "selected_zone": null
+    },
+    {
+      "trial_id": 20,
+      "timestamp": "2026-05-11T19:09:35.464797",
+      "module": "go_no_go",
+      "difficulty": 2,
+      "question_type": "go",
+      "is_correct": false,
+      "reaction_time_ms": 7011.1401081085205,
+      "target_zone": 3,
+      "selected_zone": null
+    },
+    {
+      "trial_id": 21,
+      "timestamp": "2026-05-11T19:09:42.385200",
+      "module": "go_no_go",
+      "difficulty": 2,
+      "question_type": "no_go",
+      "is_correct": true,
+      "reaction_time_ms": 4865.657806396484,
+      "target_zone": 3,
+      "selected_zone": 6
+    },
+    {
+      "trial_id": 22,
+      "timestamp": "2026-05-11T19:09:51.967645",
+      "module": "go_no_go",
+      "difficulty": 2,
+      "question_type": "go",
+      "is_correct": false,
+      "reaction_time_ms": 7511.975526809692,
+      "target_zone": 4,
+      "selected_zone": null
+    }
+  ],
+  "final_score": 0,
+  "final_accuracy": 0.36363636363636365,
+  "total_trials": 22,
+  "correct_trials": 8,
+  "avg_reaction_time_ms": 5911.903858184814,
+  "min_difficulty": 2,
+  "max_difficulty": 4
+}

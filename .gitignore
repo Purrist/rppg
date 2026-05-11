@@ -54,3 +54,4 @@ backend/perception/healthdata/
 mmw_history/
 backend/perception/hlk.json
 backend/perception/face_database/
+backend/core/prevoice/

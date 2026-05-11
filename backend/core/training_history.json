@@ -115,5 +115,18 @@
     "correct_rate": 0.88,
     "avg_bpm": "--",
     "avg_emotion": "neutral"
+  },
+  {
+    "date": "2026-05-11T19:11:02.929334",
+    "mode": "processing_speed",
+    "module": "go_no_go",
+    "difficulty": 3,
+    "duration": 32,
+    "score": 10,
+    "correct_count": 2,
+    "total_count": 4,
+    "correct_rate": 0.5,
+    "avg_bpm": "--",
+    "avg_emotion": "neutral"
   }
 ]

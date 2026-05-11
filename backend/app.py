@@ -156,10 +156,8 @@ if not os.path.exists(models_dir) or not os.listdir(models_dir):
             from core.voice_manager_sherpa import init_voice_manager, get_voice_manager
             voice_manager = init_voice_manager(socketio, system_core)
             
-            # ⭐ 设置语音识别回调 - 识别到用户语音后自动发送给AI
-            voice_manager.set_speech_recognized_callback(lambda text: handle_voice_command(text))
-            
             # ⭐ 启动语音监听（后端持续监听麦克风）
+            # 注意：不再设置回调，语音命令直接由 voice_manager 内部处理
             voice_manager.start_listening()
         except Exception as e:
             voice_manager = None
@@ -168,10 +166,8 @@ else:
         from core.voice_manager_sherpa import init_voice_manager, get_voice_manager
         voice_manager = init_voice_manager(socketio, system_core)
         
-        # ⭐ 设置语音识别回调 - 识别到用户语音后自动发送给AI
-        voice_manager.set_speech_recognized_callback(lambda text: handle_voice_command(text))
-        
         # ⭐ 启动语音监听（后端持续监听麦克风）
+        # 注意：不再设置回调，语音命令直接由 voice_manager 内部处理
         voice_manager.start_listening()
     except Exception as e:
         voice_manager = None
@@ -182,34 +178,6 @@ from core.training_analytics import init_training_analytics, get_training_analyt
 core_data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "core")
 training_analytics = init_training_analytics(data_dir=core_data_dir)
 #print(f"[训练系统] 训练分析器已初始化，数据目录: {core_data_dir}")
-
-# 语音命令处理函数
-def handle_voice_command(text: str):
-    """处理语音命令 - 将用户语音发送给AI Agent"""
-    print(f"[语音命令] 收到: {text}")
-
-    try:
-        # 获取当前系统上下文
-        context = system_core.get_state()
-        
-        # 调用AI Agent
-        response, action = ask_akon(text, context)
-        
-        print(f"[语音命令] AI回复: {response}")
-        
-        # 通知前端显示AI回复（会触发打字机效果）
-        socketio.emit('voice_llm_response', {
-            'text': response
-        })
-        
-        # 处理页面跳转
-        if action and action.get('type') == 'navigate':
-            socketio.emit('navigate_to', {'page': action.get('page')})
-        
-    except Exception as e:
-        print(f"[语音命令] 处理错误: {e}")
-        import traceback
-        traceback.print_exc()
 
 # 用户状态（保留用于兼容）
 user_state = {
@@ -937,8 +905,14 @@ def handle_speak_text(data):
     text = data.get('text', '')
     source = data.get('source', 'text')
     
+    # ⭐ 调试：追踪 speak_text 的来源
+    print(f"[语音播报] ⚠️ speak_text 被调用！来源: {source}, 文本: {text[:30]}...")
+    
     if text and voice_manager:
-        print(f"[语音播报] 来源: {source}, 文本: {text[:30]}...")
+        # ⭐ 警告：如果来源是 voice，说明前端没有正确过滤
+        if source == 'voice':
+            print(f"[语音播报] ⚠️ 警告：来源是 voice，这可能导致重复播报！")
+        print(f"[语音播报] 执行播报: {text[:30]}...")
         voice_manager._speak(text)
 
 # ============================================================================

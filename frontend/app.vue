@@ -12,7 +12,8 @@
           <div class="nav-item" :class="{ 'active-custom': currentPath === '/' }" @click="handleNavigate('/')">🏠<br>首页</div>
           <div class="nav-item" :class="{ 'active-custom': currentPath === '/health' }" @click="handleNavigate('/health')">❤️<br>健康</div>
           <div class="nav-item" :class="{ 'active-custom': currentPath === '/entertainment' }" @click="handleNavigate('/entertainment')">🎵<br>娱乐</div>
-          <div class="nav-item" :class="{ 'active-custom': currentPath === '/learning' }" @click="handleNavigate('/learning')">🧩<br>益智</div> 
+          <div class="nav-item" :class="{ 'active-custom': currentPath === '/learning' }" @click="handleNavigate('/learning')">🧩<br>益智</div>
+          <div class="nav-item" :class="{ 'active-custom': currentPath === '/call' }" @click="handleNavigate('/call')">📞<br>通话</div>
         </div>
         <!-- ⭐ 点击张爷爷直接跳转设置页 -->
         <div class="user-zone" @click="goToSettings">
@@ -398,6 +399,7 @@ onMounted(() => {
   socket.on('navigate_to', (data) => {
     if (!isPurePage.value && route.path !== data.page) {
       router.push(data.page)
+      ui.akon = false
     }
   })
   
@@ -631,8 +633,9 @@ async function startTypeWriter(fullText, source = 'text') {
   // 打字完成后，添加完整的消息到全局记录
   addChatMessage({ role: 'assistant', content: fullText })
   
-  // 通知后端进行语音播报（只由后端播报，不做任何前端播报）
-  if (socket && socket.connected) {
+  // ⭐ 关键修复：当来源是 voice 时，后端已经播报过了，不再重复触发
+  // 只有来源是 text（用户手动输入）时，才通知后端播报
+  if (socket && socket.connected && source !== 'voice') {
     socket.emit('speak_text', { text: fullText, source })
   }
 }
@@ -676,7 +679,7 @@ html, body {
   width: 140px; background: #F8F9FA; display: flex; flex-direction: column;
   padding: 40px 0; border-right: 1px solid #EEE; z-index: 100;
 }
-.nav-links { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 30px; }
+.nav-links { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 22px; }
 
 .nav-item { 
   cursor: pointer; color: #333; font-size: 22px; font-weight: bold; 
