@@ -40,8 +40,8 @@ class GameManager:
             game_config.dwell_time = self._system_core.get_dwell_time()
             print(f"[GameManager] 使用SystemCore确认时间: {game_config.dwell_time}ms")
         
-        # 创建游戏实例
-        game = game_class(self.socketio, game_config) if game_config else game_class(self.socketio)
+        # 创建游戏实例（传递 system_core）
+        game = game_class(self.socketio, game_config, self._system_core) if game_config else game_class(self.socketio, None, self._system_core)
         
         # 如果有额外参数，更新到游戏实例
         if game_params:

@@ -1,3 +1,4 @@
+
 # games/processing_speed_game.py
 # 处理速度训练游戏 - 基于用户定义重新设计
 #
@@ -97,11 +98,11 @@ class ProcessingSpeedGame(GameBase):
         8: {"extra_time": 1.5, "zones": 8},   # 确认时间+1.5秒，8个圈
     }
 
-    def __init__(self, socketio, config: ProcessingSpeedConfig = None):
-        super().__init__(socketio, config or ProcessingSpeedConfig())
+    def __init__(self, socketio, config: ProcessingSpeedConfig = None, system_core=None):
+        super().__init__(socketio, config or ProcessingSpeedConfig(), system_core)
 
         # 难度等级（1-8级）
-        self.difficulty_level = 3
+        self.difficulty_level = 4  # DDA 默认难度为4
 
         # 当前模块
         self.current_module = TrainingModule.GO_NO_GO
@@ -126,7 +127,7 @@ class ProcessingSpeedGame(GameBase):
             "no_go_total": 0,
         }
 
-        # 最近表现（用于动态难度）
+        # 最近表现（保留用于历史记录，但不再用于难度调整）
         self.recent_trials = []
 
         # 确认时间（从配置读取）
@@ -165,13 +166,8 @@ class ProcessingSpeedGame(GameBase):
         # ⭐ 保存结算数据到临时变量，用于在结算画面显示
         self._last_settlement_stats = self.state.stats.copy() if self.state.stats else {}
 
-        # 使用训练分析器的最佳难度作为初始难度
-        if ANALYTICS_AVAILABLE:
-            analytics = get_training_analytics()
-            # 初始难度默认为3，但会在start_session时被最佳难度覆盖
-            self.difficulty_level = 3
-        else:
-            self.difficulty_level = 3
+        # 重置难度为 DDA 默认值
+        self.difficulty_level = 4
         
         self.current_module = TrainingModule.GO_NO_GO
         self.trial_id = 0
@@ -226,6 +222,10 @@ class ProcessingSpeedGame(GameBase):
                 initial_difficulty=self.difficulty_level
             )
             print(f"[ProcessingSpeedGame] 训练分析会话已开始")
+
+        # ⭐ 重置 DDA 系统
+        if self.system_core and hasattr(self.system_core, 'reset_dda_for_new_game'):
+            self.system_core.reset_dda_for_new_game()
         
         self._start_interval()
 
@@ -574,7 +574,6 @@ class ProcessingSpeedGame(GameBase):
 
         # Go/No-Go统计
         if self.current_question["module"] == "go_no_go":
-            # ⭐ 修复：使用 correct_action 判断是 Go 还是 No-Go
             correct_action = self.current_question.get("correct_action", "step_on_target")
             is_go = correct_action == "step_on_target"
             if is_go:
@@ -597,15 +596,18 @@ class ProcessingSpeedGame(GameBase):
             # 错误扣5分
             self.state.score = max(0, self.state.score - 5)
 
-        # 记录最近表现
+        # 记录表现（保留历史记录）
         self.recent_trials.append({"correct": correct})
         if len(self.recent_trials) > 5:
             self.recent_trials.pop(0)
 
-        # ⭐ 记录到训练分析器
+        # ⭐ 调用 DDA 系统
+        self._update_dda(correct, elapsed * 1000)
+
+        # ⭐ 记录到训练分析器（保留用于数据分析，但不用于难度调整）
         if ANALYTICS_AVAILABLE:
             analytics = get_training_analytics()
-            should_adjust, new_difficulty = analytics.record_trial({
+            analytics.record_trial({
                 'module': self.current_question.get("module", "unknown"),
                 'difficulty': self.difficulty_level,
                 'question_type': 'go' if self.current_question.get("correct_action") == "step_on_target" else 'no_go',
@@ -614,18 +616,9 @@ class ProcessingSpeedGame(GameBase):
                 'target_zone': self.current_question.get("target_zone", 0),
                 'selected_zone': zone_id
             })
-            
-            # 如果建议调整难度，更新难度
-            if should_adjust and new_difficulty != self.difficulty_level:
-                print(f"[ProcessingSpeedGame] 训练分析器建议调整难度: {self.difficulty_level} -> {new_difficulty}")
-                self.difficulty_level = new_difficulty
 
         # 发送反馈
         self._emit_feedback(correct, zone_id)
-
-        # 动态难度调整（本地逻辑，作为备用）
-        if len(self.recent_trials) >= 5:
-            self._adjust_difficulty()
 
         # 开始间隔
         self._start_interval()
@@ -665,15 +658,18 @@ class ProcessingSpeedGame(GameBase):
             # 超时扣分（与错误一致，扣5分）
             self.state.score = max(0, self.state.score - 5)
 
-        # 记录
+        # 记录表现（保留历史记录）
         self.recent_trials.append({"correct": correct})
         if len(self.recent_trials) > 5:
             self.recent_trials.pop(0)
 
-        # ⭐ 记录到训练分析器
+        # ⭐ 调用 DDA 系统
+        self._update_dda(correct, elapsed * 1000)
+
+        # ⭐ 记录到训练分析器（保留用于数据分析，但不用于难度调整）
         if ANALYTICS_AVAILABLE:
             analytics = get_training_analytics()
-            should_adjust, new_difficulty = analytics.record_trial({
+            analytics.record_trial({
                 'module': self.current_question.get("module", "unknown"),
                 'difficulty': self.difficulty_level,
                 'question_type': 'go' if self.current_question.get("correct_action") == "step_on_target" else 'no_go',
@@ -682,19 +678,10 @@ class ProcessingSpeedGame(GameBase):
                 'target_zone': self.current_question.get("target_zone", 0),
                 'selected_zone': None
             })
-            
-            # 如果建议调整难度，更新难度
-            if should_adjust and new_difficulty != self.difficulty_level:
-                print(f"[ProcessingSpeedGame] 训练分析器建议调整难度: {self.difficulty_level} -> {new_difficulty}")
-                self.difficulty_level = new_difficulty
 
         # 发送超时反馈
         if not correct:
             self._emit_feedback(correct=False, zone_id=None, is_timeout=True)
-
-        # 动态难度调整
-        if len(self.recent_trials) >= 5:
-            self._adjust_difficulty()
 
         # 开始间隔
         self._start_interval()
@@ -725,29 +712,54 @@ class ProcessingSpeedGame(GameBase):
             zone_color = zone_state.get("color_name", "")
             return zone_color == target_color
 
-    def _adjust_difficulty(self):
-        """动态难度调整 - 基于答题情况调整区域数量"""
-        if len(self.recent_trials) < 5:
-            return
+    def _update_dda(self, correct: bool, reaction_time_ms: float):
+        """⭐ 将题目结果更新到 DDA 系统（包含感知数据）"""
+        try:
+            if not (self.system_core and hasattr(self.system_core, 'dda_system') and self.system_core.dda_system is not None):
+                return
 
-        correct_count = sum(1 for t in self.recent_trials if t["correct"])
-        accuracy = correct_count / len(self.recent_trials)
+            # 1. 获取最新的感知数据
+            perception_data = {}
+            if hasattr(self.system_core, 'get_dda_perception_data'):
+                perception_data = self.system_core.get_dda_perception_data()
 
-        # 调整规则 - 新的难度调整策略
-        # 目标：维持在60-90%正确率的最佳区间
-        if accuracy < 0.6:
-            # 正确率过低，降低难度（减少区域数量）
-            if self.difficulty_level > 1:
-                self.difficulty_level -= 1
-                print(f"[ProcessingSpeed] 难度降低至 {self.difficulty_level} 级")
-        elif accuracy > 0.9:
-            # 正确率过高，提高难度（增加区域数量）
-            if self.difficulty_level < 8:
-                self.difficulty_level += 1
-                print(f"[ProcessingSpeed] 难度提高至 {self.difficulty_level} 级")
-        # 60-90%正确率区间，维持当前难度
-        else:
-            print(f"[ProcessingSpeed] 维持当前难度 {self.difficulty_level} 级")
+            # 2. 构建完整的 unified 数据格式（游戏数据 + 感知数据）
+            unified = {
+                'difficulty': self.difficulty_level,
+                'game_status': 'playing',
+                'results': [{
+                    'seq': self.trial_id,
+                    'type': 'hit' if correct else 'miss',
+                    'time': int(reaction_time_ms),
+                    'difficulty': self.difficulty_level,
+                    'score': 1 if correct else 0
+                }],
+                # 添加感知数据
+                'hr_valid': perception_data.get('hr_valid', False),
+                'hrr_pct': perception_data.get('hrr_pct', 0),
+                'hr_slope': perception_data.get('hr_slope', 0),
+                'emotion': perception_data.get('emotion', 'neutral'),
+                'confidence': perception_data.get('confidence', 0),
+                'face_detected': perception_data.get('face_detected', True),
+                'face_count': perception_data.get('face_count', 1)
+            }
+
+            # 3. 调用 DDA 更新
+            dda_result = self.system_core.dda_system.update_from_unified(unified)
+
+            # 4. 检查是否调整了难度
+            if dda_result.get('adjustment_made', False):
+                new_diff = dda_result.get('current_difficulty', self.difficulty_level)
+                new_diff = max(1, min(8, new_diff))
+                if new_diff != self.difficulty_level:
+                    print(f"[ProcessingSpeedGame] DDA 调整难度: {self.difficulty_level} -> {new_diff}, 原因: {dda_result.get('reason')}")
+                    self.difficulty_level = new_diff
+                    
+                    # 同时更新 system_core 中的难度
+                    if hasattr(self.system_core, 'set_game_difficulty'):
+                        self.system_core.set_game_difficulty(new_diff)
+        except Exception as e:
+            print(f"[ProcessingSpeedGame] DDA 更新失败: {e}")
 
     # ==================== 状态发送 ====================
     def _emit_state(self):
@@ -855,3 +867,4 @@ class ProcessingSpeedGame(GameBase):
             "dwell_time": self.dwell_time_s,
         })
         return state
+

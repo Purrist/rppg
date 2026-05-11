@@ -106,12 +106,22 @@ from games import GameManager, GAME_REGISTRY, GAME_CONFIGS
 
 # 感知模块
 from perception import PerceptionManager, init_screen_processor, get_screen_processor, draw_detection_info
+from perception.perception_integrator import PerceptionIntegrator
 
 # ============================================================================
 # 初始化
 # ============================================================================
 # ⭐ 1. 初始化系统核心（必须在其他模块之前）
 system_core = init_system_core(socketio)
+
+# ⭐ 1.5 初始化感知整合器（启动情绪/心率子进程）
+perception_integrator = None
+try:
+    perception_integrator = PerceptionIntegrator(socketio, system_core)
+    perception_integrator.start()
+except Exception as e:
+    print(f"[感知系统] 启动感知整合器失败: {e}")
+    perception_integrator = None
 
 # 2. 投影摄像头处理器
 screen_proc = init_screen_processor(camera_source=PROJECTION_CAMERA_SOURCE, socketio=socketio)

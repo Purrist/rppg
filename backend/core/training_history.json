@@ -89,5 +89,31 @@
     "correct_rate": 0.4,
     "avg_bpm": "--",
     "avg_emotion": "neutral"
+  },
+  {
+    "date": "2026-05-05T16:01:21.136697",
+    "mode": "processing_speed",
+    "module": "go_no_go",
+    "difficulty": 5,
+    "duration": 0,
+    "score": 0,
+    "correct_count": 4,
+    "total_count": 4,
+    "correct_rate": 1.0,
+    "avg_bpm": "--",
+    "avg_emotion": "neutral"
+  },
+  {
+    "date": "2026-05-11T13:41:35.290009",
+    "mode": "processing_speed",
+    "module": "go_no_go",
+    "difficulty": 4,
+    "duration": 364,
+    "score": 0,
+    "correct_count": 22,
+    "total_count": 25,
+    "correct_rate": 0.88,
+    "avg_bpm": "--",
+    "avg_emotion": "neutral"
   }
 ]

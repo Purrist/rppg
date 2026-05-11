@@ -27,7 +27,7 @@
       "cwd": "${workspaceFolder}/backend",
       "python": "D:/anaconda/envs/rppg/python.exe",
       "args": [
-        "http://10.158.6.244:8080/video",
+        "http://192.168.137.25:8080/video",
         "1"
       ],
       "env": {

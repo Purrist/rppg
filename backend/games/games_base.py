@@ -58,8 +58,9 @@ class GameState:
 class GameBase(ABC):
     """游戏基类 - 所有游戏必须继承"""
     
-    def __init__(self, socketio, config: GameConfig):
+    def __init__(self, socketio, config: GameConfig, system_core=None):
         self.socketio = socketio
+        self.system_core = system_core  # ⭐ 添加 system_core 引用
         self.config = config
         self.state = GameState(status="IDLE", timer=config.duration)
         

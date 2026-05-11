@@ -25,11 +25,19 @@ SystemCore - 系统核心 (v3.1 优化版)
 
 import json
 import os
+import sys
 import time
 import threading
 from datetime import datetime
 from typing import Dict, Any, Optional, Callable, List
 from enum import Enum
+
+# 添加父目录到路径，导入 perception 模块
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+try:
+    from perception.dda import DDASystem
+except ImportError:
+    DDASystem = None
 
 
 class AIMode(Enum):
@@ -75,7 +83,24 @@ class SystemCore:
         
         # 状态监听器
         self._listeners: set[Callable] = set()
-        
+
+        # ⭐ DDA 系统初始化
+        self.dda_system = None
+        if DDASystem is not None:
+            self.dda_system = DDASystem()
+            self.dda_system.current_difficulty = 4
+            
+        # ⭐ DDA 专用的感知数据缓存
+        self._dda_perception_data = {
+            'hr_valid': False,
+            'hrr_pct': 0,
+            'hr_slope': 0,
+            'emotion': 'neutral',
+            'confidence': 0,
+            'face_detected': True,
+            'face_count': 1
+        }
+
         # ==================== 核心状态 ====================
         self._state = {
             # AI模式
@@ -909,6 +934,28 @@ class SystemCore:
                 }
             }
             print('[SystemCore] 监控数据已重置')
+
+    # ==================== DDA 系统 ====================
+
+    def get_dda_system(self):
+        """获取 DDA 系统实例"""
+        return self.dda_system
+
+    def reset_dda_for_new_game(self):
+        """为新游戏重置 DDA"""
+        if self.dda_system is not None:
+            self.dda_system.reset_for_new_game()
+            print(f'[SystemCore] DDA 系统已为新游戏重置')
+
+    def set_dda_perception_data(self, perception_data):
+        """设置 DDA 专用的感知数据"""
+        with self._lock:
+            self._dda_perception_data.update(perception_data)
+
+    def get_dda_perception_data(self):
+        """获取 DDA 专用的感知数据"""
+        with self._lock:
+            return self._dda_perception_data.copy()
 
 
 # ==================== 全局实例（线程安全）====================
