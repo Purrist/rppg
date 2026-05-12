@@ -4,6 +4,7 @@ import numpy as np
 from collections import deque
 import sys
 import logging
+from datetime import datetime
 
 logging.getLogger('werkzeug').setLevel(logging.CRITICAL)
 logging.getLogger('flask').setLevel(logging.CRITICAL)
@@ -23,6 +24,11 @@ from emotion_logger import EmotionLogger
 
 # ── Constants ──────────────────────────────────────────────
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+# 实时数据保存到 frontend/core 目录
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(SCRIPT_DIR)))
+FRONTEND_CORE_DIR = os.path.join(PROJECT_ROOT, 'frontend', 'core')
+os.makedirs(FRONTEND_CORE_DIR, exist_ok=True)
+
 CALIB_N = 30
 AU_MAIN = ['AU1','AU2','AU4','AU5','AU6','AU7','AU9','AU10','AU11','AU12','AU13','AU14','AU15','AU16','AU17','AU18','AU19','AU20','AU22','AU23','AU24','AU25','AU26','AU27','AU32','AU38','AU39']
 AU_SUB = ['AUL1','AUR1','AUL2','AUR2','AUL4','AUR4','AUL6','AUR6','AUL10','AUR10','AUL12','AUR12','AUL14','AUR14']
@@ -951,6 +957,8 @@ class EmotionEngine:
                     
                     self.au_result = res
                     emotion_logger.log(self.au_result, self.fer_result, self.get_fusion())
+                    # 保存实时数据到 frontend/core/emotion.json
+                    save_realtime_emotion(self.au_result, self.fer_result, self.get_fusion())
             time.sleep(0.01)
 
     def fer_loop(self):
@@ -1093,6 +1101,42 @@ class EmotionEngine:
 
 # ── Flask ────────────────────────────────────────────
 app = Flask(__name__)
+
+# 实时数据保存函数
+_emotion_log_start_time = time.time()
+
+def save_realtime_emotion(au_result, fer_result, fusion_result):
+    try:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        data = {
+            'timestamp': timestamp,
+            'elapsed': round(time.time() - _emotion_log_start_time, 2),
+            'au': {
+                'emotion': au_result.get('emotion', 'no_face'),
+                'confidence': float(au_result.get('confidence', 0)),
+                'scores': au_result.get('scores', {}),
+                'pose': au_result.get('pose', 'front'),
+                'pitch': float(au_result.get('pitch', 0)),
+                'yaw': float(au_result.get('yaw', 0)),
+                'au_features': au_result.get('au', {})
+            },
+            'fer': {
+                'label': fer_result.get('label', 'neutral'),
+                'conf': float(fer_result.get('conf', 0)),
+                'probs_3': fer_result.get('probs_3', {})
+            },
+            'fusion': {
+                'emotion': fusion_result.get('emotion', 'no_face'),
+                'confidence': float(fusion_result.get('confidence', 0)),
+                'scores': fusion_result.get('scores', {})
+            }
+        }
+        emotion_json_path = os.path.join(FRONTEND_CORE_DIR, 'emotion.json')
+        with open(emotion_json_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[Emotion] 保存实时数据失败: {e}")
+
 # ⭐ 先创建 emotion_logger，确保在启动线程之前就定义好！
 emotion_logger = EmotionLogger(data_dir='emodata', max_file_duration=300)
 print("[EmotionLogger] 情绪记录器已启动")

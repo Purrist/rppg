@@ -100,7 +100,7 @@ def ask_akon(user_input: str, system_state: dict) -> Tuple[str, dict]:
     try:
         response = requests.post(
             "http://localhost:11434/api/generate",
-            json={"model": "gemma3:1b", "prompt": prompt, "stream": False},
+            json={"model": "gemma3:4b", "prompt": prompt, "stream": False},
             timeout=15
         )
         
@@ -145,10 +145,10 @@ def _build_think_prompt(world_state: dict, state_manager) -> str:
 
 def _select_model(world_state: dict) -> str:
     if world_state.get("perception", {}).get("speaking"):
-        return "gemma3:1b"
+        return "gemma3:4b"
     if world_state.get("perception", {}).get("idleMinutes", 0) > 30:
-        return "gemma3:1b"
-    return "gemma3:1b"
+        return "gemma3:4b"
+    return "gemma3:4b"
 
 
 def _parse_decision(response: str) -> dict:

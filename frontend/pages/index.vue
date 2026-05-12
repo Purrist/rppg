@@ -5,17 +5,23 @@
         <h1>{{ greeting }}，张爷爷</h1>
         <p>{{ currentDate }} {{ currentWeekday }}  {{ currentTime }}</p>
         <div class="weather-widget">
-          <div class="location">{{ city }}</div>
-          <div class="weather-main">
+          <div class="weather-top">
+            <span class="location">{{ city }}</span>
             <span class="temp">{{ temperature }}°</span>
-            <span class="weather-icon">{{ weatherIcon }}</span>
-            <span class="weather">{{ weather }}</span>
+            <span class="wind" v-if="windPower">{{ windDirection }} {{ windPower }}级</span>
+          </div>
+          <div class="weather-bottom">
+            <div class="weather-bottom-left">
+              <span class="weather-icon">{{ weatherIcon }}</span>
+              <span class="weather">{{ weather }}</span>
+            </div>
+            <span class="humidity">空气湿度 {{ humidity }}%</span>
           </div>
         </div>
       </div>
       <div class="akon-card">
           <div class="akon-header">
-            <div class="akon-avatar">🤖</div>
+            <img src="/akon.svg" alt="阿康" class="akon-avatar" />
             <button class="voice-btn" @click="startVoiceInput">
               🎤 说话
             </button>
@@ -183,59 +189,158 @@ function updateFromSystemState(state) {
   realTimeData.value.heartRate = heartRate.value
   realTimeData.value.breathRate = breathRate.value
   
-  // 生成简单的波形
-  generateSimpleWave(realTimeData.value.heartRate, realTimeData.value.hrWave, 70)
-  generateSimpleWave(realTimeData.value.breathRate, realTimeData.value.brWave, 16)
+  // 从 systemState 获取相位数据绘制波形
+  if (state?.perception?.physiology?.raw?.hph !== undefined && 
+      state?.perception?.physiology?.raw?.hph !== null) {
+    hrPhaseWave.value.push(state.perception.physiology.raw.hph)
+    if (hrPhaseWave.value.length > 300) {
+      hrPhaseWave.value.shift()
+    }
+  }
+  
+  if (state?.perception?.physiology?.raw?.bph !== undefined && 
+      state?.perception?.physiology?.raw?.bph !== null) {
+    brPhaseWave.value.push(state.perception.physiology.raw.bph)
+    if (brPhaseWave.value.length > 300) {
+      brPhaseWave.value.shift()
+    }
+  }
   
   // 立即绘制
   nextTick(() => {
-    drawWave(hrCanvas.value, realTimeData.value.hrWave, '#FF4D4D')
-    drawWave(brCanvas.value, realTimeData.value.brWave, '#33B555')
+    drawPhaseWave(hrCanvas.value, hrPhaseWave.value, '#FF4D4D')
+    drawPhaseWave(brCanvas.value, brPhaseWave.value, '#33B555')
   })
 }
 
-const HLKK_API = 'http://127.0.0.1:5020'
+// 健康数据引用
+const healthData = ref({
+  time: 0,
+  hr: 72,
+  br: 16,
+  hph: 0,
+  bph: 0,
+  is_human: 0,
+  distance: 0,
+  distance_valid: 0,
+  signal_state: 'INIT',
+  hr_valid: false,
+  br_valid: false,
+  phase_valid: false,
+  hrr: 0,
+  hrr_label: '',
+  slope: 0,
+  slope_label: '',
+  brv: 0,
+  brv_label: '',
+  brel: 0,
+  brel_label: '',
+  cr: 0,
+  cr_label: '',
+  plv: 0.9,
+  plv_label: ''
+})
+
+// 相位波形数据（保存300个点，约1分钟数据，每200ms一个点）
+const hrPhaseWave = ref([])
+const brPhaseWave = ref([])
+
+const getBackendHost = () => {
+  if (typeof window === 'undefined') return 'localhost'
+  const host = window.location.hostname
+  return host || 'localhost'
+}
+
+const BACKEND_PORT = 5000
+const HLKK_PORT = 5020
+const backendHost = getBackendHost()
+const backendUrl = `http://${backendHost}:${BACKEND_PORT}`
+const hlkkUrl = `http://${backendHost}:${HLKK_PORT}`
+
+async function fetchHealthJson() {
+  try {
+    const res = await fetch(`${backendUrl}/core/health.json?` + Date.now())
+    if (res.ok) {
+      const data = await res.json()
+      healthData.value = data
+      
+      // 更新实时数据
+      realTimeData.value.heartRate = (data.hr !== undefined && data.hr !== null && data.hr > 0) ? Math.round(data.hr) : '--'
+      realTimeData.value.breathRate = (data.br !== undefined && data.br !== null && data.br > 0) ? Math.round(data.br) : '--'
+      
+      // 收集相位数据绘制波形
+      if (data.hph !== null && data.hph !== undefined) {
+        hrPhaseWave.value.push(data.hph)
+        if (hrPhaseWave.value.length > 300) {
+          hrPhaseWave.value.shift()
+        }
+      }
+      
+      if (data.bph !== null && data.bph !== undefined) {
+        brPhaseWave.value.push(data.bph)
+        if (brPhaseWave.value.length > 300) {
+          brPhaseWave.value.shift()
+        }
+      }
+      
+      // 立即绘制
+      nextTick(() => {
+        drawPhaseWave(hrCanvas.value, hrPhaseWave.value, '#FF4D4D')
+        drawPhaseWave(brCanvas.value, brPhaseWave.value, '#33B555')
+      })
+    }
+  } catch (e) {
+    console.warn('[Index] 无法读取 health.json:', e.message)
+  }
+}
 
 async function fetchRealTimeData() {
   try {
-    const res = await fetch(`${HLKK_API}/data`)
-    const data = await res.json()
-    
-    // 优先从 raw 获取数值
-    const raw = data.raw || {}
-    let hr = raw.hr
-    let br = raw.br
-    
-    // 如果 raw 没有，从 rt 获取
-    if ((hr === undefined || hr === null) && data.rt) {
-      hr = data.rt.heart_rate ? data.rt.heart_rate[data.rt.heart_rate.length - 1] : null
-    }
-    if ((br === undefined || br === null) && data.rt) {
-      br = data.rt.breath_rate ? data.rt.breath_rate[data.rt.breath_rate.length - 1] : null
-    }
-    
-    // 更新数值
-    realTimeData.value.heartRate = (hr !== undefined && hr !== null && hr > 0) ? Math.round(hr) : '--'
-    realTimeData.value.breathRate = (br !== undefined && br !== null && br > 0) ? Math.round(br) : '--'
-    
-    // 获取波形
-    if (data.rt) {
-      if (data.rt.heart_phase && data.rt.heart_phase.length > 0) {
-        realTimeData.value.hrWave = data.rt.heart_phase.slice(-50)
-      }
-      if (data.rt.breath_phase && data.rt.breath_phase.length > 0) {
-        realTimeData.value.brWave = data.rt.breath_phase.slice(-50)
-      }
-    }
-    
-    // 立即绘制
-    nextTick(() => {
-      drawWave(hrCanvas.value, realTimeData.value.hrWave, '#FF4D4D')
-      drawWave(brCanvas.value, realTimeData.value.brWave, '#33B555')
-    })
+    await fetchHealthJson()
   } catch (e) {
-    console.error('获取HLKK数据失败:', e.message)
+    console.error('获取数据失败:', e.message)
   }
+}
+
+// 绘制相位波形（hph和bph范围0-2π）
+function drawPhaseWave(canvasRef, waveData, color) {
+  const canvas = canvasRef
+  if (!canvas) return
+  
+  const ctx = canvas.getContext('2d')
+  const width = canvas.width || 300
+  const height = canvas.height || 40
+  
+  ctx.clearRect(0, 0, width, height)
+  
+  let dataToDraw = waveData
+  if (!dataToDraw || dataToDraw.length < 2) {
+    // 如果没有数据，画一个简单的横线
+    dataToDraw = []
+    for (let i = 0; i < 10; i++) {
+      dataToDraw.push(Math.PI)
+    }
+  }
+  
+  ctx.beginPath()
+  ctx.strokeStyle = color
+  ctx.lineWidth = 2
+  
+  // 相位范围是0-2π，绘制正弦波
+  dataToDraw.forEach((phase, i) => {
+    const x = (i / (dataToDraw.length - 1)) * width
+    // 相位到正弦值：值范围 -1 到 1，转换为画布坐标
+    const normalizedSin = Math.sin(phase)
+    const y = height/2 - normalizedSin * height * 0.35
+    
+    if (i === 0) {
+      ctx.moveTo(x, y)
+    } else {
+      ctx.lineTo(x, y)
+    }
+  })
+  
+  ctx.stroke()
 }
 
 function drawWave(canvasRef, waveData, color) {
@@ -312,6 +417,9 @@ const city = ref('加载中...')
 const temperature = ref('--')
 const weather = ref('...')
 const humidity = ref('--')
+const windDirection = ref('')
+const windPower = ref('')
+const windIcon = ref('')
 const weatherIcon = ref('')
 const greeting = ref('早安')
 
@@ -406,6 +514,13 @@ async function fetchWeather() {
       temperature.value = data.data.temperature
       weather.value = data.data.weather
       humidity.value = data.data.humidity
+      windDirection.value = data.data.wind_direction || ''
+      // 清理风力数据，避免重复"级"字
+      let rawWindPower = data.data.wind_power || ''
+      if (rawWindPower) {
+        rawWindPower = rawWindPower.replace(/级$/, '')
+      }
+      windPower.value = rawWindPower
       weatherIcon.value = getWeatherIcon(data.data.weather_icon || '999')
     } else if (data.city) {
       // 直接返回数据的情况
@@ -413,6 +528,13 @@ async function fetchWeather() {
       temperature.value = data.temperature
       weather.value = data.weather
       humidity.value = data.humidity
+      windDirection.value = data.wind_direction || ''
+      // 清理风力数据，避免重复"级"字
+      let rawWindPower = data.wind_power || ''
+      if (rawWindPower) {
+        rawWindPower = rawWindPower.replace(/级$/, '')
+      }
+      windPower.value = rawWindPower
       weatherIcon.value = getWeatherIcon(data.weather_icon || '999')
     } else {
       city.value = '获取失败'
@@ -452,20 +574,12 @@ onMounted(() => {
   // 自动翻转
   flipInterval = setInterval(() => {
     isFlipped.value = !isFlipped.value
-  }, 5000)
+  }, 8000)
   
   // 波形流畅更新
   waveInterval = setInterval(() => {
-    // 生成简单的波形
-    generateSimpleWave(realTimeData.value.heartRate, realTimeData.value.hrWave, 70)
-    generateSimpleWave(realTimeData.value.breathRate, realTimeData.value.brWave, 16)
-    
-    // 立即绘制
-    nextTick(() => {
-      drawWave(hrCanvas.value, realTimeData.value.hrWave, '#FF4D4D')
-      drawWave(brCanvas.value, realTimeData.value.brWave, '#33B555')
-    })
-  }, 100)
+    fetchHealthJson()
+  }, 200)
   
   // 初始化Socket连接
   try {
@@ -571,56 +685,81 @@ const startVoiceInput = () => {
   justify-content: space-between;
   gap: 30px;
   margin-top: -40px;
-  margin-bottom: 50px;
+  margin-bottom: 30px;
   flex-wrap: nowrap;
   width: 100%;
 }
 
 .weather-widget {
-  padding: 20px 24px;
+  padding: 16px 20px;
   background: #0f172a;
   color: #fff;
   border-radius: 16px;
   width: 100%;
   font-family: system-ui, sans-serif;
   display: flex;
-  align-items: center;
-  gap: 25px;
+  flex-direction: column;
+  gap: 10px;
   margin-top: 0;
 }
 
-.location {
-  font-size: 28px;
-  font-weight: 600;
-  flex-shrink: 0;
-}
-
-.weather-main {
+.weather-top {
   display: flex;
   align-items: center;
-  gap: 20px;
-  flex: 1;
+  justify-content: space-between;
+  width: 100%;
+  gap: 16px;
+}
+
+.weather-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  margin-top: 8px;
+}
+
+.weather-bottom-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.right-align {
+  margin-left: auto;
+}
+
+.location {
+  font-size: 26px;
+  font-weight: 600;
 }
 
 .weather-icon {
-  font-size: 48px;
+  font-size: 40px;
 }
 
 .temp {
-  font-size: 56px;
+  font-size: 46px;
   font-weight: 700;
 }
 
+.humidity {
+  font-size: 24px;
+  font-weight: 500;
+  color: #fff;
+}
+
 .weather {
-  font-size: 28px;
+  font-size: 26px;
   font-weight: 500;
 }
 
-.humidity {
-  font-size: 12px;
-  opacity: 0.7;
-  flex-shrink: 0;
+.wind {
+  font-size: 26px;
+  font-weight: 500;
+  color: #fff;
 }
+
 .welcome-text {
   flex: 0 0 45%;
   min-width: 0;
@@ -639,8 +778,8 @@ const startVoiceInput = () => {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  min-height: 250px;
-  height: 100%;
+  min-height: 260px;
+  height: 270px;
 }
 .akon-card:hover {
   border-color: #D0D0D0;
@@ -716,7 +855,7 @@ const startVoiceInput = () => {
   transform: scale(1.02);
 }
 
-.main-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-top: 50px; }
+.main-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-top: 30px; }
 .card { background: #FFF; border: 2px solid #F0F0F0; border-radius: 35px; padding: 20px 25px; display: flex; align-items: center; gap: 25px; cursor: pointer; transition: 0.3s; position: relative; overflow: hidden; perspective: 1000px; }
 .card:hover { border-color: #FF7222; background: #FFF9F6; }
 .card-icon { font-size: 50px; }
@@ -763,7 +902,7 @@ const startVoiceInput = () => {
   display: block;
 }
 
-.quick-actions { margin-top: 40px; display: flex; gap: 30px; }
+.quick-actions { margin-top: 30px; display: flex; gap: 30px; }
 .action-btn { flex: 1; height: 120px; border-radius: 30px; display: flex; align-items: center; justify-content: center; font-size: 30px; font-weight: bold; color: #FFF; cursor: pointer; }
 .call { background: #33B555; }
 .sos { background: #FF4D4D; }

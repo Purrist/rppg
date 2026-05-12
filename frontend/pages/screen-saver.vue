@@ -86,12 +86,12 @@ const states = {
   }
 }
 
-const emotionList = Object.keys(states).filter(e => e !== 'sad' && e !== 'angry')
-const currentState = ref('happy')
-const previousStates = ref(['happy'])
+const emotionList = Object.keys(states).filter(e => e !== 'sad' && e !== 'angry' && e !== 'happy' && e !== 'pain')
+// 初始表情从轮播列表里随机选一个，不要用happy
+const currentState = ref(emotionList[0])
+const previousEmotions = ref([emotionList[0]])
 let emotionTimer = null
-let unsubscribe = null
-let isPageLoaded = false
+let unsubscribeStore = null
 
 const faceStyle = computed(() => {
   const state = states[currentState.value]
@@ -122,48 +122,52 @@ function setEmotion(emotion) {
 }
 
 function nextEmotion() {
-  let ind = Math.floor(Math.random() * emotionList.length)
-  if (previousStates.value.indexOf(ind) !== -1) return nextEmotion()
-  previousStates.value.push(ind)
-  previousStates.value = previousStates.value.slice(-4)
-  return emotionList[ind]
+  const availableEmotions = emotionList.filter(e => !previousEmotions.value.includes(e))
+  const selectedEmotion = availableEmotions.length > 0 
+    ? availableEmotions[Math.floor(Math.random() * availableEmotions.length)]
+    : emotionList[Math.floor(Math.random() * emotionList.length)]
+  
+  previousEmotions.value.push(selectedEmotion)
+  previousEmotions.value = previousEmotions.value.slice(-4)
+  return selectedEmotion
 }
 
 function exitScreenSaver() {
-  window.dispatchEvent(new CustomEvent('exit-screen-saver'))
-  router.push('/')
+  // 先显示微笑再退出
+  setEmotion('happy')
+  setTimeout(() => {
+    window.dispatchEvent(new CustomEvent('exit-screen-saver'))
+    router.push('/')
+  }, 500)
 }
 
 function handleScreenSaverClick() {
-  if (isPageLoaded) {
-    exitScreenSaver()
-  }
+  exitScreenSaver()
 }
 
 onMounted(() => {
-  setEmotion('happy')
+  // 初始表情已经在ref声明时设置了，不用再设
   
   emotionTimer = setInterval(() => {
     setEmotion(nextEmotion())
   }, 10000)
 
-  unsubscribe = subscribe((state) => {
+  // 监听系统状态，检测有人走近和正脸识别
+  unsubscribeStore = subscribe((state) => {
     const distance = state.perception?.physiology?.raw?.distance
+    const distanceValid = state.perception?.physiology?.raw?.distance_valid
+    const isHuman = state.perception?.physiology?.raw?.is_human
     const faceDetected = state.perception?.face?.au?.face_detected
-    
-    if (isPageLoaded && distance < 50 && faceDetected) {
+
+    if (distanceValid && typeof distance === 'number' && distance > 0 && distance < 150 && isHuman && faceDetected) {
       exitScreenSaver()
     }
   })
-
-  setTimeout(() => {
-    isPageLoaded = true
-  }, 500)
 })
 
 onUnmounted(() => {
   if (emotionTimer) clearInterval(emotionTimer)
-  if (unsubscribe) unsubscribe()
+  if (unsubscribeStore) unsubscribeStore()
 })
 </script>
 

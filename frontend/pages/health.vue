@@ -26,13 +26,13 @@
             <!-- 心率卡片 -->
             <div class="mini-st" style="display:flex;align-items:center;justify-content:space-between;padding:16px;height:55px">
               <span style="font-size:18px;font-weight:600;color:#64748B">心率</span>
-              <span style="font-size:36px;font-weight:700;color:#0D9488">{{ healthData.hr }}</span>
+              <span style="font-size:36px;font-weight:700;color:#0D9488">{{ jsonHealthData.hr }}</span>
               <span style="font-size:18px;color:#94A3B8">bpm</span>
             </div>
             <!-- 呼吸率卡片 -->
             <div class="mini-st" style="display:flex;align-items:center;justify-content:space-between;padding:16px;height:55px">
               <span style="font-size:18px;font-weight:600;color:#64748B">呼吸率</span>
-              <span style="font-size:36px;font-weight:700;color:#F97316">{{ healthData.br }}</span>
+              <span style="font-size:36px;font-weight:700;color:#F97316">{{ jsonHealthData.br }}</span>
               <span style="font-size:18px;color:#94A3B8">/min</span>
             </div>
             <!-- 心肺频率比指针 -->
@@ -40,7 +40,7 @@
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
                 <h3 style="font-size:18px;font-weight:700;color:#1E293B">心肺频率比</h3>
                 <span style="padding:0px 12px;border-radius:16px;font-size:14px;font-weight:600" :style="getCrStatusStyle()">
-                  {{ getCrStatus() }}
+                  {{ jsonHealthData.cr_label || getCrStatus() }}
                 </span>
               </div>
               <div style="display:flex;flex-direction:column;align-items:center">
@@ -52,7 +52,7 @@
                     <circle cx="80" cy="80" r="3" fill="#1E293B"/>
                   </svg>
                 </div>
-                <div class="m-val text-3xl mt-1" style="color:#0D9488">{{ healthData.cr }}</div>
+                <div class="m-val text-3xl mt-1" style="color:#0D9488">{{ jsonHealthData.cr > 0 ? jsonHealthData.cr.toFixed(1) : healthData.cr }}</div>
               </div>
             </div>
             <!-- 呼吸急促度指针 -->
@@ -60,7 +60,7 @@
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
                 <h3 style="font-size:18px;font-weight:700;color:#1E293B">呼吸急促度</h3>
                 <span style="padding:0px 12px;border-radius:16px;font-size:14px;font-weight:600" :style="getBrelStatusStyle()">
-                  {{ getBrelStatus() }}
+                  {{ jsonHealthData.brel_label || getBrelStatus() }}
                 </span>
               </div>
               <div style="display:flex;flex-direction:column;align-items:center">
@@ -72,7 +72,7 @@
                     <circle cx="80" cy="80" r="3" fill="#1E293B"/>
                   </svg>
                 </div>
-                <div class="m-val text-3xl mt-1" :style="{color:brelColor}">{{ healthData.brel }}%</div>
+                <div class="m-val text-3xl mt-1" :style="{color:brelColor}">{{ jsonHealthData.brel !== 0 ? jsonHealthData.brel.toFixed(0) : healthData.brel }}%</div>
               </div>
             </div>
           </div>
@@ -84,7 +84,10 @@
         <!-- 健康趋势 -->
         <div class="card" style="padding:20px">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-            <div style="font-size:17px;font-weight:700;color:#1E293B">健康趋势</div>
+            <div style="display:flex;align-items:center;gap:12px">
+              <div style="font-size:17px;font-weight:700;color:#1E293B">健康趋势</div>
+              <span style="font-size:14px;color:#64748B">心肺频率比</span>
+            </div>
             <div style="display:flex;gap:6px">
               <button class="tab-btn2" :class="{active:period==='day'}" @click="period='day'">日</button>
               <button class="tab-btn2" :class="{active:period==='week'}" @click="period='week'">周</button>
@@ -143,28 +146,28 @@
     <section v-show="activeTab=='emotion'" class="split fade-up" style="margin-top:20px">
       <div class="left-col">
         <!-- 实时情绪 -->
-        <div class="card emotion-card" style="padding:16px">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-            <span style="font-size:16px;font-weight:600;color:#1E293B">实时情绪</span>
+        <div class="card emotion-card" style="height:35;padding:16px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+            <span style="font-size:17px;font-weight:700;color:#1E293B">实时情绪</span>
             <div style="display:flex;align-items:center;gap:12px">
               <span :style="{color:personDetected?'#10B981':'#94A3B8',fontSize:'16px',fontWeight:'600'}">
                 {{ personDetected ? '有人' : '无人' }}
               </span>
             </div>
           </div>
-          <div class="emo-bar" style="height:12px;margin-bottom:12px">
-            <div :style="{width:(fusionEmotion.positive||emotion.fusion.positive)+'%',background:'#10B981'}"></div>
-            <div :style="{width:(fusionEmotion.neutral||emotion.fusion.neutral)+'%',background:'#94A3B8'}"></div>
-            <div :style="{width:(fusionEmotion.negative||emotion.fusion.negative)+'%',background:'#EF4444'}"></div>
+          <div class="emo-bar" style="height:12px;margin-bottom:16px">
+            <div :style="{width:(fusionEmotionResult.scores.positive*100)+'%',background:'#10B981'}"></div>
+            <div :style="{width:(fusionEmotionResult.scores.neutral*100)+'%',background:'#94A3B8'}"></div>
+            <div :style="{width:(fusionEmotionResult.scores.negative*100)+'%',background:'#EF4444'}"></div>
           </div>
-          <div style="display:flex;align-items:center;justify-content:center">
-            <span style="font-size:14px;color:#64748B;margin-right:4px">积极:</span>
-            <span style="font-size:28px;color:#10B981;font-weight:700">{{ personDetected ? ((fusionEmotion.positive||emotion.fusion.positive)).toFixed(0) + '%' : '--' }}</span>
+          <div style="display:flex;align-items:center;justify-content:space-around">
+            <span style="font-size:28px;font-weight:700" :style="{color:fusionEmotionResult.emotion === '积极' ? '#10B981' : fusionEmotionResult.emotion === '消极' ? '#EF4444' : '#94A3B8'}">{{ fusionEmotionResult.emotion }}</span>
+            <span style="font-size:28px;color:#1E293B;font-weight:700">{{ fusionEmotionResult.confidence === '--' ? '--' : (fusionEmotionResult.confidence * 100).toFixed(0) + '%' }}</span>
           </div>
         </div>
 
         <!-- 压力值 -->
-        <div class="card" style="padding:12px;height:200px;display:flex;flex-direction:column;align-items:center">
+        <div class="card" style="padding:12px;height:180px;display:flex;flex-direction:column;align-items:center">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;align-self:stretch">
             <h3 style="font-size:18px;font-weight:700;color:#1E293B">压力值</h3>
             <span style="padding:4px 12px;border-radius:16px;font-size:14px;font-weight:600" :style="getStressStatusStyle()">
@@ -172,14 +175,14 @@
             </span>
           </div>
           <div class="gauge-container">
-            <svg viewBox="0 0 160 88" width="160" height="88">
+            <svg viewBox="0 0 160 88" width="140" height="77">
               <path d="M 20 80 A 60 60 0 0 1 140 80" fill="none" stroke="#E2E8F0" stroke-width="10" stroke-linecap="round"/>
               <path d="M 20 80 A 60 60 0 0 1 140 80" fill="none" :stroke="pressureColor" stroke-width="10" stroke-linecap="round" :stroke-dasharray="stressProgress" :stroke-dashoffset="stressOffset"/>
               <line x1="80" y1="80" :x2="stressNeedleX" :y2="stressNeedleY" stroke="#1E293B" stroke-width="2" stroke-linecap="round"/>
               <circle cx="80" cy="80" r="3" fill="#1E293B"/>
             </svg>
           </div>
-          <div class="m-val text-3xl mt-1" :style="{color:pressureColor}">{{ emotion.stress }}</div>
+          <div class="m-val text-3xl mt-1" :style="{color:pressureColor}">{{ estimatedStress }}</div>
         </div>
 
         <!-- 视频流 -->
@@ -227,80 +230,125 @@
         <!-- 情绪分析 -->
         <div class="card" style="padding:20px">
           <h3 style="font-size:17px;font-weight:700;color:#1E293B;margin-bottom:16px">情绪分析</h3>
-          <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:16px">
-            <div class="mini-st" style="padding:12px;display:flex;align-items:center;justify-content:space-between">
+          <div style="display:flex;gap:12px;margin-bottom:16px">
+            <div class="mini-st" style="height:15px;flex:1;padding:20px;display:flex;align-items:center;justify-content:space-between">
               <span style="font-size:14px;color:#64748B">主导</span>
               <span style="font-size:20px;font-weight:700;color:#0D9488">{{ emotion.analysis.dominant }}</span>
             </div>
-            <div class="mini-st" style="padding:12px;display:flex;align-items:center;justify-content:space-between">
+            <div class="mini-st" style="height:15px;flex:1;padding:20px;display:flex;align-items:center;justify-content:space-between">
               <span style="font-size:14px;color:#64748B">稳定性</span>
               <span style="font-size:20px;font-weight:700;color:#10B981">{{ emotion.analysis.stability }}</span>
             </div>
-            <div class="mini-st" style="padding:12px;display:flex;align-items:center;justify-content:space-between">
+            <div class="mini-st" style="height:15px;flex:1;padding:20px;display:flex;align-items:center;justify-content:space-between">
               <span style="font-size:14px;color:#64748B">波动</span>
               <span style="font-size:20px;font-weight:700;color:#F97316">{{ emotion.analysis.volatility }}</span>
             </div>
           </div>
-          <div style="display:flex;align-items:center;gap:16px;padding:10px 12px;background:#f8f8f8;border-radius:10px">
-            <span style="font-size:14px;font-weight:600;color:#1E293B">建议</span>
-            <div class="adv-item" style="padding:0"><i class="fas fa-spa text-teal-500" style="font-size:16px"></i><span style="font-size:14px;color:#475569">深呼吸练习维持情绪稳定</span></div>
+          <div class="card" style="padding:12px;background:#F8FAFC">
+            <div style="display:flex;align-items:center;gap:14px;margin-bottom:10px">
+              <span style="font-size:14px;font-weight:600;color:#1E293B">建议</span>
+              <i class="fas fa-spa" style="font-size:16px;color:#0D9488"></i>
+            </div>
+            <div style="font-size:14px;color:#475569;line-height:1.7">
+            进行5-10分钟的深呼吸练习，帮助维持情绪稳定<br/>
+            </div>
           </div>
         </div>
       </div>
     </section>
 
     <!-- 睡眠健康 -->
-    <section v-show="activeTab=='sleep'" class="split fade-up">
+    <section v-show="activeTab=='sleep'" class="split fade-up" style="margin-top:20px">
       <div class="left-col">
-        <!-- 睡眠得分 -->
-        <div class="card" style="padding:12px;display:flex;flex-direction:column;align-items:center">
-          <h3 class="font-bold text-xs mb-2 self-start">睡眠得分</h3>
-          <div class="relative" style="width:110px;height:110px">
-            <svg viewBox="0 0 110 110" class="prog-ring" width="110" height="110">
-              <circle cx="55" cy="55" r="46" fill="none" stroke="#F1F5F9" stroke-width="8"/>
-              <circle cx="55" cy="55" r="46" fill="none" stroke="#0D9488" stroke-width="8" stroke-linecap="round" :stroke-dasharray="2*Math.PI*46" :stroke-dashoffset="2*Math.PI*46*(1-sleepScore/100)"/>
+        <!-- 睡眠比例卡片 -->
+        <div class="card" style="padding:16px">
+          <h3 style="font-size:17px;font-weight:700;margin-bottom:12px;color:#1E293B">睡眠比例</h3>
+          <div style="display:flex;justify-content:center;align-items:center">
+            <svg viewBox="0 0 200 200" width="140" height="140">
+              <!-- 背景圆环 -->
+              <circle cx="100" cy="100" r="80" fill="none" stroke="#F1F5F9" stroke-width="30"/>
+              
+              <!-- 各阶段圆环 -->
+              <circle cx="100" cy="100" r="80" fill="none" stroke="#0F766E" stroke-width="30"
+                      :stroke-dasharray="`${sleepDeep/totalSleep*2*Math.PI*80} ${2*Math.PI*80}`"
+                      stroke-linecap="round"/>
+              <circle cx="100" cy="100" r="80" fill="none" stroke="#14B8A6" stroke-width="30"
+                      :stroke-dasharray="`${sleepLight/totalSleep*2*Math.PI*80} ${2*Math.PI*80}`"
+                      :stroke-dashoffset="`-${sleepDeep/totalSleep*2*Math.PI*80}`"
+                      stroke-linecap="round"/>
+              <circle cx="100" cy="100" r="80" fill="none" stroke="#F59E0B" stroke-width="30"
+                      :stroke-dasharray="`${sleepRem/totalSleep*2*Math.PI*80} ${2*Math.PI*80}`"
+                      :stroke-dashoffset="`-${(sleepDeep + sleepLight)/totalSleep*2*Math.PI*80}`"
+                      stroke-linecap="round"/>
+              <circle cx="100" cy="100" r="80" fill="none" stroke="#EF4444" stroke-width="30"
+                      :stroke-dasharray="`${sleepAwake/totalSleep*2*Math.PI*80} ${2*Math.PI*80}`"
+                      :stroke-dashoffset="`-${(sleepDeep + sleepLight + sleepRem)/totalSleep*2*Math.PI*80}`"
+                      stroke-linecap="round"/>
+              
+              <!-- 中心文字 -->
+              <text x="100" y="92" text-anchor="middle" font-size="26" font-weight="700" fill="#1E293B">{{(sleepDeep+sleepLight+sleepRem).toFixed(1)}}h</text>
+              <text x="100" y="118" text-anchor="middle" font-size="14" font-weight="500" fill="#64748B">总睡眠</text>
             </svg>
-            <div class="absolute inset-0 flex flex-col items-center justify-center" style="transform:rotate(90deg)">
-              <span class="m-val text-2xl" style="color:#0D9488">{{ sleepScore }}</span>
-              <span class="text-[9px] text-slate-400">/100</span>
+          </div>
+          
+          <!-- 四行详情：上下结构 -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px 16px;margin-top:18px">
+            <div style="padding:8px 10px;background:#F0FDFA;border-radius:6px">
+              <div style="display:flex;align-items:center;gap:6px">
+                <span style="width:12px;height:12px;border-radius:3px;background:#0F766E"></span>
+                <span style="font-size:12px;color:#64748B">深睡</span>
+              </div>
+              <div style="display:flex;gap:10px;font-size:14px;font-weight:600;color:#0F766E;margin-top:8px">
+                <span>{{sleepDeep}}h</span>
+                <span>{{(sleepDeep/totalSleep*100).toFixed(0)}}%</span>
+              </div>
+            </div>
+            <div style="padding:8px 10px;background:#F0FDFA;border-radius:6px">
+              <div style="display:flex;align-items:center;gap:6px">
+                <span style="width:12px;height:12px;border-radius:3px;background:#14B8A6"></span>
+                <span style="font-size:12px;color:#64748B">浅睡</span>
+              </div>
+              <div style="display:flex;gap:10px;font-size:14px;font-weight:600;color:#14B8A6;margin-top:8px">
+                <span>{{sleepLight}}h</span>
+                <span>{{(sleepLight/totalSleep*100).toFixed(0)}}%</span>
+              </div>
+            </div>
+            <div style="padding:8px 10px;background:#F0FDFA;border-radius:6px">
+              <div style="display:flex;align-items:center;gap:6px">
+                <span style="width:12px;height:12px;border-radius:3px;background:#F59E0B"></span>
+                <span style="font-size:12px;color:#64748B">REM</span>
+              </div>
+              <div style="display:flex;gap:10px;font-size:14px;font-weight:600;color:#F59E0B;margin-top:8px">
+                <span>{{sleepRem}}h</span>
+                <span>{{(sleepRem/totalSleep*100).toFixed(0)}}%</span>
+              </div>
+            </div>
+            <div style="padding:8px 10px;background:#FEF2F2;border-radius:6px">
+              <div style="display:flex;align-items:center;gap:6px">
+                <span style="width:12px;height:12px;border-radius:3px;background:#EF4444"></span>
+                <span style="font-size:12px;color:#64748B">清醒</span>
+              </div>
+              <div style="display:flex;gap:10px;font-size:14px;font-weight:600;color:#EF4444;margin-top:8px">
+                <span>{{sleepAwake}}h</span>
+                <span>{{(sleepAwake/totalSleep*100).toFixed(0)}}%</span>
+              </div>
             </div>
           </div>
-          <div class="text-[11px] font-semibold mt-2" style="color:#0D9488">{{ sleepScoreLabel }}</div>
         </div>
 
-        <!-- 睡眠比例 -->
-        <div class="card" style="padding:12px">
-          <div class="flex items-center gap-1.5 mb-2"><div class="w-4 h-4 rounded bg-teal-50 flex items-center justify-center"><i class="fas fa-chart-pie text-teal-600" style="font-size:8px"></i></div><h3 class="font-bold text-xs">睡眠比例</h3></div>
-          <div class="sleep-bar mb-2">
-            <div :style="{width:sleepDeep/totalSleep*100+'%',background:'#0F766E'}"></div>
-            <div :style="{width:sleepLight/totalSleep*100+'%',background:'#14B8A6'}"></div>
-            <div :style="{width:sleepRem/totalSleep*100+'%',background:'#F59E0B'}"></div>
-            <div :style="{width:sleepAwake/totalSleep*100+'%',background:'#EF4444'}"></div>
-          </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 8px">
-            <div class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded" style="background:#0F766E"></span><span class="text-[9px] text-slate-500">深睡</span><span class="text-[11px] font-bold ml-auto">{{ sleepDeep }}h</span></div>
-            <div class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded" style="background:#14B8A6"></span><span class="text-[9px] text-slate-500">浅睡</span><span class="text-[11px] font-bold ml-auto">{{ sleepLight }}h</span></div>
-            <div class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded" style="background:#F59E0B"></span><span class="text-[9px] text-slate-500">REM</span><span class="text-[11px] font-bold ml-auto">{{ sleepRem }}h</span></div>
-            <div class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded" style="background:#EF4444"></span><span class="text-[9px] text-slate-500">清醒</span><span class="text-[11px] font-bold ml-auto">{{ sleepAwake }}h</span></div>
-          </div>
-          <div class="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between">
-            <span class="text-[9px] text-slate-400">总睡眠</span>
-            <span class="m-val text-sm">{{(sleepDeep+sleepLight+sleepRem).toFixed(1)}}h</span>
-          </div>
-        </div>
-
-        <!-- 睡眠记录 -->
-        <div class="card" style="padding:12px;flex:1;min-height:0;display:flex;flex-direction:column">
-          <div class="flex items-center gap-1.5 mb-2"><div class="w-4 h-4 rounded bg-blue-50 flex items-center justify-center"><i class="fas fa-clock-rotate-left text-blue-500" style="font-size:8px"></i></div><h3 class="font-bold text-xs">睡眠记录</h3></div>
-          <div class="flex flex-col overflow-y-auto flex-1 min-h-0" style="margin:0 -4px;padding:0 4px">
-            <div class="rec-row" v-for="(r,i) in sleepRecords" :key="i">
-              <div class="flex-1 min-w-0">
-                <div class="text-[11px] font-medium text-slate-700">{{r.date}}</div>
-                <div class="text-[9px] text-slate-400">{{r.start}} - {{r.end}}</div>
+        <!-- 睡眠记录近两天 -->
+        <div class="card" style="padding:16px">
+          <h3 style="font-size:17px;font-weight:700;margin-bottom:12px;color:#1E293B">睡眠记录</h3>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <div v-for="(r,i) in sleepRecords.slice(0,2)" :key="i"
+                 style="display:flex;justify-content:space-between;align-items:center;padding:12px;background:#F8FAFC;border-radius:8px">
+              <div>
+                <div style="font-size:14px;font-weight:600;color:#1E293B">{{r.date}}</div>
+                <div style="font-size:12px;color:#94A3B8">{{r.start}} - {{r.end}}</div>
               </div>
-              <div class="text-right">
-                <div class="m-val text-sm" :style="{color:r.score>=80?'#0D9488':r.score>=60?'#F97316':'#EF4444'}">{{r.score}}</div>
-                <div class="text-[9px] text-slate-400">{{r.duration}}h</div>
+              <div style="text-align:right">
+                <div style="font-size:20px;font-weight:700" :style="{color:r.score>=80?'#0D9488':r.score>=60?'#F97316':'#EF4444'}">{{r.score}}</div>
+                <div style="font-size:12px;color:#94A3B8">{{r.duration}}h</div>
               </div>
             </div>
           </div>
@@ -308,90 +356,66 @@
       </div>
 
       <div class="right-col">
-        <!-- 睡眠时长趋势 -->
-        <div class="card" style="padding:12px">
-          <div class="flex items-center justify-between mb-2">
-            <div class="flex items-center gap-1.5"><div class="w-4 h-4 rounded bg-violet-50 flex items-center justify-center"><i class="fas fa-chart-area text-violet-500" style="font-size:8px"></i></div><h3 class="font-bold text-xs">睡眠时长趋势</h3></div>
-            <div class="flex gap-2 text-[9px]">
-              <span class="flex items-center gap-0.5"><span class="w-2 h-2 rounded" style="background:#0F766E"></span>深睡</span>
-              <span class="flex items-center gap-0.5"><span class="w-2 h-2 rounded" style="background:#14B8A6"></span>浅睡</span>
-              <span class="flex items-center gap-0.5"><span class="w-2 h-2 rounded" style="background:#F59E0B"></span>REM</span>
-              <span class="flex items-center gap-0.5"><span class="w-2 h-2 rounded" style="background:#EF4444"></span>清醒</span>
+        <!-- 睡眠趋势 -->
+        <div class="card" style="padding:16px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+            <div style="font-size:17px;font-weight:700;color:#1E293B">睡眠趋势</div>
+            <div style="display:flex;gap:16px;flex-wrap:wrap" v-if="sleepPeriod==='day'">
+              <div style="display:flex;align-items:center;gap:4px"><span style="width:16px;height:10px;background:#0F766E;border-radius:2px"></span><span style="font-size:11px;color:#64748B">深睡</span></div>
+              <div style="display:flex;align-items:center;gap:4px"><span style="width:16px;height:10px;background:#14B8A6;border-radius:2px"></span><span style="font-size:11px;color:#64748B">浅睡</span></div>
+              <div style="display:flex;align-items:center;gap:4px"><span style="width:16px;height:10px;background:#F59E0B;border-radius:2px"></span><span style="font-size:11px;color:#64748B">REM</span></div>
+            </div>
+            <div style="display:flex;gap:12px" v-if="sleepPeriod==='week'">
+              <div style="display:flex;align-items:center;gap:4px"><span style="width:16px;height:10px;background:#0F766E;border-radius:2px"></span><span style="font-size:11px;color:#64748B">深睡</span></div>
+              <div style="display:flex;align-items:center;gap:4px"><span style="width:16px;height:10px;background:#14B8A6;border-radius:2px"></span><span style="font-size:11px;color:#64748B">浅睡</span></div>
+              <div style="display:flex;align-items:center;gap:4px"><span style="width:16px;height:10px;background:#F59E0B;border-radius:2px"></span><span style="font-size:11px;color:#64748B">REM</span></div>
+              <div style="display:flex;align-items:center;gap:4px"><span style="width:16px;height:10px;background:#EF4444;border-radius:2px"></span><span style="font-size:11px;color:#64748B">清醒</span></div>
+            </div>
+            <div style="display:flex;gap:12px" v-if="sleepPeriod==='year'">
+              <div style="display:flex;align-items:center;gap:4px"><span style="width:16px;height:10px;background:#0D9488;border-radius:2px"></span><span style="font-size:11px;color:#64748B">睡眠时长</span></div>
+            </div>
+            <div style="display:flex;gap:6px">
+              <button class="tab-btn2" :class="{active:sleepPeriod==='day'}" @click="sleepPeriod='day'">日</button>
+              <button class="tab-btn2" :class="{active:sleepPeriod==='week'}" @click="sleepPeriod='week'">周</button>
+              <button class="tab-btn2" :class="{active:sleepPeriod==='year'}" @click="sleepPeriod='year'">年</button>
             </div>
           </div>
-          <div class="bar-chart">
-            <div class="chart-bars">
-              <div 
-                v-for="(item, index) in sleepDurationData" 
-                :key="index"
-                class="chart-bar sleep-bar"
-                :style="{ height: (item / 10 * 100) + '%' }"
-              >
-                <div class="bar-value">{{ item }}h</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Lissajous + 相位差 -->
-        <div class="right-2col">
-          <div class="card" style="padding:12px">
-            <div class="flex items-center justify-between mb-1.5">
-              <div class="flex items-center gap-1"><div class="w-4 h-4 rounded bg-indigo-50 flex items-center justify-center"><i class="fas fa-bezier-curve text-indigo-500" style="font-size:8px"></i></div><span class="font-bold text-[11px]">心肺相空间</span></div>
-              <span class="text-[9px] text-slate-400">HR vs BR</span>
-            </div>
-            <div class="lissajous-chart">
-              <svg viewBox="0 0 200 200">
-                <circle cx="100" cy="100" r="70" fill="none" stroke="#e2e8f0" stroke-width="1" />
-                <circle cx="100" cy="100" r="50" fill="none" stroke="#e2e8f0" stroke-width="1" />
-                <circle cx="100" cy="100" r="30" fill="none" stroke="#e2e8f0" stroke-width="1" />
-                <polyline :points="lissajousPoints" fill="none" stroke="#6366F1" stroke-width="1.5" />
-              </svg>
-            </div>
-          </div>
-          <div class="card" style="padding:12px">
-            <div class="flex items-center justify-between mb-1.5">
-              <div class="flex items-center gap-1"><div class="w-4 h-4 rounded bg-violet-50 flex items-center justify-center"><i class="fas fa-circle-notch text-violet-500" style="font-size:8px"></i></div><span class="font-bold text-[11px]">相位差圆周</span></div>
-              <span class="m-val text-sm" style="color:#6366F1">{{ healthData.phaseDiff }}°</span>
-            </div>
-            <div class="polar-chart">
-              <svg viewBox="0 0 150 150">
-                <circle cx="75" cy="75" r="60" fill="none" stroke="#e2e8f0" stroke-width="2" />
-                <circle cx="75" cy="75" r="40" fill="none" stroke="#e2e8f0" stroke-width="1" />
-                <circle cx="75" cy="75" r="20" fill="none" stroke="#e2e8f0" stroke-width="1" />
-                <circle cx="75" cy="75" r="55" fill="none" stroke="#6366F1" stroke-width="8" :stroke-dasharray="phaseDashArray" :stroke-dashoffset="-healthData.phaseDiff * 1.8" />
-                <circle cx="75" cy="75" r="8" fill="#6366F1" />
-              </svg>
-            </div>
+          <div style="height:200px;position:relative">
+            <canvas ref="sleepChartCanvas"></canvas>
           </div>
         </div>
 
-        <!-- PLV + 解读 -->
-        <div class="right-2col">
-          <div class="card" style="padding:12px;display:flex;flex-direction:column;align-items:center;justify-content:center">
-            <h3 class="font-bold text-[11px] mb-2 self-start">相位锁定值</h3>
-            <div class="relative" style="width:110px;height:110px">
-              <svg viewBox="0 0 110 110" class="prog-ring" width="110" height="110">
-                <circle cx="55" cy="55" r="44" fill="none" stroke="#F1F5F9" stroke-width="8"/>
-                <circle cx="55" cy="55" r="44" fill="none" stroke="#6366F1" stroke-width="8" stroke-linecap="round" :stroke-dasharray="2*Math.PI*44" :stroke-dashoffset="2*Math.PI*44*(1-sleepPlv)"/>
-              </svg>
-              <div class="absolute inset-0 flex flex-col items-center justify-center" style="transform:rotate(90deg)">
-                <span class="m-val text-xl" style="color:#6366F1">{{ sleepPlv }}</span>
+        <!-- 解读与建议 -->
+        <div class="card" style="padding:16px">
+          <h3 style="font-size:17px;font-weight:700;margin-bottom:12px;color:#1E293B">解读与建议</h3>
+          
+          <!-- 睡眠解读 -->
+          <div style="background:#F0FDFA;border-radius:8px;padding:12px;border:1px solid #CCFBF1;margin-bottom:12px">
+            <div style="font-size:14px;font-weight:600;color:#0F766E;margin-bottom:6px">睡眠解读</div>
+            <p style="font-size:13px;color:#0F766E;line-height:1.6">
+              深睡占比{{(sleepDeep/totalSleep*100).toFixed(0)}}%，接近推荐水平。REM充足，心肺耦合强(PLV={{sleepPlv}})，自主神经调节良好。
+            </p>
+          </div>
+          
+          <!-- 建议列表 -->
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <div style="display:flex;align-items:flex-start;gap:10px;padding:10px;background:#F8FAFC;border-radius:8px">
+              <div style="width:28px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center;background:#F0FDFA">
+                <i class="fas fa-clock" style="font-size:14px;color:#0D9488"></i>
+              </div>
+              <div style="flex:1">
+                <div style="font-size:14px;font-weight:600;color:#1E293B">固定作息</div>
+                <div style="font-size:12px;color:#64748B">同一时间入睡起床</div>
               </div>
             </div>
-            <div class="text-[9px] text-slate-400 mt-2">心肺耦合强度</div>
-            <div class="text-[10px] font-semibold" style="color:#6366F1">强耦合</div>
-          </div>
-          <div class="card" style="padding:12px">
-            <div class="flex items-center gap-1.5 mb-2"><div class="w-4 h-4 rounded bg-teal-50 flex items-center justify-center"><i class="fas fa-file-medical text-teal-600" style="font-size:8px"></i></div><h3 class="font-bold text-xs">解读与建议</h3></div>
-            <div class="bg-teal-50/50 rounded-lg p-2.5 border border-teal-100 mb-2">
-              <div class="text-[10px] font-semibold text-teal-800 mb-0.5">睡眠解读</div>
-              <p class="text-[9px] text-teal-700 leading-relaxed">深睡占比{{(sleepDeep/totalSleep*100).toFixed(0)}}%，接近推荐水平。REM充足，心肺耦合强(PLV={{sleepPlv}})，自主神经调节良好。</p>
-            </div>
-            <div class="flex flex-col gap-1.5">
-              <div class="adv-item" v-for="(a,i) in sleepAdvices" :key="i">
-                <div class="w-5 h-5 rounded flex items-center justify-center shrink-0" :style="{background:a.bg}"><i :class="a.icon" style="font-size:8px" :style="{color:a.color}"></i></div>
-                <div><div class="text-[10px] font-semibold text-slate-700">{{a.title}}</div><div class="text-[9px] text-slate-400">{{a.desc}}</div></div>
+            
+            <div style="display:flex;align-items:flex-start;gap:10px;padding:10px;background:#F8FAFC;border-radius:8px">
+              <div style="width:28px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center;background:#FFF7ED">
+                <i class="fas fa-book-open" style="font-size:14px;color:#F97316"></i>
+              </div>
+              <div style="flex:1">
+                <div style="font-size:14px;font-weight:600;color:#1E293B">睡前放松</div>
+                <div style="font-size:12px;color:#64748B">避免蓝光刺激</div>
               </div>
             </div>
           </div>
@@ -405,24 +429,91 @@
 import { ref, computed, onMounted, onUnmounted, watchEffect } from 'vue'
 import { useRouter } from 'vue-router'
 import { watch } from 'vue'
-import systemStore from '../core/systemStore.js';
 
 const router = useRouter();
 const HLKK_PORT = 5020;
+const BACKEND_PORT = 5000;
+
+// 动态获取后端地址
+const getBackendHost = () => {
+  if (typeof window === 'undefined') return 'localhost'
+  const host = window.location.hostname
+  return host || 'localhost'
+}
+
+const backendHost = getBackendHost()
+const backendUrl = `http://${backendHost}:${BACKEND_PORT}`
+const hlkkUrl = `http://${backendHost}:${HLKK_PORT}`
+
+console.log('[Health] 后端地址:', backendUrl)
+console.log('[Health] HLKK地址:', hlkkUrl)
+
 const activeTab = ref('cardio');
 const period = ref('day');
 const emoPeriod = ref('day');
+const sleepPeriod = ref('day');
 const currentTime = ref('');
 
-// SystemStore 数据
-const systemState = ref({});
-let unsubscribeStore = null;
+// 从 JSON 文件获取的数据
+const jsonEmotionData = ref({
+  timestamp: '',
+  elapsed: 0,
+  au: { emotion: 'no_face', confidence: 0, scores: { neutral: 0, positive: 0, negative: 0 }, pose: 'front', pitch: 0, yaw: 0, au_features: {} },
+  fer: { label: 'neutral', conf: 0, probs_3: { neutral: 0, positive: 0, negative: 0 } },
+  fusion: { emotion: 'no_face', confidence: 0, scores: { neutral: 0, positive: 0, negative: 0 } }
+});
 
-// 从 SystemStore 获取的感知数据
-const perception = computed(() => systemState.value.perception || {});
-const personDetected = computed(() => perception.value.personDetected || false);
-const faceData = computed(() => perception.value.face || {});
-const fusionEmotion = computed(() => faceData.value.fusion || {});
+const jsonHealthData = ref({
+  time: 0,
+  hr: 72,
+  br: 16,
+  hph: 0,
+  bph: 0,
+  is_human: 0,
+  distance: 0,
+  distance_valid: 0,
+  signal_state: 'INIT',
+  hr_valid: false,
+  br_valid: false,
+  phase_valid: false,
+  hrr: 0,
+  hrr_label: '',
+  slope: 0,
+  slope_label: '',
+  brv: 0,
+  brv_label: '',
+  brel: 0,
+  brel_label: '',
+  cr: 0,
+  cr_label: '',
+  plv: 0.9,
+  plv_label: ''
+});
+
+// 有人/无人判断（优先使用 emotion.json 的融合情绪）
+const personDetected = computed(() => {
+  return jsonEmotionData.value.fusion.emotion !== 'no_face';
+});
+
+// 融合情绪结果
+const fusionEmotionResult = computed(() => {
+  const fusion = jsonEmotionData.value.fusion;
+  if (!personDetected.value) {
+    return { emotion: '--', confidence: '--', scores: { neutral: 0, positive: 0, negative: 0 } };
+  }
+  return {
+    emotion: fusion.emotion === 'positive' ? '积极' : fusion.emotion === 'negative' ? '消极' : '中性',
+    confidence: fusion.confidence,
+    scores: fusion.scores
+  };
+});
+
+// 从 PLV 值估算压力值 (PLV越高，压力越低)
+const estimatedStress = computed(() => {
+  const plv = jsonHealthData.value.plv;
+  // PLV范围 0-1，转换为压力值 100-0
+  return Math.max(0, Math.min(100, Math.round((1 - plv) * 100)));
+});
 
 const healthData = ref({ hr: 72, br: 16, cr: 4.5, brel: 15, signal: 'NORMAL', plv: 0.914, phaseDiff: 45, hrr: 38, brv: 12, hrSlope: 0.15 });
 
@@ -538,7 +629,6 @@ async function loadChart() {
 }
 
 async function renderChart(tab) {
-  if (chart) chart.destroy();
   const ctx = chartCanvas.value?.getContext('2d');
   if (!ctx) return;
   
@@ -547,6 +637,54 @@ async function renderChart(tab) {
   
   const d = trendData[tab];
   
+  // 如果图表已存在，只更新数据
+  if (chart) {
+    chart.data.labels = d.labels;
+    
+    if (tab === 'day') {
+      const points = d.values.map(v => (v < MIN || v > MAX) ? 4 : 0);
+      const pColor = d.values.map(v => (v < MIN || v > MAX) ? '#f0654a' : '#0D9488');
+      
+      chart.config.type = 'line';
+      chart.data.datasets = [{
+        data: d.values, borderColor:'#0D9488', borderWidth:2,
+        backgroundColor: ctx.createLinearGradient(0,0,0,200),
+        fill:true, tension:0.4,
+        pointRadius: points, pointBackgroundColor: pColor,
+        pointBorderColor: pColor, pointHoverRadius:5
+      }];
+      const grad = chart.data.datasets[0].backgroundColor;
+      grad.addColorStop(0,'rgba(13,148,136,0.15)');
+      grad.addColorStop(1,'rgba(13,148,136,0)');
+      
+      chart.options = lineOpts();
+      chart.plugins = [rangePlugin];
+    } else {
+      chart.config.type = 'bar';
+      chart.data.datasets = [
+        {label:'正常',data:d.normal,backgroundColor:'rgba(13,148,136,0.7)',borderRadius:4,barPercentage:0.6},
+        {label:'异常',data:d.abnormal,backgroundColor:'rgba(240,101,74,0.7)',borderRadius:4,barPercentage:0.6}
+      ];
+      chart.options = {
+        responsive:true,maintainAspectRatio:false,
+        animation:{duration:300},
+        plugins:{
+          legend:{position:'top',align:'end',labels:{font:{size:11},boxWidth:10,padding:10}},
+          tooltip:{backgroundColor:'#fff',titleColor:'#333',bodyColor:'#333',borderColor:'#eee',borderWidth:1,cornerRadius:6,padding:8}
+        },
+        scales:{
+          x:{stacked:true,grid:{display:false},ticks:{color:'#aaa',font:{size:10}},border:{display:false}},
+          y:{stacked:true,beginAtZero:true,grid:{color:'rgba(0,0,0,0.04)'},ticks:{color:'#aaa',font:{size:10}},border:{display:false}}
+        }
+      };
+    }
+    
+    chart.update();
+    renderStats(tab);
+    return;
+  }
+  
+  // 如果图表不存在，创建新图表
   if (tab === 'day') {
     const points = d.values.map(v => (v < MIN || v > MAX) ? 4 : 0);
     const pColor = d.values.map(v => (v < MIN || v > MAX) ? '#f0654a' : '#0D9488');
@@ -580,7 +718,7 @@ async function renderChart(tab) {
       },
       options:{
         responsive:true,maintainAspectRatio:false,
-        animation:{duration:500},
+        animation:{duration:300},
         plugins:{
           legend:{position:'top',align:'end',labels:{font:{size:11},boxWidth:10,padding:10}},
           tooltip:{backgroundColor:'#fff',titleColor:'#333',bodyColor:'#333',borderColor:'#eee',borderWidth:1,cornerRadius:6,padding:8}
@@ -697,14 +835,14 @@ const stressClass = computed(() => {
 });
 
 const pressureColor = computed(() => {
-  const s = emotion.value.stress;
+  const s = estimatedStress.value;
   if (s < 30) return '#10B981';
   if (s < 60) return '#F97316';
   return '#EF4444';
 });
 
 const pressureLabel = computed(() => {
-  const s = emotion.value.stress;
+  const s = estimatedStress.value;
   if (s < 30) return '放松';
   if (s < 50) return '轻度压力';
   if (s < 70) return '中度压力';
@@ -760,7 +898,7 @@ const brelNeedleY = computed(() => 80 + Math.sin(brelNeedleAngle.value) * 42);
 
 // 压力值仪表盘
 const stressProgress = computed(() => {
-  const stress = Math.min(Math.max(emotion.value.stress, 0), 100);
+  const stress = Math.min(Math.max(estimatedStress.value, 0), 100);
   const circumference = Math.PI * 120;
   return `${stress / 100 * circumference} ${circumference}`;
 });
@@ -768,7 +906,7 @@ const stressProgress = computed(() => {
 const stressOffset = computed(() => 0);
 
 const stressNeedleAngle = computed(() => {
-  const stress = Math.min(Math.max(emotion.value.stress, 0), 100);
+  const stress = Math.min(Math.max(estimatedStress.value, 0), 100);
   return Math.PI + stress / 100 * Math.PI;
 });
 
@@ -777,22 +915,21 @@ const stressNeedleY = computed(() => 80 + Math.sin(stressNeedleAngle.value) * 42
 
 // 主导情绪
 const dominantEmotion = computed(() => {
-  const p = emotion.value.fusion;
-  if (p.positive >= p.neutral && p.positive >= p.negative) return '积极';
-  if (p.neutral >= p.positive && p.neutral >= p.negative) return '中性';
-  return '消极';
+  if (!personDetected.value) return '--';
+  return fusionEmotionResult.value.emotion;
 });
 
 const dominantEmotionColor = computed(() => {
   const e = dominantEmotion.value;
   if (e === '积极') return '#10B981';
   if (e === '中性') return '#94A3B8';
-  return '#EF4444';
+  if (e === '消极') return '#EF4444';
+  return '#94A3B8';
 });
 
 // 压力状态
 const getStressStatus = () => {
-  const stress = emotion.value.stress;
+  const stress = estimatedStress.value;
   if (stress < 30) return '偏低';
   if (stress < 60) return '正常';
   return '偏高';
@@ -833,7 +970,6 @@ const emotionTrendData = {
 };
 
 const renderEmotionChart = async (period) => {
-  if (emotionChart) emotionChart.destroy();
   const ctx = emotionChartCanvas.value?.getContext('2d');
   if (!ctx) return;
   
@@ -842,6 +978,17 @@ const renderEmotionChart = async (period) => {
   
   const d = emotionTrendData[period];
   
+  // 如果图表已存在，只更新数据
+  if (emotionChart) {
+    emotionChart.data.labels = d.labels;
+    emotionChart.data.datasets[0].data = d.positive;
+    emotionChart.data.datasets[1].data = d.stress;
+    emotionChart.update();
+    renderEmotionStats(period);
+    return;
+  }
+  
+  // 如果图表不存在，创建新图表
   emotionChart = new Chart(ctx, {
     type: 'line',
     data: {
@@ -872,6 +1019,7 @@ const renderEmotionChart = async (period) => {
     },
     options: {
       responsive: true, maintainAspectRatio: false,
+      animation:{duration:300},
       plugins: { legend: { display: false } },
       scales: { 
         x: { grid: { display: false }, ticks: { color: '#aaa', font: { size: 10 } }, border: { display: false } }, 
@@ -898,6 +1046,135 @@ watch(emoPeriod, (newVal) => {
   renderEmotionChart(newVal);
 });
 
+// 睡眠趋势图表
+const sleepChartCanvas = ref(null);
+let sleepChart = null;
+
+const sleepTrendData = {
+  day: {
+    labels: ['22:00','23:00','00:00','01:00','02:00','03:00','04:00','05:00','06:00'],
+    // 每个时间段的睡眠阶段：0=清醒, 1=REM, 2=浅睡, 3=深睡
+    stages: [2, 2, 3, 2, 1, 2, 2, 2, 0]
+  },
+  week: {
+    labels: ['周一','周二','周三','周四','周五','周六','周日'],
+    deep: [1.2, 1.5, 1.3, 1.4, 1.6, 1.8, 1.5],
+    light: [3.2, 3.5, 3.0, 3.4, 3.6, 3.8, 3.3],
+    rem: [1.5, 1.8, 1.6, 1.7, 1.9, 2.0, 1.7],
+    awake: [0.4, 0.3, 0.5, 0.3, 0.2, 0.3, 0.4]
+  },
+  year: {
+    labels: ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'],
+    duration: [6.8, 7.0, 6.5, 7.2, 7.5, 7.0, 7.3, 6.8, 7.2, 7.6, 7.1, 7.0]
+  }
+};
+
+const renderSleepChart = async (period) => {
+  const ctx = sleepChartCanvas.value?.getContext('2d');
+  if (!ctx) return;
+
+  const Chart = await loadChart();
+  if (!Chart) return;
+
+  const d = sleepTrendData[period];
+
+  // 销毁旧图表并重新创建（因为图表类型不同）
+  if (sleepChart) {
+    sleepChart.destroy();
+    sleepChart = null;
+  }
+
+  if (period === 'day') {
+    // 日视图：睡眠阶段条形图
+    sleepChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: d.labels,
+        datasets: [{
+          data: d.stages,
+          backgroundColor: d.stages.map(s => {
+            if (s === 0) return '#EF4444';  // 清醒-红色
+            if (s === 1) return '#F59E0B';  // REM-橙色
+            if (s === 2) return '#14B8A6';  // 浅睡-青色
+            if (s === 3) return '#0F766E';  // 深睡-深绿
+            return '#94A3B8';  // 默认灰色
+          }),
+          borderRadius: 4,
+          barPercentage: 0.8
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: { duration: 300 },
+        indexAxis: 'x',
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { grid: { display: false }, ticks: { color: '#64748B', font: { size: 11 } }, border: { display: false } },
+          y: { 
+            display: false,
+            min: -0.5,
+            max: 3.5
+          }
+        }
+      }
+    });
+  } else if (period === 'week') {
+    // 周视图：堆叠柱状图
+    sleepChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: d.labels,
+        datasets: [
+          { label: '深睡', data: d.deep, backgroundColor: '#0F766E', borderRadius: 4, barPercentage: 0.7 },
+          { label: '浅睡', data: d.light, backgroundColor: '#14B8A6', borderRadius: 4, barPercentage: 0.7 },
+          { label: 'REM', data: d.rem, backgroundColor: '#F59E0B', borderRadius: 4, barPercentage: 0.7 },
+          { label: '清醒', data: d.awake, backgroundColor: '#EF4444', borderRadius: 4, barPercentage: 0.7 }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: { duration: 300 },
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { stacked: true, grid: { display: false }, ticks: { color: '#64748B', font: { size: 11 } }, border: { display: false } },
+          y: { stacked: true, beginAtZero: true, grid: { color: 'rgba(0,0,0,0.04)' }, ticks: { color: '#64748B', font: { size: 11 } }, border: { display: false } }
+        }
+      }
+    });
+  } else {
+    // 年视图：睡眠时长柱状图
+    sleepChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: d.labels,
+        datasets: [{
+          label: '睡眠时长',
+          data: d.duration,
+          backgroundColor: '#0D9488',
+          borderRadius: 4,
+          barPercentage: 0.7
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: { duration: 300 },
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { grid: { display: false }, ticks: { color: '#64748B', font: { size: 10 } }, border: { display: false } },
+          y: { beginAtZero: true, max: 10, grid: { color: 'rgba(0,0,0,0.04)' }, ticks: { color: '#64748B', font: { size: 11 } }, border: { display: false } }
+        }
+      }
+    });
+  }
+};
+
+watch(sleepPeriod, (newVal) => {
+  renderSleepChart(newVal);
+});
+
 const phaseDashArray = computed(() => {
   const phase = healthData.value.phaseDiff;
   const circumference = Math.PI * 110;
@@ -913,11 +1190,14 @@ const updateTime = () => {
   currentTime.value = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 };
 
+let waveFrame = 0;
+
 const hrWavePoints = computed(() => {
+  waveFrame++;
   const points = [];
-  for (let i = 0; i <= 50; i++) {
-    const x = (i / 50) * 400;
-    const y = 60 + Math.sin(i * 0.5) * 30 + Math.sin(i * 0.1) * 15 + (Math.random() - 0.5) * 8;
+  for (let i = 0; i <= 30; i++) {
+    const x = (i / 30) * 400;
+    const y = 60 + Math.sin(i * 0.5 + waveFrame * 0.02) * 25 + Math.sin(i * 0.1) * 10;
     points.push(`${x},${y}`);
   }
   return points.join(' ');
@@ -925,9 +1205,9 @@ const hrWavePoints = computed(() => {
 
 const brWavePoints = computed(() => {
   const points = [];
-  for (let i = 0; i <= 50; i++) {
-    const x = (i / 50) * 400;
-    const y = 60 + Math.sin(i * 0.15) * 35 + (Math.random() - 0.5) * 6;
+  for (let i = 0; i <= 30; i++) {
+    const x = (i / 30) * 400;
+    const y = 60 + Math.sin(i * 0.15 + waveFrame * 0.01) * 30;
     points.push(`${x},${y}`);
   }
   return points.join(' ');
@@ -935,8 +1215,8 @@ const brWavePoints = computed(() => {
 
 const lissajousPoints = computed(() => {
   const points = [];
-  for (let i = 0; i <= 64; i++) {
-    const t = (i / 64) * 2 * Math.PI;
+  for (let i = 0; i <= 32; i++) {
+    const t = (i / 32) * 2 * Math.PI + waveFrame * 0.005;
     const x = 100 + 50 * Math.cos(t);
     const y = 100 + 40 * Math.sin(t * 1.5);
     points.push(`${x},${y}`);
@@ -946,9 +1226,9 @@ const lissajousPoints = computed(() => {
 
 const neutralPoints = computed(() => {
   const points = [];
-  for (let i = 0; i <= 60; i++) {
-    const x = (i / 60) * 600;
-    const y = 130 - (30 + Math.sin(i * 0.1) * 10 + Math.random() * 5);
+  for (let i = 0; i <= 30; i++) {
+    const x = (i / 30) * 600;
+    const y = 130 - (30 + Math.sin(i * 0.1 + waveFrame * 0.01) * 8);
     points.push(`${x},${y}`);
   }
   return points.join(' ');
@@ -956,9 +1236,9 @@ const neutralPoints = computed(() => {
 
 const positivePoints = computed(() => {
   const points = [];
-  for (let i = 0; i <= 60; i++) {
-    const x = (i / 60) * 600;
-    const y = 130 - (35 + Math.sin(i * 0.12) * 15 + Math.random() * 5);
+  for (let i = 0; i <= 30; i++) {
+    const x = (i / 30) * 600;
+    const y = 130 - (35 + Math.sin(i * 0.12 + waveFrame * 0.01) * 12);
     points.push(`${x},${y}`);
   }
   return points.join(' ');
@@ -966,9 +1246,9 @@ const positivePoints = computed(() => {
 
 const negativePoints = computed(() => {
   const points = [];
-  for (let i = 0; i <= 60; i++) {
-    const x = (i / 60) * 600;
-    const y = 130 - (15 + Math.sin(i * 0.08) * 8 + Math.random() * 5);
+  for (let i = 0; i <= 30; i++) {
+    const x = (i / 30) * 600;
+    const y = 130 - (15 + Math.sin(i * 0.08 + waveFrame * 0.008) * 6);
     points.push(`${x},${y}`);
   }
   return points.join(' ');
@@ -976,7 +1256,12 @@ const negativePoints = computed(() => {
 
 async function fetchData() {
   try {
-    const res = await fetch(`http://localhost:${HLKK_PORT}/data`);
+    // 从 JSON 文件获取数据
+    await fetchEmotionData();
+    await fetchHealthData();
+    
+    // 从 HLKK 服务获取数据（作为备用）
+    const res = await fetch(`${hlkkUrl}/data`);
     if (res.ok) {
       const data = await res.json();
       healthData.value.hr = data.raw?.hr?.toFixed(0) || 72;
@@ -1001,6 +1286,30 @@ async function fetchData() {
   }
 }
 
+async function fetchEmotionData() {
+  try {
+    const res = await fetch(`${backendUrl}/core/emotion.json?` + Date.now());
+    if (res.ok) {
+      const data = await res.json();
+      jsonEmotionData.value = data;
+    }
+  } catch (e) {
+    console.warn('[Health] 无法读取 emotion.json:', e);
+  }
+}
+
+async function fetchHealthData() {
+  try {
+    const res = await fetch(`${backendUrl}/core/health.json?` + Date.now());
+    if (res.ok) {
+      const data = await res.json();
+      jsonHealthData.value = data;
+    }
+  } catch (e) {
+    console.warn('[Health] 无法读取 health.json:', e);
+  }
+}
+
 let intervalId = null;
 
 const goToVideoCall = () => {
@@ -1020,25 +1329,21 @@ watch(period, (newVal) => {
 onMounted(async () => {
   fetchData();
   updateTime();
-  intervalId = setInterval(fetchData, 1000);
+  intervalId = setInterval(fetchData, 2000);
   setInterval(updateTime, 1000);
-  
-  // 订阅 SystemStore
-  unsubscribeStore = systemStore.subscribe((state) => {
-    systemState.value = state;
-  });
   
   setTimeout(() => {
     renderChart('day');
     renderEmotionChart('day');
+    renderSleepChart('day');
   }, 300);
 });
 
 onUnmounted(() => {
   if (intervalId) clearInterval(intervalId);
-  if (unsubscribeStore) unsubscribeStore();
   if (chart) chart.destroy();
   if (emotionChart) emotionChart.destroy();
+  if (sleepChart) sleepChart.destroy();
 });
 </script>
 

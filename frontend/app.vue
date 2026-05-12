@@ -36,7 +36,7 @@
         @touchstart="handleDragStart"
         @click="handleBallClick"
       >
-        <span class="akon-icon">🤖</span>
+        <img src="/akon.svg" alt="阿康" class="akon-icon" />
       </div>
 
             <!-- 阿康对话 -->
@@ -44,21 +44,26 @@
         <div class="akon-panel" @click.stop>
           <!-- 头部 -->
           <div class="akon-header">
-            <span class="akon-avatar">🤖</span>
+            <img src="/akon.svg" alt="阿康" class="akon-avatar" />
             <span class="akon-title">阿康助手</span>
             <button class="akon-close-btn" @click="closeAkon">✕</button>
           </div>
           <!-- 消息区域 -->
           <div class="akon-messages" ref="messagesRef">
             <div v-for="(msg, idx) in akonMessages" :key="idx" class="akon-msg" :class="msg.role">
-              <div class="msg-avatar">{{ msg.role === 'user' ? '👴' : '🤖' }}</div>
+              <div class="msg-avatar">
+                <span v-if="msg.role === 'user'">👴</span>
+                <img v-else src="/akon.svg" alt="阿康" class="msg-avatar-img" />
+              </div>
               <div class="msg-text">
                 {{ msg.content }}
                 <span v-if="isTyping && idx === akonMessages.length - 1" class="cursor">|</span>
               </div>
             </div>
             <div v-if="akonLoading" class="akon-msg assistant">
-              <div class="msg-avatar">🤖</div>
+              <div class="msg-avatar">
+                <img src="/akon.svg" alt="阿康" class="msg-avatar-img" />
+              </div>
               <div class="msg-text loading">
                 思考中<span class="dot dot1">.</span><span class="dot dot2">.</span><span class="dot dot3">.</span>
               </div>
@@ -122,6 +127,14 @@ const currentPath = computed(() => route.path)
 // ⭐ 屏保相关
 const SCREEN_SAVER_DELAY = 4 * 60 * 1000 
 let screenSaverTimer = null
+const showScreenSaver = computed(() => route.path === '/screen-saver')
+
+function exitScreenSaver() {
+  if (route.path === '/screen-saver') {
+    router.push('/')
+    resetScreenSaverTimer()
+  }
+}
 
 function resetScreenSaverTimer() {
   if (screenSaverTimer) clearTimeout(screenSaverTimer)
@@ -410,17 +423,7 @@ onMounted(() => {
       }
     }
     
-    // ⭐ 检测毫米波雷达数据，有人靠近时退出屏保
-    if (showScreenSaver.value) {
-      const distance = data.perception?.physiology?.raw?.distance
-      const distanceValid = data.perception?.physiology?.raw?.distance_valid
-      const isHuman = data.perception?.physiology?.raw?.is_human
-      
-      if (distanceValid && distance < 150 && isHuman) {
-        console.log('[屏保] 检测到有人靠近，退出屏保')
-        exitScreenSaver()
-      }
-    }
+    // 屏保页面的退出逻辑由 screen-saver.vue 自己处理，避免冲突
   })
   
   socket.on('navigate_to', (data) => {
@@ -761,7 +764,9 @@ html, body {
 .akon-ball.is-docked {
   transform: scale(0.95);
 }
-.akon-icon { font-size: 45px; pointer-events: none; }
+.akon-icon { width: 50px; height: 50px; pointer-events: none; }
+.akon-avatar { width: 40px; height: 40px; margin-right: 10px; }
+.msg-avatar-img { width: 100%; height: 100%; object-fit: contain; }
 
 .user-zone { text-align: center; position: relative; cursor: pointer; margin-top: auto; }
 .avatar { font-size: 50px; }

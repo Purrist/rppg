@@ -21,6 +21,11 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 HEALTHDATA_DIR = os.path.join(SCRIPT_DIR, 'healthdata')
 os.makedirs(HEALTHDATA_DIR, exist_ok=True)
 
+# 实时数据保存到 frontend/core 目录
+PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
+FRONTEND_CORE_DIR = os.path.join(PROJECT_ROOT, 'frontend', 'core')
+os.makedirs(FRONTEND_CORE_DIR, exist_ok=True)
+
 start_time = time.strftime("%Y%m%d-%H%M%S")
 RAW_LOG_FILE = os.path.join(HEALTHDATA_DIR, f"{start_time}raw.json")
 ANALYSIS_LOG_FILE = os.path.join(HEALTHDATA_DIR, f"{start_time}analysis.json")
@@ -331,6 +336,66 @@ def save_logs():
             json.dump(analysis_log_data, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print("保存日志失败: %s" % str(e))
+
+
+def save_realtime_health(result):
+    try:
+        # 构建简化的 health.json 数据结构
+        data = {
+            "time": time.time(),
+            "hr": float(latest_data["heart_rate"]),
+            "br": float(latest_data["breath_rate"]),
+            "hph": float(latest_data["heart_phase"]),
+            "bph": float(latest_data["breath_phase"]),
+            "is_human": int(latest_data["is_human"]),
+            "distance": float(latest_data["distance"]),
+            "distance_valid": int(latest_data["distance_valid"]),
+            "signal_state": latest_data["signal_state"],
+            "hr_valid": latest_data.get("hr_valid", False),
+            "br_valid": latest_data.get("br_valid", False),
+            "phase_valid": latest_data.get("phase_valid", False),
+            "hrr": 0.0,
+            "hrr_label": "",
+            "slope": 0.0,
+            "slope_label": "",
+            "brv": 0.0,
+            "brv_label": "",
+            "brel": 0.0,
+            "brel_label": "",
+            "cr": 0.0,
+            "cr_label": "",
+            "plv": 0.0,
+            "plv_label": ""
+        }
+        
+        # 添加分析数据
+        if result and "physiology" in result:
+            physio = result["physiology"]
+            if physio.get("hrr_pct") is not None:
+                data["hrr"] = float(physio["hrr_pct"])
+                data["hrr_label"] = get_hrr_label(data["hrr"])
+            if physio.get("hr_slope") is not None:
+                data["slope"] = float(physio["hr_slope"])
+                data["slope_label"] = get_slope_label(data["slope"])
+            if physio.get("brv_cv") is not None:
+                data["brv"] = float(physio["brv_cv"])
+                data["brv_label"] = get_brv_label(data["brv"])
+            if physio.get("br_elevation") is not None:
+                data["brel"] = float(physio["br_elevation"])
+                data["brel_label"] = get_brel_label(data["brel"])
+            if physio.get("cr_ratio") is not None:
+                data["cr"] = float(physio["cr_ratio"])
+                data["cr_label"] = get_cr_label(data["cr"])
+            if physio.get("plv_r") is not None:
+                data["plv"] = float(physio["plv_r"])
+                data["plv_label"] = get_plv_label(data["plv"])
+        
+        # 保存文件
+        health_json_path = os.path.join(FRONTEND_CORE_DIR, 'health.json')
+        with open(health_json_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[Health] 保存实时数据失败: {e}")
 
 
 def get_hrr_label(hrr):
@@ -1158,6 +1223,9 @@ def get_data():
         "br_valid": rt_br_valid_history[-200:],
         "phase_valid": rt_phase_valid_history[-200:]
     }
+
+    # 保存实时数据到 frontend/core/health.json
+    save_realtime_health(result)
 
     return jsonify(result)
 

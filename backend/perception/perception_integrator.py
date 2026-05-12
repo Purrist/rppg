@@ -956,8 +956,6 @@ class PerceptionIntegrator:
                             analysis_data['plv_label'] = '深度放松'
                     else:
                         analysis_data['plv_label'] = None
-                    
-                    print(f"[PerceptionIntegrator] 映射后的生理分析数据: {analysis_data}")
                     self.system_core.update_physiology_data(raw_data, analysis_data)
                 
                 # ⭐ 更新完整的面部/情绪数据（来自 emotion.py）

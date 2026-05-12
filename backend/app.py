@@ -390,6 +390,20 @@ def serve_static(path):
         return send_from_directory(app.static_folder, 'index.html')
 
 # ============================================================================
+# 核心数据文件服务
+# ============================================================================
+import os
+
+CORE_DATA_DIR = os.path.join(os.path.dirname(__file__), '../frontend/core')
+
+@app.route('/core/<path:path>')
+def serve_core_data(path):
+    try:
+        return send_from_directory(CORE_DATA_DIR, path)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 404
+
+# ============================================================================
 # 视频流
 # ============================================================================
 def gen_video(processor, is_corrected=False):

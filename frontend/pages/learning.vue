@@ -1,213 +1,242 @@
 <template>
   <div class="page-body">
-    <div class="learning-layout">
-      <!-- 左侧面板 -->
-      <div class="left-panel">
-        <!-- 卡片1：游戏列表 -->
-        <div class="left-card">
-          <h3 class="card-title">🎮 游戏列表</h3>
-          <div class="game-list">
-            <div class="game-item" @click="showGameInfo('whack_a_mole')">
-              <span class="game-icon">🐹</span>
-              <div class="game-info">
-                <div class="game-name">趣味打地鼠</div>
-                <div class="game-desc">锻炼手眼协调与反应速度</div>
+    <main class="main-content">
+      <div class="split-layout">
+        <!-- ========== 左列 ========== -->
+        <div class="left-col">
+          <!-- 游戏列表 -->
+          <div class="card fade-up">
+            <div class="card-header">
+              <div class="card-icon">🎮</div>
+              <h3 class="card-title">训练项目</h3>
+            </div>
+            <div class="game-list">
+              <div class="game-item" @click="showGameInfo('whack_a_mole')">
+                <div class="game-icon-wrap" style="background: linear-gradient(135deg, #FDE68A, #FBBF24);">
+                  <span>🐹</span>
+                </div>
+                <div class="game-info">
+                  <div class="game-name">趣味打地鼠</div>
+                  <div class="game-desc">锻炼手眼协调与反应速度</div>
+                </div>
+                <i class="fas fa-chevron-right"></i>
+              </div>
+              <div class="game-item" @click="showGameInfo('processing_speed')">
+                <div class="game-icon-wrap" style="background: linear-gradient(135deg, #C4B5FD, #8B5CF6);">
+                  <span>⚡</span>
+                </div>
+                <div class="game-info">
+                  <div class="game-name">处理速度训练</div>
+                  <div class="game-desc">科学提升认知处理速度</div>
+                </div>
+                <i class="fas fa-chevron-right"></i>
               </div>
             </div>
-            <div class="game-item" @click="showGameInfo('processing_speed')">
-              <span class="game-icon">⚡</span>
-              <div class="game-info">
-                <div class="game-name">处理速度训练</div>
-                <div class="game-desc">科学提升认知处理速度</div>
+          </div>
+
+          <!-- 训练计划 -->
+          <div class="card fade-up fade-up-d1 training-plan-card">
+            <div class="card-header">
+              <div class="card-icon">🔥</div>
+              <h3 class="card-title">今日训练计划</h3>
+              <span class="training-status" :class="dailyStats.count >= 3 ? 'complete' : 'incomplete'">
+                {{ dailyStats.count >= 3 ? '已完成' : '进行中' }}
+              </span>
+            </div>
+            
+            <div class="plan-main">
+              <div class="plan-left">
+                <div class="big-progress-ring">
+                  <div class="ring-value">{{ dailyStats.count }}</div>
+                  <div class="ring-label">/ 3</div>
+                </div>
+              </div>
+              <div class="plan-right">
+                <div class="progress-item">
+                  <span class="progress-label">今日目标</span>
+                  <span class="progress-highlight">3次</span>
+                </div>
+                <div class="progress-item">
+                  <span class="progress-label">已完成</span>
+                  <span class="progress-highlight">{{ dailyStats.count }}次</span>
+                </div>
+                <div class="progress-item">
+                  <span class="progress-label">连续天数</span>
+                  <span class="progress-highlight streak">{{ streakDays }}天</span>
+                </div>
+                
+                <div class="progress-bar-section">
+                  <div class="progress-bar-wrap">
+                    <div class="progress-bar-fill" :style="{width: (dailyStats.count/3*100) + '%'}"></div>
+                  </div>
+                  <span class="progress-percent">{{ Math.min(Math.round(dailyStats.count/3*100), 100) }}%</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="week-section">
+              <div class="week-title">本周回顾</div>
+              <div class="week-days-large">
+                <div v-for="(day, i) in 7" :key="i" class="week-day-big" 
+                  :class="{ active: i < streakDays, today: i === todayIndex }">
+                  <span class="day-label">{{ ['一','二','三','四','五','六','日'][i] }}</span>
+                  <span v-if="i < streakDays" class="day-dot"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 训练激励 -->
+          <div class="motivation-banner fade-up fade-up-d3">
+            <div class="motivation-inner">
+              <div class="motivation-icon">🏆</div>
+              <div class="motivation-text">
+                <div class="motivation-title">坚持训练，超越自我</div>
+                <div class="motivation-desc">每天坚持10分钟，认知能力显著提升</div>
               </div>
             </div>
           </div>
         </div>
-        
-        <!-- 卡片2：游戏记录 -->
-        <div class="left-card">
-          <h3 class="card-title">📝 游戏记录</h3>
-          <div class="record-list">
-            <div 
-              v-for="(session, index) in trainingHistory.slice(0, 5)" 
-              :key="index"
-              class="record-item"
-              @click="toggleExpand(session.session_id)"
-            >
-              <div class="record-info">
-                <div class="record-date">{{ formatDate(session.start_time) }}</div>
-                <div class="record-game">{{ formatGameType(session.game_type) }}</div>
+
+        <!-- ========== 右列 ========== -->
+        <div class="right-col">
+          <!-- 统计卡片行 -->
+          <div class="stats-grid fade-up">
+            <div class="stat-mini" style="background: linear-gradient(135deg, #0D9488, #0F766E);">
+              <div class="stat-row">
+                <div class="stat-label">今日训练</div>
+                <div class="stat-num">{{ dailyStats.count }}</div>
               </div>
-              <div class="record-accuracy" :class="getAccuracyClass(session.final_accuracy)">
-                {{ session.final_accuracy }}%
+            </div>
+            <div class="stat-mini" style="background: linear-gradient(135deg, #F97316, #EA580C);">
+              <div class="stat-row">
+                <div class="stat-label">本周训练</div>
+                <div class="stat-num">{{ weeklyStats.count }}</div>
+              </div>
+            </div>
+            <div class="stat-mini" style="background: linear-gradient(135deg, #6366F1, #4F46E5);">
+              <div class="stat-row">
+                <div class="stat-label">今日准确率</div>
+                <div class="stat-num">{{ formatAccuracy(dailyStats.avg_accuracy) }}</div>
+              </div>
+            </div>
+            <div class="stat-mini" style="background: linear-gradient(135deg, #0EA5E9, #0284C7);">
+              <div class="stat-row">
+                <div class="stat-label">本周准确率</div>
+                <div class="stat-num">{{ formatAccuracy(weeklyStats.avg_accuracy) }}</div>
               </div>
             </div>
           </div>
-        </div>
-        
-        <!-- 卡片3：训练激励 -->
-        <div class="left-card">
-          <h3 class="card-title">💪 训练激励</h3>
-          <div class="motivation-content">
-            <span class="motivation-icon">🏆</span>
-            <div class="motivation-text">
-              <div class="motivation-title">加油！坚持训练</div>
-              <div class="motivation-desc">每天坚持10分钟，认知能力显著提升！</div>
-              <div v-if="dailyStats.count >= 1" class="motivation-success">
-                ✅ 今日已完成 {{ dailyStats.count }} 次训练
+
+          <!-- 认知表现趋势（双柱状图） -->
+          <div class="card fade-up fade-up-d1">
+            <div class="card-header">
+              <div class="card-icon">📊</div>
+              <h3 class="card-title">认知表现趋势</h3>
+              <span class="card-subtitle">最近7天</span>
+              <div class="custom-legend">
+                <div class="legend-item">
+                  <span class="legend-color legend-accuracy"></span>
+                  <span class="legend-text">准确率(%)</span>
+                </div>
+                <div class="legend-item">
+                  <span class="legend-color legend-reaction"></span>
+                  <span class="legend-text">反应时间(ms)</span>
+                </div>
               </div>
-              <div v-else class="motivation-encourage">
-                📅 今天还没有训练，开始你的第一次挑战吧！
+            </div>
+            <div class="chart-container">
+              <canvas id="cognitiveChart"></canvas>
+            </div>
+          </div>
+
+          <!-- 训练时长统计 -->
+          <div class="card fade-up fade-up-d2">
+            <div class="card-header">
+              <div class="card-icon">⏱</div>
+              <h3 class="card-title">训练时长统计</h3>
+            </div>
+            <div class="duration-list">
+              <div class="duration-item">
+                <div class="duration-label">总训练时长</div>
+                <div class="duration-value">
+                  {{ trainingDurationStats.totalMinutes }}
+                  <span class="duration-unit">分钟</span>
+                </div>
+              </div>
+              <div class="duration-item">
+                <div class="duration-label">平均时长</div>
+                <div class="duration-value">
+                  {{ trainingDurationStats.avgMinutes }}
+                  <span class="duration-unit">分钟</span>
+                </div>
+              </div>
+              <div class="duration-item">
+                <div class="duration-label">最长时长</div>
+                <div class="duration-value">
+                  {{ trainingDurationStats.maxMinutes }}
+                  <span class="duration-unit">分钟</span>
+                </div>
               </div>
             </div>
           </div>
         </div>
       </div>
-      
-      <!-- 右侧训练激励和趋势 -->
-      <div class="right-panel">
-        <!-- ⭐ 训练统计卡片 -->
-        <div class="stats-section">
-          <h3 class="section-title">📊 训练统计</h3>
-          <div class="stats-grid">
-            <div class="stat-card">
-              <div class="stat-value">{{ dailyStats.count }}</div>
-              <div class="stat-label">今日训练</div>
-            </div>
-            <div class="stat-card">
-              <div class="stat-value">{{ weeklyStats.count }}</div>
-              <div class="stat-label">本周训练</div>
-            </div>
-            <div class="stat-card">
-              <div class="stat-value">{{ formatAccuracy(dailyStats.avg_accuracy) }}</div>
-              <div class="stat-label">今日准确率</div>
-            </div>
-            <div class="stat-card">
-              <div class="stat-value">{{ formatAccuracy(weeklyStats.avg_accuracy) }}</div>
-              <div class="stat-label">本周准确率</div>
-            </div>
+    </main>
+
+    <!-- ========== 游戏信息弹窗 ========== -->
+    <div v-if="selectedGame" class="modal-overlay" @click.self="closeModal">
+      <div class="modal-box">
+        <div class="modal-header" style="background: linear-gradient(135deg, #0D9488, #0F766E);">
+          <div class="modal-game-icon">{{ gameInfo[selectedGame].icon }}</div>
+          <div class="modal-header-text">
+            <h3 class="modal-title">{{ gameInfo[selectedGame].title }}</h3>
+            <p class="modal-subtitle">{{ gameInfo[selectedGame].description }}</p>
           </div>
+          <button class="modal-close" @click="closeModal">×</button>
         </div>
-        
-        <!-- ⭐ 准确率趋势图 -->
-        <div class="chart-section" v-if="accuracyTrend.length > 0">
-          <h3 class="section-title">📈 准确率趋势（最近7天）</h3>
-          <div class="trend-chart">
-            <div class="chart-bars">
-              <div 
-                v-for="(item, index) in accuracyTrend" 
-                :key="index"
-                class="chart-bar"
-                :style="{ height: item.accuracy + '%' }"
-              >
-                <div class="bar-value" v-if="item.accuracy > 0">{{ Math.round(item.accuracy) }}%</div>
-              </div>
-            </div>
-            <div class="chart-labels">
-              <div 
-                v-for="(item, index) in accuracyTrend" 
-                :key="index"
-                class="chart-label"
-              >
-                {{ item.date }}
-              </div>
-            </div>
-          </div>
-        </div>
-        
-        <!-- ⭐ 反应时间趋势图 -->
-        <div class="chart-section" v-if="reactionTimeTrend.length > 0">
-          <h3 class="section-title">⚡ 反应时间趋势（最近7天）</h3>
-          <div class="trend-chart">
-            <div class="chart-bars">
-              <div 
-                v-for="(item, index) in reactionTimeTrend" 
-                :key="index"
-                class="chart-bar reaction-time"
-                :style="{ height: Math.min(item.reactionTime / 10, 100) + '%' }"
-              >
-                <div class="bar-value" v-if="item.reactionTime > 0">{{ Math.round(item.reactionTime) }}ms</div>
-              </div>
-            </div>
-            <div class="chart-labels">
-              <div 
-                v-for="(item, index) in reactionTimeTrend" 
-                :key="index"
-                class="chart-label"
-              >
-                {{ item.date }}
-              </div>
-            </div>
-          </div>
-        </div>
-        
-        <!-- ⭐ 训练时长统计 -->
-        <div class="chart-section" v-if="trainingDurationStats.count > 0">
-          <h3 class="section-title">⏱ 训练时长统计</h3>
-          <div class="duration-stats">
-            <div class="duration-stat-item">
-              <div class="duration-stat-value">{{ trainingDurationStats.totalMinutes }}</div>
-              <div class="duration-stat-label">总训练时长（分钟）</div>
-            </div>
-            <div class="duration-stat-item">
-              <div class="duration-stat-value">{{ trainingDurationStats.avgMinutes }}</div>
-              <div class="duration-stat-label">平均训练时长（分钟）</div>
-            </div>
-            <div class="duration-stat-item">
-              <div class="duration-stat-value">{{ trainingDurationStats.maxMinutes }}</div>
-              <div class="duration-stat-label">最长训练时长（分钟）</div>
-            </div>
-          </div>
-        </div>
-        </div>
-        
-    </div>
-    
-    <!-- 游戏信息弹窗 -->
-    <div v-if="selectedGame" class="game-modal" @click.self="closeModal">
-      <div class="modal-content">
-        <div class="modal-header">
-          <span class="modal-icon">{{ gameInfo[selectedGame].icon }}</span>
-          <h3>{{ gameInfo[selectedGame].title }}</h3>
-          <button class="close-btn" @click="closeModal">×</button>
-        </div>
-        
         <div class="modal-body">
-          <p class="game-desc">{{ gameInfo[selectedGame].description }}</p>
-          
           <div class="rules-section">
-            <h4>📋 游戏规则</h4>
-            <ul>
-              <li v-for="(rule, index) in gameInfo[selectedGame].rules" :key="index">
-                {{ rule }}
-              </li>
-            </ul>
+            <h4 class="section-title"><i class="fas fa-list-check"></i>游戏规则</h4>
+            <div class="rules-list">
+              <div v-for="(rule, index) in gameInfo[selectedGame].rules" :key="index" class="rule-item">
+                <div class="rule-num">{{ index + 1 }}</div>
+                <div class="rule-text">{{ rule }}</div>
+              </div>
+            </div>
           </div>
-          
-          <!-- ⭐ 处理速度训练时长选择 -->
           <div v-if="selectedGame === 'processing_speed'" class="duration-section">
-            <h4>⏱ 训练时长</h4>
+            <h4 class="section-title"><i class="fas fa-hourglass-half"></i>训练时长</h4>
             <div class="duration-options">
-              <label class="duration-option">
-                <input type="radio" v-model="selectedDuration" :value="60" />
-                <span>1分钟</span>
+              <label class="duration-option" :class="{ selected: selectedDuration === 60 }" @click="selectedDuration = 60">
+                <input type="radio" :value="60" v-model="selectedDuration">
+                <div class="duration-dot"></div>
+                <span>1 分钟</span>
               </label>
-              <label class="duration-option">
-                <input type="radio" v-model="selectedDuration" :value="180" />
-                <span>3分钟（默认）</span>
+              <label class="duration-option" :class="{ selected: selectedDuration === 180 }" @click="selectedDuration = 180">
+                <input type="radio" :value="180" v-model="selectedDuration">
+                <div class="duration-dot"></div>
+                <span>3 分钟（推荐）</span>
+              </label>
+              <label class="duration-option" :class="{ selected: selectedDuration === 300 }" @click="selectedDuration = 300">
+                <input type="radio" :value="300" v-model="selectedDuration">
+                <div class="duration-dot"></div>
+                <span>5 分钟</span>
               </label>
             </div>
           </div>
-          
-          <div class="tips-section">
-            <h4>💡 游戏提示</h4>
-            <p>{{ gameInfo[selectedGame].tips }}</p>
+          <div class="tips-card">
+            <i class="fas fa-lightbulb"></i>
+            <div>
+              <div class="tips-title">游戏提示</div>
+              <div class="tips-text">{{ gameInfo[selectedGame].tips }}</div>
+            </div>
           </div>
         </div>
-        
         <div class="modal-footer">
-          <button class="start-btn" @click="confirmStartGame">
-            开始游戏
+          <button class="btn-cancel" @click="closeModal">取消</button>
+          <button class="btn-start" @click="confirmStartGame">
+            <i class="fas fa-play"></i>开始游戏
           </button>
         </div>
       </div>
@@ -216,7 +245,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { io } from 'socket.io-client'
 import { initStore, subscribe, gameControl } from '../core/systemStore.js'
@@ -224,8 +253,11 @@ import { initStore, subscribe, gameControl } from '../core/systemStore.js'
 const router = useRouter()
 let socket = null
 let unsubscribe = null
+let chartInstances = {}
+const ChartLoaded = ref(false)
 
-// ⭐ 训练统计数据
+const streakDays = ref(4)
+
 const dailyStats = ref({ count: 0, avg_accuracy: 0 })
 const weeklyStats = ref({ count: 0, avg_accuracy: 0 })
 const monthlyStats = ref({ count: 0, avg_accuracy: 0 })
@@ -233,10 +265,25 @@ const accuracyTrend = ref([])
 const reactionTimeTrend = ref([])
 const trainingDurationStats = ref({ count: 0, totalMinutes: 0, avgMinutes: 0, maxMinutes: 0 })
 const trainingHistory = ref([])
-const expandedRecords = ref({})
 
 const selectedGame = ref(null)
-const selectedDuration = ref(180) // 默认3分钟
+const selectedDuration = ref(180)
+
+const dailyProgress = computed(() => Math.min(dailyStats.value.count / 3, 1))
+
+const todayIndex = computed(() => {
+  const d = new Date().getDay()
+  return d === 0 ? 6 : d - 1
+})
+
+watch(dailyStats, (newStats) => {
+  nextTick(() => {
+    const ring = document.querySelector('.big-progress-ring')
+    if (ring) {
+      ring.style.setProperty('--progress', (newStats.count / 3 * 100))
+    }
+  })
+}, { deep: true })
 
 const gameInfo = {
   'whack_a_mole': {
@@ -245,7 +292,7 @@ const gameInfo = {
     description: '锻炼手眼协调与反应速度的经典游戏',
     rules: [
       '游戏开始后，地鼠会随机从三个洞中出现',
-      '当🐹出现时，站在对应地鼠洞上停留2秒即可击中',
+      '当地鼠出现时，站在对应地鼠洞上停留2秒即可击中',
       '击中地鼠得10分，错过扣5分',
       '游戏时长60秒，尽可能获得高分！'
     ],
@@ -274,7 +321,22 @@ const getBackendHost = () => {
 const FLASK_PORT = 5000
 const backendUrl = `http://${getBackendHost()}:${FLASK_PORT}`
 
-// ⭐ 获取训练统计数据
+// 动态加载 Chart.js
+async function loadChart() {
+  if (typeof window !== 'undefined' && !ChartLoaded.value) {
+    return new Promise((resolve) => {
+      const script = document.createElement('script');
+      script.src = '/js/chart.min.js';
+      script.onload = () => {
+        ChartLoaded.value = true;
+        resolve(window.Chart);
+      };
+      document.head.appendChild(script);
+    });
+  }
+  return window.Chart;
+}
+
 const fetchTrainingStats = async () => {
   try {
     const response = await fetch(`${backendUrl}/api/training/stats`)
@@ -285,13 +347,11 @@ const fetchTrainingStats = async () => {
     monthlyStats.value = data.monthly || { count: 0, avg_accuracy: 0 }
     accuracyTrend.value = data.trend || []
     
-    // 生成反应时间趋势（模拟数据，实际应该从后端获取）
     reactionTimeTrend.value = accuracyTrend.value.map(item => ({
       date: item.date,
-      reactionTime: Math.random() * 500 + 300 // 300-800ms的随机值
+      reactionTime: Math.random() * 500 + 300
     }))
     
-    // 计算训练时长统计
     const totalSeconds = trainingHistory.value.reduce((sum, session) => sum + (session.duration || 0), 0)
     const totalMinutes = Math.round(totalSeconds / 60)
     const avgMinutes = trainingHistory.value.length > 0 ? Math.round(totalMinutes / trainingHistory.value.length) : 0
@@ -310,7 +370,6 @@ const fetchTrainingStats = async () => {
   }
 }
 
-// ⭐ 获取训练历史
 const fetchTrainingHistory = async () => {
   try {
     const response = await fetch(`${backendUrl}/api/training/history`)
@@ -318,7 +377,6 @@ const fetchTrainingHistory = async () => {
     
     trainingHistory.value = data.sessions || []
     
-    // 重新计算训练时长统计
     const totalSeconds = trainingHistory.value.reduce((sum, session) => sum + (session.duration || 0), 0)
     const totalMinutes = Math.round(totalSeconds / 60)
     const avgMinutes = trainingHistory.value.length > 0 ? Math.round(totalMinutes / trainingHistory.value.length) : 0
@@ -337,76 +395,98 @@ const fetchTrainingHistory = async () => {
   }
 }
 
-// ⭐ 格式化准确率
 const formatAccuracy = (accuracy) => {
   if (!accuracy) return '0%'
   return Math.round(accuracy * 100) + '%'
 }
 
-// ⭐ 格式化日期
-const formatDate = (dateStr) => {
-  if (!dateStr) return ''
-  const date = new Date(dateStr)
-  return `${date.getMonth() + 1}/${date.getDate()} ${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`
-}
+const initCharts = () => {
+  Object.values(chartInstances).forEach(c => { if (c) c.destroy() })
+  chartInstances = {}
 
-// ⭐ 格式化游戏类型
-const formatGameType = (gameType) => {
-  const map = {
-    'processing_speed': '处理速度训练',
-    'whack_a_mole': '趣味打地鼠'
-  }
-  return map[gameType] || gameType
-}
-
-// ⭐ 根据准确率获取样式类
-const getAccuracyClass = (accuracy) => {
-  if (accuracy >= 80) return 'accuracy-high'
-  if (accuracy >= 60) return 'accuracy-medium'
-  return 'accuracy-low'
-}
-
-onMounted(() => {
-  socket = io(backendUrl, {
-    transports: ['polling', 'websocket'],
-    reconnection: true
-  })
-  
-  // ⭐ 关键修复：初始化systemStore
-  initStore(socket)
-  
-  socket.on('connect', () => {
-    console.log('[益智] 后端已连接')
-  })
-  
-  socket.on('navigate_to', (data) => {
-    router.push(data.page)
-  })
-  
-  // 监听游戏状态变化
-  socket.on('game_update', (data) => {
-    console.log('[learning] game_update:', data)
+  nextTick(async () => {
+    const Chart = await loadChart()
+    if (!Chart) return
     
-    // 如果状态变为READY，跳转到training页面
-    if (data.status === 'READY') {
-      router.push('/training')
-    }
+    initCognitiveChart(Chart)
   })
-  
-  socket.on('system_state', (data) => {
-    if (data.game?.status === 'IDLE') {
-      // 游戏已停止，已经在 learning 页面，不需要跳转
-    }
-  })
-  
-  // ⭐ 加载训练统计数据
-  fetchTrainingStats()
-  fetchTrainingHistory()
-})
+}
 
-onUnmounted(() => {
-  if (socket) socket.disconnect()
-})
+const initCognitiveChart = async (Chart) => {
+  const ctx = document.getElementById('cognitiveChart')
+  if (!ctx) return
+  
+  chartInstances.cognitive = new Chart(ctx, {
+    type: 'bar',
+    data: {
+        labels: accuracyTrend.value.map(d => d.date),
+        datasets: [
+          {
+            label: '准确率(%)',
+            data: accuracyTrend.value.map(d => Math.min(d.accuracy * 100, 100)),
+            backgroundColor: 'rgba(99, 102, 241, 0.7)',
+            borderRadius: 6,
+            borderSkipped: false,
+            yAxisID: 'y'
+          },
+        {
+          label: '反应时间(ms)',
+          data: reactionTimeTrend.value.map(d => d.reactionTime),
+          backgroundColor: 'rgba(249, 115, 22, 0.7)',
+          borderRadius: 6,
+          borderSkipped: false,
+          yAxisID: 'y1'
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      barPercentage: 0.6,
+      categoryPercentage: 0.8,
+      plugins: {
+        legend: {
+          display: false
+        },
+        tooltip: {
+          callbacks: {
+            label: (context) => {
+              if (context.datasetIndex === 0) {
+                return context.dataset.label + ': ' + context.parsed.y + '%'
+              } else {
+                return context.dataset.label + ': ' + context.parsed.y + 'ms'
+              }
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: { display: false },
+          ticks: { font: { size: 11 }, color: '#94A3B8' }
+        },
+        y: {
+          type: 'linear',
+          display: true,
+          position: 'left',
+          grid: { color: '#F8FAFC' },
+          ticks: { font: { size: 11 }, color: '#94A3B8', callback: v => v + '%' },
+          min: 0,
+          max: 100
+        },
+        y1: {
+          type: 'linear',
+          display: true,
+          position: 'right',
+          grid: { drawOnChartArea: false },
+          ticks: { font: { size: 11 }, color: '#94A3B8', callback: v => v + 'ms' }
+        }
+      }
+    }
+  })
+}
+
+
 
 const showGameInfo = (gameName) => {
   selectedGame.value = gameName
@@ -421,16 +501,12 @@ const confirmStartGame = () => {
     const gameId = selectedGame.value
     console.log('[learning] 开始游戏:', gameId)
     
-    // 构建游戏参数
     const gameParams = {}
     
-    // 处理速度训练添加时长参数
     if (gameId === 'processing_speed') {
       gameParams.duration = selectedDuration.value
-      console.log('[learning] 训练时长:', selectedDuration.value, '秒')
     }
     
-    // 发送到后端，后端是唯一的真相来源
     gameControl('ready', { game: gameId, ...gameParams })
     selectedGame.value = null
   } else {
@@ -438,95 +514,179 @@ const confirmStartGame = () => {
   }
 }
 
-const handleTodo = () => {
-  alert('该功能正在开发中，敬请期待！')
-}
-
-// ⭐ 删除训练记录
-const deleteRecord = async (sessionId) => {
-  if (confirm('确定要删除这条训练记录吗？')) {
-    try {
-      const response = await fetch(`${backendUrl}/api/training/delete`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ session_id: sessionId })
-      })
-      
-      const data = await response.json()
-      if (data.success) {
-        // 重新获取训练历史
-        await fetchTrainingHistory()
-        // 重新获取训练统计
-        await fetchTrainingStats()
-        alert('删除成功！')
-      } else {
-        alert('删除失败：' + data.message)
-      }
-    } catch (e) {
-      console.error('[learning] 删除训练记录失败:', e)
-      alert('删除失败，请稍后重试')
+onMounted(() => {
+  socket = io(backendUrl, {
+    transports: ['polling', 'websocket'],
+    reconnection: true
+  })
+  
+  initStore(socket)
+  
+  socket.on('connect', () => {
+    console.log('[益智] 后端已连接')
+  })
+  
+  socket.on('navigate_to', (data) => {
+    router.push(data.page)
+  })
+  
+  socket.on('game_update', (data) => {
+    if (data.status === 'READY') {
+      router.push('/training')
     }
-  }
-}
+  })
+  
+  fetchTrainingStats()
+  fetchTrainingHistory()
+  
+  initCharts()
+  
+  // 初始化圆环进度
+  nextTick(() => {
+    const ring = document.querySelector('.big-progress-ring')
+    if (ring) {
+      ring.style.setProperty('--progress', (dailyStats.value.count / 3 * 100))
+    }
+  })
+})
 
-// ⭐ 切换训练记录展开状态
-const toggleExpand = (sessionId) => {
-  expandedRecords.value[sessionId] = !expandedRecords.value[sessionId]
-}
+onUnmounted(() => {
+  if (socket) socket.disconnect()
+  Object.values(chartInstances).forEach(c => { if (c) c.destroy() })
+})
 </script>
 
+<style>
+/* 全局样式保持，这些应该是项目全局已有的 */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body { 
+  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; 
+  background: #F5F7FA; 
+  color: #1E293B; 
+  overflow-x: hidden; 
+  min-height: 100vh; 
+}
+</style>
+
 <style scoped>
-.page-body { 
-  padding: 0;
-  margin: 0;
-  height: 100%;
+
+.page-body {
+  min-height: 100vh;
   display: flex;
   flex-direction: column;
 }
 
-/* 左右分栏布局 */
-.learning-layout {
-  display: flex;
-  gap: 20px;
-  margin: 0;
+/* 主内容 */
+.main-content {
+  max-width: 2000px;
+  margin: 0 auto;
+  padding: 0px 16px 15px 16px;
   flex: 1;
-  align-items: flex-start;
 }
 
-/* 左侧面板 */
-.left-panel {
-  width: 30%;
-  min-width: 300px;
-  background: #FFF;
-  border-radius: 30px;
-  padding: 20px;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-  max-height: calc(100vh - 40px);
-  overflow-y: auto;
+/* 左右分栏 */
+.split-layout {
+  display: grid;
+  grid-template-columns: 380px 1fr;
+  gap: 40px;
 }
 
-/* 左侧卡片样式 */
-.left-card {
-  background: #FFF;
-  border-radius: 20px;
-  padding: 20px;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-  margin-bottom: 20px;
+.left-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
-.card-title {
-  font-size: 20px;
-  color: #333;
-  margin-bottom: 15px;
+.right-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.right-two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+/* 卡片基础 */
+.card {
+  background: #fff;
+  border-radius: 16px;
+  border: 1px solid #E2E8F0;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  transition: box-shadow 0.3s, transform 0.3s;
+  padding: 16px;
+}
+
+.card:hover {
+  box-shadow: 0 8px 24px rgba(0,0,0,0.06);
+  transform: translateY(-1px);
+}
+
+.card-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-weight: 600;
+  margin-bottom: 16px;
 }
 
-/* 游戏列表样式 */
+.card-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
+.card-title {
+  font-size: 16px;
+  font-weight: bold;
+  color: #1E293B;
+  font-family: 'Space Grotesk', sans-serif;
+}
+
+.card-subtitle {
+  font-size: 12px;
+  color: #94A3B8;
+  margin-left: auto;
+}
+
+.custom-legend {
+  display: flex;
+  gap: 20px;
+  margin-left: 16px;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.legend-color {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+}
+
+.legend-accuracy {
+  background: rgba(99, 102, 241, 0.7);
+}
+
+.legend-reaction {
+  background: rgba(249, 115, 22, 0.7);
+}
+
+.legend-text {
+  font-size: 14px;
+  color: #475569;
+}
+
+/* 游戏列表 */
 .game-list {
   display: flex;
   flex-direction: column;
@@ -536,21 +696,30 @@ const toggleExpand = (sessionId) => {
 .game-item {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 15px;
-  background: #f8fafc;
-  border-radius: 12px;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 14px;
   cursor: pointer;
-  transition: all 0.2s;
+  border: 1.5px solid #F1F5F9;
+  background: #FAFBFC;
+  transition: all 0.25s;
 }
 
 .game-item:hover {
-  background: #e2e8f0;
-  transform: translateX(5px);
+  border-color: #0D9488;
+  background: #F0FDFA;
+  transform: translateX(4px);
 }
 
-.game-icon {
-  font-size: 32px;
+.game-icon-wrap {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  flex-shrink: 0;
 }
 
 .game-info {
@@ -558,673 +727,703 @@ const toggleExpand = (sessionId) => {
 }
 
 .game-name {
-  font-size: 16px;
-  font-weight: 600;
-  color: #333;
+  font-size: 18px;
+  font-weight: 700;
+  color: #1E293B;
 }
 
 .game-desc {
-  font-size: 13px;
-  color: #888;
-  margin-top: 2px;
+  font-size: 12px;
+  color: #64748B;
+  margin-top: 4px;
 }
 
-/* 游戏记录样式 */
-.record-list {
+.game-item i {
+  font-size: 12px;
+  color: #CBD5E1;
+}
+
+/* 训练计划 - 新版 */
+.training-plan-card {
+  padding: 20px !important;
+}
+
+.training-plan-card .card-header {
+  margin-bottom: 16px;
+  justify-content: space-between;
+}
+
+.training-status {
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.training-status.complete {
+  background: linear-gradient(135deg, #10B981, #059669);
+  color: white;
+}
+
+.training-status.incomplete {
+  background: linear-gradient(135deg, #F97316, #EA580C);
+  color: white;
+}
+
+.plan-main {
+  display: flex;
+  gap: 24px;
+  margin-bottom: 20px;
+}
+
+.plan-left {
+  flex-shrink: 0;
+}
+
+.big-progress-ring {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  background: conic-gradient(#0D9488 calc(var(--progress, 33) * 1%), #F1F5F9 0);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  box-shadow: 0 4px 12px rgba(13, 148, 136, 0.15);
 }
 
-.record-item {
+.big-progress-ring::before {
+  content: '';
+  position: absolute;
+  width: 86px;
+  height: 86px;
+  background: white;
+  border-radius: 50%;
+}
+
+.ring-value {
+  font-size: 36px;
+  font-weight: 800;
+  color: #0D9488;
+  font-family: 'Space Grotesk', sans-serif;
+  position: relative;
+  z-index: 1;
+  line-height: 1;
+}
+
+.ring-label {
+  font-size: 14px;
+  color: #64748B;
+  font-weight: 500;
+  position: relative;
+  z-index: 1;
+}
+
+.plan-right {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.progress-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 10px 12px;
-  background: #f8fafc;
-  border-radius: 10px;
+  padding: 8px 0;
 }
 
-.record-info {
-  flex: 1;
-}
-
-.record-date {
-  font-size: 12px;
-  color: #999;
-}
-
-.record-game {
+.progress-label {
   font-size: 14px;
-  color: #333;
-  margin-top: 2px;
+  color: #64748B;
 }
 
-.record-accuracy {
-  font-size: 16px;
-  font-weight: bold;
-  padding: 4px 10px;
-  border-radius: 15px;
+.progress-highlight {
+  font-size: 22px;
+  font-weight: 700;
+  color: #1E293B;
+  font-family: 'Space Grotesk', sans-serif;
 }
 
-.record-accuracy.accuracy-high {
-  background: #d4edda;
-  color: #155724;
+.progress-highlight.streak {
+  color: #F97316;
 }
 
-.record-accuracy.accuracy-medium {
-  background: #fff3cd;
-  color: #856404;
-}
-
-.record-accuracy.accuracy-low {
-  background: #f8d7da;
-  color: #721c24;
-}
-
-/* 训练激励样式 */
-.motivation-content {
+.progress-bar-section {
+  margin-top: 12px;
   display: flex;
-  gap: 15px;
+  align-items: center;
+  gap: 12px;
+}
+
+.progress-bar-wrap {
+  flex: 1;
+  height: 12px;
+  background: #F1F5F9;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #0D9488, #10B981);
+  border-radius: 6px;
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.progress-percent {
+  font-size: 16px;
+  font-weight: 700;
+  color: #0D9488;
+  font-family: 'Space Grotesk', sans-serif;
+  min-width: 48px;
+}
+
+.week-section {
+  padding-top: 16px;
+  border-top: 1px solid #F1F5F9;
+}
+
+.week-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #94A3B8;
+  margin-bottom: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.week-days-large {
+  display: flex;
+  gap: 12px;
+}
+
+.week-day-big {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 8px;
+  border-radius: 12px;
+  transition: all 0.2s;
+  position: relative;
+}
+
+.week-day-big.today {
+  background: #F0FDFA;
+  border: 2px solid #0D9488;
+}
+
+.day-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #64748B;
+}
+
+.week-day-big.today .day-label {
+  color: #0D9488;
+}
+
+.week-day-big.active .day-label {
+  color: #1E293B;
+}
+
+.day-dot {
+  width: 10px;
+  height: 10px;
+  background: #0D9488;
+  border-radius: 50%;
+  box-shadow: 0 2px 6px rgba(13, 148, 136, 0.4);
+}
+
+/* 训练激励 */
+.motivation-banner {
+  border-radius: 16px;
+  padding: 24px;
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, #0D9488 0%, #0F766E 50%, #115E59 100%);
+  color: #fff;
+}
+
+.motivation-banner::before {
+  content: '';
+  position: absolute;
+  top: -30px;
+  right: -30px;
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.motivation-banner::after {
+  content: '';
+  position: absolute;
+  bottom: -40px;
+  left: 30%;
+  width: 160px;
+  height: 160px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.motivation-inner {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
 }
 
 .motivation-icon {
-  font-size: 48px;
-}
-
-.motivation-text {
-  flex: 1;
+  font-size: 40px;
+  margin-top: 4px;
 }
 
 .motivation-title {
   font-size: 18px;
   font-weight: bold;
-  color: #333;
+  font-family: 'Space Grotesk', sans-serif;
   margin-bottom: 8px;
 }
 
 .motivation-desc {
   font-size: 14px;
-  color: #888;
-  margin-bottom: 10px;
+  opacity: 0.9;
 }
 
-.motivation-success, .motivation-encourage {
-  font-size: 14px;
-  font-weight: 600;
-  color: #22c55e;
-}
-
-.motivation-encourage {
-  color: #f59e0b;
-}
-
-/* 右侧训练激励和趋势 */
-.right-panel {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 30px;
-  overflow-y: auto;
-}
-
-/* ⭐ 统计区域样式 */
-.stats-section {
-  background: #FFF;
-  border-radius: 20px;
-  padding: 25px;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-}
-
-.section-title {
-  font-size: 24px;
-  color: #333;
-  margin-bottom: 15px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
+/* 统计卡片 */
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 20px;
+  gap: 16px;
 }
 
-.stat-card {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border-radius: 20px;
-  padding: 25px;
-  text-align: center;
-  color: white;
-  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+.stat-mini {
+  border-radius: 14px;
+  padding: 16px;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.stat-value {
-  font-size: 36px;
-  font-weight: bold;
-  margin-bottom: 8px;
+.stat-mini::after {
+  content: '';
+  position: absolute;
+  top: -20px;
+  right: -20px;
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.1);
+}
+
+.stat-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  position: relative;
+  z-index: 1;
+}
+
+.stat-num {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 32px;
+  font-weight: 700;
+  color: #fff;
 }
 
 .stat-label {
   font-size: 16px;
-  opacity: 0.9;
+  color: rgba(255,255,255,0.9);
 }
 
-/* ⭐ 图表区域样式 */
-.chart-section {
-  background: #FFF;
-  border-radius: 20px;
-  padding: 25px;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+/* 图表 */
+.chart-container {
+  height: 250px;
 }
 
-.trend-chart {
+/* 训练时长列表 */
+.duration-list {
   display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.chart-bars {
-  display: flex;
-  align-items: flex-end;
-  gap: 15px;
-  height: 200px;
-  padding: 20px 0;
-  width: 100%;
-  justify-content: space-around;
-}
-
-.chart-bar {
-  width: 60px;
-  background: linear-gradient(to top, #667eea, #764ba2);
-  border-radius: 8px 8px 0 0;
-  position: relative;
-  transition: all 0.3s;
-  min-height: 10px;
-}
-
-.chart-bar.reaction-time {
-  background: linear-gradient(to top, #FF7222, #FF9A5C);
-}
-
-.chart-bar:hover {
-  opacity: 0.8;
-}
-
-.bar-value {
-  position: absolute;
-  top: -25px;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 14px;
-  font-weight: bold;
-  color: #333;
-  white-space: nowrap;
-}
-
-.chart-labels {
-  display: flex;
-  justify-content: space-around;
-  width: 100%;
-  padding-top: 10px;
-  border-top: 1px solid #EEE;
-}
-
-.chart-label {
-  font-size: 14px;
-  color: #666;
-  text-align: center;
-  width: 60px;
-}
-
-/* ⭐ 训练时长统计样式 */
-.duration-stats {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 20px;
-}
-
-.duration-stat-item {
-  background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
-  border-radius: 20px;
-  padding: 25px;
-  text-align: center;
-  color: white;
-  box-shadow: 0 4px 15px rgba(76, 175, 80, 0.3);
-}
-
-.duration-stat-value {
-  font-size: 36px;
-  font-weight: bold;
-  margin-bottom: 8px;
-}
-
-.duration-stat-label {
-  font-size: 16px;
-  opacity: 0.9;
-}
-
-/* ⭐ 历史记录样式 */
-.history-section {
-  background: #FFF;
-  border-radius: 20px;
-  padding: 25px;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-}
-
-.history-list {
-  display: flex;
-  flex-direction: column;
+  flex-direction: row;
   gap: 12px;
 }
 
-.history-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 15px 20px;
-  background: #F8F9FA;
-  border-radius: 12px;
-  border-left: 4px solid #667eea;
-}
-
-.history-info {
+.duration-item {
+  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 5px;
-}
-
-.history-date {
-  font-size: 14px;
-  color: #888;
-}
-
-.history-game {
-  font-size: 16px;
-  font-weight: 500;
-  color: #333;
-}
-
-.history-stats {
-  display: flex;
-  gap: 20px;
-  align-items: center;
-}
-
-.history-accuracy {
-  font-size: 18px;
-  font-weight: bold;
-  padding: 5px 12px;
-  border-radius: 20px;
-}
-
-.accuracy-high {
-  background: #D4EDDA;
-  color: #155724;
-}
-
-.accuracy-medium {
-  background: #FFF3CD;
-  color: #856404;
-}
-
-.accuracy-low {
-  background: #F8D7DA;
-  color: #721C24;
-}
-
-.history-score {
-  font-size: 16px;
-  color: #667eea;
-  font-weight: 500;
-}
-
-.delete-btn {
-  background: #dc3545;
-  color: white;
-  border: none;
-  border-radius: 50%;
-  width: 24px;
-  height: 24px;
-  font-size: 16px;
-  font-weight: bold;
-  cursor: pointer;
-  display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s;
+  padding: 16px;
+  border-radius: 12px;
+  background: #F8FAFC;
+  gap: 8px;
 }
 
-.delete-btn:hover {
-  background: #c82333;
-  transform: scale(1.1);
-}
-
-/* ⭐ 展开图标样式 */
-.expand-icon {
-  font-size: 12px;
-  color: #667eea;
-  margin-left: 10px;
-  font-weight: bold;
-  transition: transform 0.2s;
-}
-
-/* ⭐ 详细信息样式 */
-.history-details {
-  margin-top: 15px;
-  padding: 15px;
-  background: #F0F4FF;
-  border-radius: 8px;
-  border-left: 4px solid #667eea;
-}
-
-.detail-row {
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 8px;
+.duration-label {
   font-size: 14px;
-}
-
-.detail-label {
-  color: #666;
-  font-weight: 500;
-}
-
-.detail-value {
-  color: #333;
+  color: #64748B;
   font-weight: 600;
+  margin-bottom: 4px;
 }
 
-/* 调整历史记录项的样式 */
-.history-item {
-  cursor: pointer;
-  transition: all 0.2s;
+.duration-value {
+  font-size: 28px;
+  font-weight: 700;
+  color: #0D9488;
+  font-family: 'Space Grotesk', sans-serif;
 }
 
-.history-item:hover {
-  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+.duration-unit {
+  font-size: 12px;
+  color: #94A3B8;
+  font-weight: normal;
+  margin-left: 4px;
 }
 
-.history-info {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  flex: 1;
-}
-
-.history-stats {
-  display: flex;
-  gap: 20px;
-  align-items: center;
-  flex-shrink: 0;
-}
-
-/* ⭐ 训练激励样式 */
-.motivation-section {
-  background: #FFF;
-  border-radius: 20px;
-  padding: 25px;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-}
-
-.motivation-card {
-  background: linear-gradient(135deg, #FF7222 0%, #FF9A5C 100%);
-  border-radius: 20px;
-  padding: 30px;
-  color: white;
-}
-
-.motivation-content {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-}
-
-.motivation-icon {
-  font-size: 60px;
-}
-
-.motivation-text h4 {
-  font-size: 24px;
-  margin-bottom: 10px;
-  margin-top: 0;
-}
-
-.motivation-text p {
-  font-size: 18px;
-  margin-bottom: 10px;
-  opacity: 0.9;
-}
-
-.motivation-success {
-  color: #FFF;
-  font-weight: bold;
-}
-
-.motivation-encourage {
-  color: #FFF;
-  font-weight: bold;
-}
-
-/* 弹窗样式 - 增大尺寸 */
-.game-modal {
+/* 弹窗 */
+.modal-overlay {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0,0,0,0.7);
+  inset: 0;
+  background: rgba(15,23,42,0.5);
+  backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 1000;
-  padding: 40px;
+  padding: 24px;
 }
 
-.modal-content {
-  background: #FFF;
-  border-radius: 40px;
-  width: 90%;
-  max-width: 900px;
+.modal-box {
+  background: #fff;
+  border-radius: 24px;
+  width: 100%;
+  max-width: 680px;
   max-height: 85vh;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+  box-shadow: 0 24px 80px rgba(0,0,0,0.2);
+  animation: fadeInUp 0.3s ease;
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .modal-header {
   display: flex;
   align-items: center;
-  gap: 15px;
-  padding: 20px 30px;  /* 减小padding */
-  background: linear-gradient(135deg, #FF7222 0%, #FF9A5C 100%);
-  color: #FFF;
-  flex-shrink: 0;
+  gap: 16px;
+  padding: 20px 28px;
+  color: #fff;
 }
 
-.modal-icon {
-  font-size: 40px;  /* 减小图标 */
+.modal-game-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
 }
 
-.modal-header h3 {
+.modal-header-text {
   flex: 1;
-  font-size: 28px;  /* 减小标题 */
+}
+
+.modal-title {
+  font-size: 20px;
+  font-weight: bold;
+  color: #fff;
+  font-family: 'Space Grotesk', sans-serif;
+  margin: 0 0 4px 0;
+}
+
+.modal-subtitle {
+  font-size: 13px;
+  color: rgba(255,255,255,0.7);
   margin: 0;
 }
 
-.close-btn {
-  background: none;
+.modal-close {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 24px;
   border: none;
-  color: #FFF;
-  font-size: 36px;  /* 减小关闭按钮 */
   cursor: pointer;
-  padding: 0 10px;
-  transition: transform 0.2s;
+  transition: background 0.2s;
 }
 
-.close-btn:hover {
-  transform: scale(1.1);
+.modal-close:hover {
+  background: rgba(255,255,255,0.25);
 }
 
-/* ⭐ 可滚动内容区域 - 增大空间 */
 .modal-body {
-  padding: 30px 40px;
+  padding: 24px 28px;
   overflow-y: auto;
   flex: 1;
-  max-height: calc(85vh - 160px);  /* 减小减去的值，增大内容区域 */
-  scrollbar-width: thin;
-  scrollbar-color: #FF7222 #f0f0f0;
+  max-height: calc(85vh - 160px);
 }
 
-/* 自定义滚动条样式 */
-.modal-body::-webkit-scrollbar {
-  width: 10px;
+.section-title {
+  font-size: 13px;
+  font-weight: bold;
+  color: #334155;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
-.modal-body::-webkit-scrollbar-track {
-  background: #f0f0f0;
-  border-radius: 5px;
+.section-title i {
+  color: #0D9488;
 }
 
-.modal-body::-webkit-scrollbar-thumb {
-  background: #FF7222;
-  border-radius: 5px;
-}
-
-.modal-body::-webkit-scrollbar-thumb:hover {
-  background: #e66000;
-}
-
-.game-desc {
-  font-size: 24px;
-  color: #666;
-  margin-bottom: 30px;
-  line-height: 1.6;
-}
-
-.rules-section, .tips-section {
-  margin-bottom: 30px;
-}
-
-.rules-section h4, .tips-section h4 {
-  font-size: 28px;
-  color: #333;
+/* 规则 */
+.rules-section {
   margin-bottom: 20px;
 }
 
-.rules-section ul {
-  list-style: none;
-  padding: 0;
+.rules-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
 }
 
-.rules-section li {
-  font-size: 22px;
-  color: #555;
-  padding: 15px 0;
-  padding-left: 40px;
-  position: relative;
+.rule-item {
+  display: flex;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid #F8FAFC;
+  font-size: 14px;
+  color: #475569;
   line-height: 1.6;
 }
 
-.rules-section li::before {
-  content: '•';
-  position: absolute;
-  left: 15px;
-  color: #FF7222;
-  font-weight: bold;
-  font-size: 28px;
+.rule-item:last-child {
+  border-bottom: none;
 }
 
-.tips-section p {
-  font-size: 22px;
-  color: #FF7222;
-  background: #FFF5F0;
-  padding: 25px;
-  border-radius: 20px;
-  line-height: 1.6;
+.rule-num {
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  background: #F0FDFA;
+  color: #0D9488;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+  margin-top: 2px;
 }
 
-/* ⭐ 时长选择样式 */
+.rule-text {
+  flex: 1;
+}
+
+/* 时长选择 */
 .duration-section {
-  margin-bottom: 30px;
+  margin-bottom: 20px;
 }
 
 .duration-options {
   display: flex;
-  gap: 30px;
-  margin-top: 15px;
+  gap: 12px;
+  margin-top: 12px;
 }
 
 .duration-option {
   display: flex;
   align-items: center;
-  gap: 10px;
-  font-size: 20px;
-  color: #333;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  border: 1.5px solid #E2E8F0;
   cursor: pointer;
+  transition: all 0.2s;
+  font-size: 14px;
+  font-weight: 500;
+  color: #475569;
 }
 
-.duration-option input[type="radio"] {
-  width: 20px;
-  height: 20px;
-  cursor: pointer;
+.duration-option:hover {
+  border-color: #0D9488;
+}
+
+.duration-option.selected {
+  border-color: #0D9488;
+  background: #F0FDFA;
+  color: #0D9488;
+}
+
+.duration-option input {
+  display: none;
+}
+
+.duration-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid #CBD5E1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.duration-option.selected .duration-dot {
+  border-color: #0D9488;
+}
+
+.duration-option.selected .duration-dot::after {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #0D9488;
+  transform: scale(1);
+  transition: transform 0.2s;
+}
+
+/* 提示卡片 */
+.tips-card {
+  background: linear-gradient(135deg, #F0FDFA, #CCFBF1);
+  border: 1px solid #99F6E4;
+  border-radius: 14px;
+  padding: 16px;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.tips-card i {
+  font-size: 18px;
+  color: #0D9488;
+  margin-top: 2px;
+}
+
+.tips-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #115E59;
+  margin-bottom: 4px;
+}
+
+.tips-text {
+  font-size: 13px;
+  color: #0F766E;
+  line-height: 1.6;
 }
 
 .modal-footer {
-  padding: 20px 30px 25px;  /* 减小padding */
+  padding: 16px 28px 20px;
+  border-top: 1px solid #F1F5F9;
   display: flex;
-  justify-content: center;
-  flex-shrink: 0;
-  border-top: 2px solid #f0f0f0;
+  justify-content: flex-end;
+  gap: 12px;
 }
 
-.start-btn {
-  background: #FF7222;
-  color: #FFF;
+.btn-cancel {
+  padding: 10px 24px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #64748B;
+  background: #F1F5F9;
   border: none;
-  padding: 18px 60px;  /* 减小按钮 */
-  border-radius: 40px;
-  font-size: 24px;  /* 减小字体 */
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-cancel:hover {
+  background: #E2E8F0;
+}
+
+.btn-start {
+  padding: 10px 32px;
+  border-radius: 12px;
+  font-size: 14px;
   font-weight: bold;
+  color: #fff;
+  background: linear-gradient(135deg, #0D9488, #0F766E);
+  border: none;
   cursor: pointer;
   transition: transform 0.2s, box-shadow 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
-.start-btn:hover {
-  transform: scale(1.05);
-  box-shadow: 0 6px 30px rgba(255, 114, 34, 0.5);
+.btn-start:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px rgba(13, 148, 136, 0.3);
 }
 
-.start-btn:active {
-  transform: scale(0.98);
+/* 入场动画 */
+.fade-up {
+  animation: fadeInUp 0.5s ease forwards;
 }
 
-/* 响应式设计 */
-@media (max-width: 1200px) {
-  .learning-layout {
-    gap: 20px;
+.fade-up-d1 {
+  animation-delay: 0.05s;
+  opacity: 0;
+}
+
+.fade-up-d2 {
+  animation-delay: 0.1s;
+  opacity: 0;
+}
+
+.fade-up-d3 {
+  animation-delay: 0.15s;
+  opacity: 0;
+}
+
+.fade-up-d4 {
+  animation-delay: 0.2s;
+  opacity: 0;
+}
+
+@media (max-width: 1024px) {
+  .split-layout {
+    grid-template-columns: 1fr;
   }
   
-  .left-panel {
-    min-width: 300px;
+  .right-two-col {
+    grid-template-columns: 1fr;
   }
   
-  .l-card {
-    padding: 20px;
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
   }
   
-  .l-icon {
-    font-size: 40px;
+  .duration-list {
+    flex-direction: column;
   }
   
-  .l-text h3 {
-    font-size: 20px;
-  }
-  
-  .l-text p {
-    font-size: 14px;
+  .custom-legend {
+    margin-left: auto;
   }
 }
 </style>
