@@ -20,7 +20,7 @@ import sounddevice as sd
 # ================= 配置 =================
 PORT = 5000
 CAMERA_ID = 1  # 外接摄像头
-IP_CAMERA_URL = "http://192.168.3.94:8080/video"
+IP_CAMERA_URL = "http://192.168.137.25:8080/video"
 
 # 模型路径
 BASE_DIR = Path(__file__).parent

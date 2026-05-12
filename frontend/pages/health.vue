@@ -3,168 +3,136 @@
     <!-- 顶部导航 -->
     <header class="page-header">
       <div class="flex items-center gap-2">
-        <span class="font-bold text-xl tracking-tight">健康中心</span>
+        <span style="font-size:24px;font-weight:800;color:#1E293B">健康中心</span>
       </div>
-      <div class="flex items-center gap-1.5 bg-slate-50 p-0.5 rounded-lg">
-        <button class="tab-btn" :class="{active:activeTab==='cardio'}" @click="switchTab('cardio')"><i class="fas fa-lungs mr-1" style="font-size:16px"></i>心肺</button>
-        <button class="tab-btn" :class="{active:activeTab==='emotion'}" @click="switchTab('emotion')"><i class="fas fa-brain mr-1" style="font-size:16px"></i>情绪</button>
-        <button class="tab-btn" :class="{active:activeTab==='sleep'}" @click="switchTab('sleep')"><i class="fas fa-moon mr-1" style="font-size:16px"></i>睡眠</button>
+      <div class="flex items-center">
+        <button class="tab-btn" :class="{active:activeTab==='cardio'}" @click="switchTab('cardio')" style="margin-right: 32px;"><i class="fas fa-lungs" style="font-size:24px; margin-right: 12px;"></i>心肺健康</button>
+        <button class="tab-btn" :class="{active:activeTab==='emotion'}" @click="switchTab('emotion')" style="margin-right: 32px;"><i class="fas fa-brain" style="font-size:24px; margin-right: 12px;"></i>情绪健康</button>
+        <button class="tab-btn" :class="{active:activeTab==='sleep'}" @click="switchTab('sleep')"><i class="fas fa-moon" style="font-size:24px; margin-right: 12px;"></i>睡眠健康</button>
       </div>
       <div class="flex items-center gap-2">
-        <span class="text-[11px] text-slate-400">{{currentTime}}</span>
+        <span style="font-size:16px;font-weight:700;color:#64748B">{{currentTime}}</span>
       </div>
     </header>
 
     <!-- 心肺健康 -->
     <section v-show="activeTab=='cardio'" class="split fade-up">
       <!-- 左侧面板 -->
-      <div class="left-col">
-        <!-- 健康摘要 -->
-        <div class="card" style="padding:12px">
-          <div class="flex items-center justify-between mb-2">
-            <div class="flex items-center gap-1.5"><div class="w-4 h-4 rounded bg-teal-50 flex items-center justify-center"><i class="fas fa-heart-pulse text-teal-600" style="font-size:8px"></i></div><h3 class="font-bold text-xs">健康摘要</h3></div>
-            <span class="text-[9px] text-teal-600 font-semibold bg-teal-50 px-1.5 py-0.5 rounded">实时</span>
-          </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
-            <div class="mini-st">
-              <div class="m-label">心率</div>
-              <div class="flex items-baseline gap-0.5 mt-0.5"><span class="m-val text-lg" style="color:#0D9488">{{ healthData.hr }}</span><span class="m-unit">bpm</span></div>
-              <div class="flex items-center gap-0.5 mt-0.5"><i class="fas fa-check text-green-500" style="font-size:8px"></i><span class="text-[9px] text-green-600">正常</span></div>
+      <div class="left-col" style="margin-top:20px">
+        <!-- 实时数据 -->
+        <div class="card" style="padding:16px">
+          <h3 style="font-size:18px;font-weight:700;margin-bottom:16px;color:#1E293B">实时数据</h3>
+          <div style="display:flex;flex-direction:column;gap:12px">
+            <!-- 心率卡片 -->
+            <div class="mini-st" style="display:flex;align-items:center;justify-content:space-between;padding:16px;height:55px">
+              <span style="font-size:18px;font-weight:600;color:#64748B">心率</span>
+              <span style="font-size:36px;font-weight:700;color:#0D9488">{{ healthData.hr }}</span>
+              <span style="font-size:18px;color:#94A3B8">bpm</span>
             </div>
-            <div class="mini-st">
-              <div class="m-label">呼吸率</div>
-              <div class="flex items-baseline gap-0.5 mt-0.5"><span class="m-val text-lg" style="color:#F97316">{{ healthData.br }}</span><span class="m-unit">/min</span></div>
-              <div class="flex items-center gap-0.5 mt-0.5"><i class="fas fa-check text-green-500" style="font-size:8px"></i><span class="text-[9px] text-green-600">正常</span></div>
+            <!-- 呼吸率卡片 -->
+            <div class="mini-st" style="display:flex;align-items:center;justify-content:space-between;padding:16px;height:55px">
+              <span style="font-size:18px;font-weight:600;color:#64748B">呼吸率</span>
+              <span style="font-size:36px;font-weight:700;color:#F97316">{{ healthData.br }}</span>
+              <span style="font-size:18px;color:#94A3B8">/min</span>
             </div>
-            <div class="mini-st">
-              <div class="m-label">心率储备</div>
-              <div class="flex items-baseline gap-0.5 mt-0.5"><span class="m-val">{{ healthData.hrr }}</span><span class="m-unit">%</span></div>
-              <div class="prog-bar mt-1"><div class="prog-fill" :style="{width:healthData.hrr+'%',background:healthData.hrr<60?'#0D9488':'#F97316'}"></div></div>
+            <!-- 心肺频率比指针 -->
+            <div class="card" style="padding:12px;height:180px">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+                <h3 style="font-size:18px;font-weight:700;color:#1E293B">心肺频率比</h3>
+                <span style="padding:0px 12px;border-radius:16px;font-size:14px;font-weight:600" :style="getCrStatusStyle()">
+                  {{ getCrStatus() }}
+                </span>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:center">
+                <div class="gauge-container">
+                  <svg viewBox="0 0 160 88" width="160" height="88">
+                    <path d="M 20 80 A 60 60 0 0 1 140 80" fill="none" stroke="#E2E8F0" stroke-width="10" stroke-linecap="round"/>
+                    <path d="M 20 80 A 60 60 0 0 1 140 80" fill="none" :stroke="crColor" stroke-width="10" stroke-linecap="round" :stroke-dasharray="crProgress" :stroke-dashoffset="crOffset"/>
+                    <line x1="80" y1="80" :x2="crNeedleX" :y2="crNeedleY" stroke="#1E293B" stroke-width="2" stroke-linecap="round"/>
+                    <circle cx="80" cy="80" r="3" fill="#1E293B"/>
+                  </svg>
+                </div>
+                <div class="m-val text-3xl mt-1" style="color:#0D9488">{{ healthData.cr }}</div>
+              </div>
             </div>
-            <div class="mini-st">
-              <div class="m-label">心肺频率比</div>
-              <div class="flex items-baseline gap-0.5 mt-0.5"><span class="m-val">{{ healthData.cr }}</span></div>
-              <span class="text-[9px] text-slate-400 mt-0.5 block">理想 4-6</span>
-            </div>
-            <div class="mini-st">
-              <div class="m-label">呼吸变异性</div>
-              <div class="flex items-baseline gap-0.5 mt-0.5"><span class="m-val">{{ healthData.brv }}</span><span class="m-unit">%</span></div>
-            </div>
-            <div class="mini-st">
-              <div class="m-label">呼吸急促度</div>
-              <div class="flex items-baseline gap-0.5 mt-0.5"><span class="m-val">{{ healthData.brel }}</span><span class="m-unit">%</span></div>
-            </div>
-            <div class="mini-st">
-              <div class="m-label">心率斜率</div>
-              <div class="flex items-baseline gap-0.5 mt-0.5"><span class="m-val">{{ healthData.hrSlope }}</span></div>
-            </div>
-            <div class="mini-st">
-              <div class="m-label">相位锁定值</div>
-              <div class="flex items-baseline gap-0.5 mt-0.5"><span class="m-val">{{ healthData.plv }}</span></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 健康指南 -->
-        <div class="card" style="padding:12px">
-          <div class="flex items-center gap-1.5 mb-2"><div class="w-4 h-4 rounded bg-emerald-50 flex items-center justify-center"><i class="fas fa-book-medical text-emerald-500" style="font-size:8px"></i></div><h3 class="font-bold text-xs">健康指南</h3></div>
-          <div class="flex flex-col gap-1.5">
-            <div class="adv-item" v-for="(a,i) in cardioAdvices" :key="i">
-              <div class="w-6 h-6 rounded flex items-center justify-center shrink-0" :style="{background:a.bg}"><i :class="a.icon" style="font-size:9px" :style="{color:a.color}"></i></div>
-              <div><div class="text-[11px] font-semibold text-slate-700">{{a.title}}</div><div class="text-[9px] text-slate-400">{{a.desc}}</div></div>
+            <!-- 呼吸急促度指针 -->
+            <div class="card" style="padding:12px;height:180px">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+                <h3 style="font-size:18px;font-weight:700;color:#1E293B">呼吸急促度</h3>
+                <span style="padding:0px 12px;border-radius:16px;font-size:14px;font-weight:600" :style="getBrelStatusStyle()">
+                  {{ getBrelStatus() }}
+                </span>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:center">
+                <div class="gauge-container">
+                  <svg viewBox="0 0 160 88" width="160" height="88">
+                    <path d="M 20 80 A 60 60 0 0 1 140 80" fill="none" stroke="#E2E8F0" stroke-width="10" stroke-linecap="round"/>
+                    <path d="M 20 80 A 60 60 0 0 1 140 80" fill="none" :stroke="brelColor" stroke-width="10" stroke-linecap="round" :stroke-dasharray="brelProgress" :stroke-dashoffset="brelOffset"/>
+                    <line x1="80" y1="80" :x2="brelNeedleX" :y2="brelNeedleY" stroke="#1E293B" stroke-width="2" stroke-linecap="round"/>
+                    <circle cx="80" cy="80" r="3" fill="#1E293B"/>
+                  </svg>
+                </div>
+                <div class="m-val text-3xl mt-1" :style="{color:brelColor}">{{ healthData.brel }}%</div>
+              </div>
             </div>
           </div>
         </div>
       </div>
 
       <!-- 右侧面板 -->
-      <div class="right-col">
+      <div class="right-col" style="margin-top:20px">
         <!-- 健康趋势 -->
-        <div class="card" style="padding:12px">
-          <div class="flex items-center justify-between mb-2">
-            <div class="flex items-center gap-1.5"><div class="w-4 h-4 rounded bg-indigo-50 flex items-center justify-center"><i class="fas fa-chart-line text-indigo-500" style="font-size:8px"></i></div><h3 class="font-bold text-xs">健康趋势</h3></div>
-            <div class="flex gap-0.5">
-              <button class="per-btn" :class="{active:period==='day'}" @click="period='day'">日</button>
-              <button class="per-btn" :class="{active:period==='week'}" @click="period='week'">周</button>
-              <button class="per-btn" :class="{active:period==='month'}" @click="period='month'">月</button>
+        <div class="card" style="padding:20px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+            <div style="font-size:17px;font-weight:700;color:#1E293B">健康趋势</div>
+            <div style="display:flex;gap:6px">
+              <button class="tab-btn2" :class="{active:period==='day'}" @click="period='day'">日</button>
+              <button class="tab-btn2" :class="{active:period==='week'}" @click="period='week'">周</button>
+              <button class="tab-btn2" :class="{active:period==='year'}" @click="period='year'">年</button>
             </div>
           </div>
-          <div class="trend-chart">
-            <div class="chart-bars">
-              <div 
-                v-for="(item, index) in hrTrendData" 
-                :key="index"
-                class="chart-bar hr-bar"
-                :style="{ height: (item / 100 * 100) + '%' }"
-              >
-                <div class="bar-value">{{ item }}</div>
+          <div style="height:215px;position:relative">
+            <canvas ref="chartCanvas"></canvas>
+          </div>
+          <div id="stats" style="display:flex;gap:12px;margin-top:12px"></div>
+        </div>
+
+        <!-- 健康指南 -->
+        <div class="card" style="padding:15px">
+          <h3 style="font-size:18px;font-weight:700;margin-bottom:10px;color:#1E293B">健康指南</h3>
+          <div style="display:flex;gap:16px">
+            <div class="card" style="flex:1;padding:16px;display:flex;flex-direction:column;align-items:center">
+              <div style="width:70px;height:70px;margin-bottom:10px">
+                <svg viewBox="0 0 80 80">
+                  <circle cx="40" cy="40" r="35" fill="none" stroke="#E2E8F0" stroke-width="6"/>
+                  <circle cx="40" cy="40" r="35" fill="none" stroke="#0D9488" stroke-width="6" stroke-linecap="round" :stroke-dasharray="220" :stroke-dashoffset="220*(1-0.75)"/>
+                  <text x="40" y="46" text-anchor="middle" font-size="18" font-weight="700" fill="#1E293B">75%</text>
+                </svg>
               </div>
+              <div style="font-size:15px;font-weight:600;color:#1E293B;margin-bottom:4px">有氧运动</div>
+              <div style="font-size:11px;color:#64748B;text-align:center">每日30分钟中等强度</div>
             </div>
-          </div>
-        </div>
-
-        <!-- 波形图 一排 -->
-        <div class="right-2col">
-          <div class="card" style="padding:12px">
-            <div class="flex items-center justify-between mb-1.5">
-              <div class="flex items-center gap-1"><div class="w-1.5 h-1.5 rounded-full bg-teal-500 pulse-d"></div><span class="font-bold text-[11px]">心率波形</span></div>
-              <span class="m-val text-base" style="color:#0D9488">{{ healthData.hr }}</span>
+            <div class="card" style="flex:1;padding:16px;display:flex;flex-direction:column;align-items:center">
+              <div style="width:70px;height:70px;margin-bottom:10px">
+                <svg viewBox="0 0 80 80">
+                  <circle cx="40" cy="40" r="35" fill="none" stroke="#E2E8F0" stroke-width="6"/>
+                  <circle cx="40" cy="40" r="35" fill="none" stroke="#F97316" stroke-width="6" stroke-linecap="round" :stroke-dasharray="220" :stroke-dashoffset="220*(1-0.6)"/>
+                  <text x="40" y="46" text-anchor="middle" font-size="18" font-weight="700" fill="#1E293B">60%</text>
+                </svg>
+              </div>
+              <div style="font-size:15px;font-weight:600;color:#1E293B;margin-bottom:4px">深呼吸</div>
+              <div style="font-size:11px;color:#64748B;text-align:center">腹式呼吸每天5分钟</div>
             </div>
-            <div class="wave-chart">
-              <svg viewBox="0 0 400 120" preserveAspectRatio="none">
-                <polyline :points="hrWavePoints" fill="none" stroke="#0D9488" stroke-width="2" />
-              </svg>
-            </div>
-          </div>
-          <div class="card" style="padding:12px">
-            <div class="flex items-center justify-between mb-1.5">
-              <div class="flex items-center gap-1"><div class="w-1.5 h-1.5 rounded-full bg-orange-500 pulse-d"></div><span class="font-bold text-[11px]">呼吸波形</span></div>
-              <span class="m-val text-base" style="color:#F97316">{{ healthData.br }}</span>
-            </div>
-            <div class="wave-chart">
-              <svg viewBox="0 0 400 120" preserveAspectRatio="none">
-                <polyline :points="brWavePoints" fill="none" stroke="#F97316" stroke-width="2" />
-              </svg>
-            </div>
-          </div>
-        </div>
-
-        <!-- 仪表盘 一排 -->
-        <div class="right-2col">
-          <div class="card" style="padding:12px;display:flex;flex-direction:column;align-items:center">
-            <h3 class="font-bold text-[11px] mb-2 self-start">心肺频率比</h3>
-            <div class="gauge-container">
-              <svg viewBox="0 0 160 88" width="160" height="88">
-                <path d="M 20 80 A 60 60 0 0 1 140 80" fill="none" stroke="#E2E8F0" stroke-width="10" stroke-linecap="round"/>
-                <path d="M 20 80 A 60 60 0 0 1 140 80" fill="none" :stroke="crColor" stroke-width="10" stroke-linecap="round" :stroke-dasharray="crProgress" :stroke-dashoffset="crOffset"/>
-                <line x1="80" y1="80" :x2="crNeedleX" :y2="crNeedleY" stroke="#1E293B" stroke-width="2" stroke-linecap="round"/>
-                <circle cx="80" cy="80" r="3" fill="#1E293B"/>
-              </svg>
-            </div>
-            <div class="m-val text-2xl mt-1" style="color:#0D9488">{{ healthData.cr }}</div>
-            <div class="text-[9px] text-slate-400 mt-0.5">理想范围 4.0 - 6.0</div>
-            <div class="flex gap-3 mt-1.5 text-[9px]">
-              <span class="flex items-center gap-0.5"><span class="w-1.5 h-1.5 rounded-full" style="background:#10B981"></span>偏低</span>
-              <span class="flex items-center gap-0.5"><span class="w-1.5 h-1.5 rounded-full" style="background:#0D9488"></span>正常</span>
-              <span class="flex items-center gap-0.5"><span class="w-1.5 h-1.5 rounded-full" style="background:#F97316"></span>偏高</span>
-            </div>
-          </div>
-          <div class="card" style="padding:12px;display:flex;flex-direction:column;align-items:center">
-            <h3 class="font-bold text-[11px] mb-2 self-start">呼吸急促度</h3>
-            <div class="gauge-container">
-              <svg viewBox="0 0 160 88" width="160" height="88">
-                <path d="M 20 80 A 60 60 0 0 1 140 80" fill="none" stroke="#E2E8F0" stroke-width="10" stroke-linecap="round"/>
-                <path d="M 20 80 A 60 60 0 0 1 140 80" fill="none" :stroke="brelColor" stroke-width="10" stroke-linecap="round" :stroke-dasharray="brelProgress" :stroke-dashoffset="brelOffset"/>
-                <line x1="80" y1="80" :x2="brelNeedleX" :y2="brelNeedleY" stroke="#1E293B" stroke-width="2" stroke-linecap="round"/>
-                <circle cx="80" cy="80" r="3" fill="#1E293B"/>
-              </svg>
-            </div>
-            <div class="m-val text-2xl mt-1" :style="{color:brelColor}">{{ healthData.brel }}%</div>
-            <div class="text-[9px] text-slate-400 mt-0.5">正常 &lt; 30%</div>
-            <div class="flex gap-3 mt-1.5 text-[9px]">
-              <span class="flex items-center gap-0.5"><span class="w-1.5 h-1.5 rounded-full" style="background:#10B981"></span>平稳</span>
-              <span class="flex items-center gap-0.5"><span class="w-1.5 h-1.5 rounded-full" style="background:#F97316"></span>轻度</span>
-              <span class="flex items-center gap-0.5"><span class="w-1.5 h-1.5 rounded-full" style="background:#EF4444"></span>急促</span>
+            <div class="card" style="flex:1;padding:16px;display:flex;flex-direction:column;align-items:center">
+              <div style="width:70px;height:70px;margin-bottom:10px">
+                <svg viewBox="0 0 80 80">
+                  <circle cx="40" cy="40" r="35" fill="none" stroke="#E2E8F0" stroke-width="6"/>
+                  <circle cx="40" cy="40" r="35" fill="none" stroke="#3B82F6" stroke-width="6" stroke-linecap="round" :stroke-dasharray="220" :stroke-dashoffset="220*(1-0.85)"/>
+                  <text x="40" y="46" text-anchor="middle" font-size="18" font-weight="700" fill="#1E293B">85%</text>
+                </svg>
+              </div>
+              <div style="font-size:15px;font-weight:600;color:#1E293B;margin-bottom:4px">充足睡眠</div>
+              <div style="font-size:11px;color:#64748B;text-align:center">7-9小时优质睡眠</div>
             </div>
           </div>
         </div>
@@ -172,119 +140,110 @@
     </section>
 
     <!-- 情绪健康 -->
-    <section v-show="activeTab=='emotion'" class="split fade-up">
+    <section v-show="activeTab=='emotion'" class="split fade-up" style="margin-top:20px">
       <div class="left-col">
-        <!-- 视频流 -->
-        <div class="card" style="padding:10px">
-          <div class="flex items-center justify-between mb-2">
-            <div class="flex items-center gap-1.5"><div class="w-4 h-4 rounded bg-slate-100 flex items-center justify-center"><i class="fas fa-video text-slate-500" style="font-size:8px"></i></div><h3 class="font-bold text-xs">视频流</h3></div>
-            <span class="live-tag"><span class="w-1 h-1 rounded-full bg-red-500 pulse-d"></span>LIVE</span>
-          </div>
-          <div class="vid-box" style="height:170px">
-            <div class="scan-ln"></div>
-            <div class="absolute inset-0 flex flex-col items-center justify-center text-white/50">
-              <i class="fas fa-video text-xl mb-1"></i>
-              <span class="text-[10px]">摄像头未连接</span>
+        <!-- 实时情绪 -->
+        <div class="card emotion-card" style="padding:16px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+            <span style="font-size:16px;font-weight:600;color:#1E293B">实时情绪</span>
+            <div style="display:flex;align-items:center;gap:12px">
+              <span :style="{color:personDetected?'#10B981':'#94A3B8',fontSize:'16px',fontWeight:'600'}">
+                {{ personDetected ? '有人' : '无人' }}
+              </span>
             </div>
-            <div style="position:absolute;top:18%;left:26%;width:48%;height:58%;border:1.5px solid rgba(13,148,136,.45);border-radius:50%"></div>
           </div>
-          <div class="flex gap-1.5 mt-2">
-            <button class="flex-1 py-1.5 rounded-lg text-[10px] font-semibold bg-teal-50 text-teal-700 hover:bg-teal-100 transition border border-teal-100"><i class="fas fa-camera mr-0.5"></i>本地</button>
-            <button class="flex-1 py-1.5 rounded-lg text-[10px] font-semibold bg-slate-50 text-slate-600 hover:bg-slate-100 transition border border-slate-200"><i class="fas fa-globe mr-0.5"></i>IP</button>
+          <div class="emo-bar" style="height:12px;margin-bottom:12px">
+            <div :style="{width:(fusionEmotion.positive||emotion.fusion.positive)+'%',background:'#10B981'}"></div>
+            <div :style="{width:(fusionEmotion.neutral||emotion.fusion.neutral)+'%',background:'#94A3B8'}"></div>
+            <div :style="{width:(fusionEmotion.negative||emotion.fusion.negative)+'%',background:'#EF4444'}"></div>
           </div>
-        </div>
-
-        <!-- 情绪通道 -->
-        <div class="card" style="padding:12px">
-          <div class="flex items-center gap-1.5 mb-2"><div class="w-4 h-4 rounded bg-indigo-50 flex items-center justify-center"><i class="fas fa-layer-group text-indigo-500" style="font-size:8px"></i></div><h3 class="font-bold text-xs">情绪通道</h3></div>
-          <!-- AU -->
-          <div class="mb-2.5">
-            <div class="flex items-center justify-between mb-1"><span class="text-[11px] font-semibold text-slate-600">AU 通道</span><span class="m-val text-sm" style="color:#0D9488">{{ emotion.auScore.toFixed(2) }}</span></div>
-            <div class="emo-bar"><div :style="{width:emotion.au.positive+'%',background:'#10B981'}"></div><div :style="{width:emotion.au.neutral+'%',background:'#94A3B8'}"></div><div :style="{width:emotion.au.negative+'%',background:'#EF4444'}"></div></div>
-            <div class="flex justify-between mt-0.5 text-[9px] text-slate-400"><span>积极{{ emotion.au.positive }}%</span><span>中性{{ emotion.au.neutral }}%</span><span>消极{{ emotion.au.negative }}%</span></div>
-          </div>
-          <!-- FER+ -->
-          <div class="mb-2.5">
-            <div class="flex items-center justify-between mb-1"><span class="text-[11px] font-semibold text-slate-600">FER+ 通道</span><span class="m-val text-sm" style="color:#F97316">{{ emotion.ferScore.toFixed(2) }}</span></div>
-            <div class="emo-bar"><div :style="{width:emotion.fer.positive+'%',background:'#10B981'}"></div><div :style="{width:emotion.fer.neutral+'%',background:'#94A3B8'}"></div><div :style="{width:emotion.fer.negative+'%',background:'#EF4444'}"></div></div>
-            <div class="flex justify-between mt-0.5 text-[9px] text-slate-400"><span>积极{{ emotion.fer.positive }}%</span><span>中性{{ emotion.fer.neutral }}%</span><span>消极{{ emotion.fer.negative }}%</span></div>
-          </div>
-          <!-- 融合 -->
-          <div class="pt-2 border-t border-slate-100">
-            <div class="flex items-center justify-between mb-1"><span class="text-[11px] font-bold text-slate-700">融合结果</span><span class="m-val text-base" style="color:#0F766E">{{ emotion.fusionScore.toFixed(2) }}</span></div>
-            <div class="emo-bar" style="height:8px"><div :style="{width:emotion.fusion.positive+'%',background:'#10B981'}"></div><div :style="{width:emotion.fusion.neutral+'%',background:'#94A3B8'}"></div><div :style="{width:emotion.fusion.negative+'%',background:'#EF4444'}"></div></div>
-            <div class="flex justify-between mt-0.5 text-[9px] text-slate-400"><span>积极{{ emotion.fusion.positive }}%</span><span>中性{{ emotion.fusion.neutral }}%</span><span>消极{{ emotion.fusion.negative }}%</span></div>
+          <div style="display:flex;align-items:center;justify-content:center">
+            <span style="font-size:14px;color:#64748B;margin-right:4px">积极:</span>
+            <span style="font-size:28px;color:#10B981;font-weight:700">{{ personDetected ? ((fusionEmotion.positive||emotion.fusion.positive)).toFixed(0) + '%' : '--' }}</span>
           </div>
         </div>
 
         <!-- 压力值 -->
-        <div class="card" style="padding:12px;display:flex;flex-direction:column;align-items:center">
-          <h3 class="font-bold text-xs mb-2 self-start">压力值</h3>
-          <div class="relative" style="width:100px;height:100px">
-            <svg viewBox="0 0 100 100" class="prog-ring" width="100" height="100">
-              <circle cx="50" cy="50" r="42" fill="none" stroke="#F1F5F9" stroke-width="7"/>
-              <circle cx="50" cy="50" r="42" fill="none" :stroke="pressureColor" stroke-width="7" stroke-linecap="round" :stroke-dasharray="2*Math.PI*42" :stroke-dashoffset="2*Math.PI*42*(1-emotion.stress/100)"/>
+        <div class="card" style="padding:12px;height:200px;display:flex;flex-direction:column;align-items:center">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;align-self:stretch">
+            <h3 style="font-size:18px;font-weight:700;color:#1E293B">压力值</h3>
+            <span style="padding:4px 12px;border-radius:16px;font-size:14px;font-weight:600" :style="getStressStatusStyle()">
+              {{ getStressStatus() }}
+            </span>
+          </div>
+          <div class="gauge-container">
+            <svg viewBox="0 0 160 88" width="160" height="88">
+              <path d="M 20 80 A 60 60 0 0 1 140 80" fill="none" stroke="#E2E8F0" stroke-width="10" stroke-linecap="round"/>
+              <path d="M 20 80 A 60 60 0 0 1 140 80" fill="none" :stroke="pressureColor" stroke-width="10" stroke-linecap="round" :stroke-dasharray="stressProgress" :stroke-dashoffset="stressOffset"/>
+              <line x1="80" y1="80" :x2="stressNeedleX" :y2="stressNeedleY" stroke="#1E293B" stroke-width="2" stroke-linecap="round"/>
+              <circle cx="80" cy="80" r="3" fill="#1E293B"/>
             </svg>
-            <div class="absolute inset-0 flex flex-col items-center justify-center" style="transform:rotate(90deg)">
-              <span class="m-val text-xl" :style="{color:pressureColor}">{{ emotion.stress }}</span>
-              <span class="text-[8px] text-slate-400">/100</span>
+          </div>
+          <div class="m-val text-3xl mt-1" :style="{color:pressureColor}">{{ emotion.stress }}</div>
+        </div>
+
+        <!-- 视频流 -->
+        <div class="card" style="padding:10px">
+          <h3 style="font-size:18px;font-weight:700;margin-bottom:12px;color:#1E293B">视频流</h3>
+          <div style="height:170px;background:#F1F5F9;display:flex;align-items:center;justify-content:center;border-radius:8px;overflow:hidden">
+            <img src="http://192.168.137.25:8080/video" style="width:100%;height:100%;object-fit:cover" @error="e=>{e.target.style.display='none';e.target.nextElementSibling.style.display='flex'}" onerror="this.style.display='none'">
+            <div style="display:none;flex-direction:column;align-items:center;justify-content:center;color:#94A3B8">
+              <i class="fas fa-video text-2xl mb-2"></i>
+              <span style="font-size:14px">未连接</span>
             </div>
           </div>
-          <div class="text-[11px] font-semibold mt-1.5" :style="{color:pressureColor}">{{ pressureLabel }}</div>
         </div>
       </div>
 
       <div class="right-col">
-        <!-- 情绪时序图 -->
-        <div class="card" style="padding:12px">
-          <div class="flex items-center justify-between mb-2">
-            <div class="flex items-center gap-1.5"><div class="w-4 h-4 rounded bg-rose-50 flex items-center justify-center"><i class="fas fa-wave-square text-rose-500" style="font-size:8px"></i></div><h3 class="font-bold text-xs">情绪时序图</h3><span class="live-tag"><span class="w-1 h-1 rounded-full bg-red-500 pulse-d"></span>LIVE</span></div>
-            <div class="flex gap-0.5">
-              <button class="per-btn" :class="{active:emoPeriod==='day'}" @click="emoPeriod='day'">日</button>
-              <button class="per-btn" :class="{active:emoPeriod==='week'}" @click="emoPeriod='week'">周</button>
-              <button class="per-btn" :class="{active:emoPeriod==='month'}" @click="emoPeriod='month'">月</button>
-              <button class="per-btn" :class="{active:emoPeriod==='year'}" @click="emoPeriod='year'">年</button>
-            </div>
-          </div>
-          <div class="wave-chart">
-            <svg viewBox="0 0 600 150" preserveAspectRatio="none">
-              <polyline :points="neutralPoints" fill="none" stroke="#94a3b8" stroke-width="2" stroke-dasharray="5,5" />
-              <polyline :points="positivePoints" fill="none" stroke="#10B981" stroke-width="2" />
-              <polyline :points="negativePoints" fill="none" stroke="#EF4444" stroke-width="2" />
-            </svg>
-          </div>
-        </div>
-
-        <!-- 情绪趋势 + 情绪分析 -->
-        <div class="right-2col">
-          <div class="card" style="padding:12px">
-            <div class="flex items-center gap-1.5 mb-2"><div class="w-4 h-4 rounded bg-teal-50 flex items-center justify-center"><i class="fas fa-chart-bar text-teal-600" style="font-size:8px"></i></div><h3 class="font-bold text-xs">情绪趋势</h3></div>
-            <div class="stacked-bar-chart">
-              <div class="stacked-bars">
-                <div v-for="(day, index) in emotionWeeklyData" :key="index" class="stacked-bar-group">
-                  <div class="stacked-bar neutral" :style="{height:day.neutral+'%'}"></div>
-                  <div class="stacked-bar positive" :style="{height:day.positive+'%'}"></div>
-                  <div class="stacked-bar negative" :style="{height:day.negative+'%'}"></div>
+        <!-- 情绪趋势 - 只有日、周、年 -->
+        <div class="card" style="padding:20px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+            <div style="font-size:17px;font-weight:700;color:#1E293B">情绪趋势</div>
+            <div style="display:flex;align-items:center;gap:16px">
+              <div style="display:flex;align-items:center;gap:8px">
+                <div style="display:flex;align-items:center;gap:4px">
+                  <span style="display:inline-block;width:20px;height:2px;background:#10B981"></span>
+                  <span style="font-size:12px;color:#64748B">积极</span>
                 </div>
+                <div style="display:flex;align-items:center;gap:4px">
+                  <span style="display:inline-block;width:20px;height:2px;background:#94A3B8;border-style:dashed;border-width:2px;border-bottom:none"></span>
+                  <span style="font-size:12px;color:#64748B">压力</span>
+                </div>
+              </div>
+              <div style="display:flex;gap:6px">
+                <button class="tab-btn2" :class="{active:emoPeriod==='day'}" @click="emoPeriod='day'">日</button>
+                <button class="tab-btn2" :class="{active:emoPeriod==='week'}" @click="emoPeriod='week'">周</button>
+                <button class="tab-btn2" :class="{active:emoPeriod==='year'}" @click="emoPeriod='year'">年</button>
               </div>
             </div>
           </div>
-          <div class="card" style="padding:12px">
-            <div class="flex items-center gap-1.5 mb-2"><div class="w-4 h-4 rounded bg-amber-50 flex items-center justify-center"><i class="fas fa-magnifying-glass-chart text-amber-500" style="font-size:8px"></i></div><h3 class="font-bold text-xs">情绪分析</h3></div>
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-bottom:8px">
-              <div class="mini-st text-center"><div class="m-label">主导</div><div class="m-val text-xs mt-0.5" style="color:#0D9488">{{ emotion.analysis.dominant }}</div></div>
-              <div class="mini-st text-center"><div class="m-label">稳定性</div><div class="m-val text-xs mt-0.5" style="color:#10B981">{{ emotion.analysis.stability }}</div></div>
-              <div class="mini-st text-center"><div class="m-label">波动</div><div class="m-val text-xs mt-0.5" style="color:#F97316">{{ emotion.analysis.volatility }}</div></div>
+          <div style="height:200px;position:relative">
+            <canvas ref="emotionChartCanvas"></canvas>
+          </div>
+          <div id="emotionStats" style="display:flex;gap:12px;margin-top:12px"></div>
+        </div>
+
+        <!-- 情绪分析 -->
+        <div class="card" style="padding:20px">
+          <h3 style="font-size:17px;font-weight:700;color:#1E293B;margin-bottom:16px">情绪分析</h3>
+          <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:16px">
+            <div class="mini-st" style="padding:12px;display:flex;align-items:center;justify-content:space-between">
+              <span style="font-size:14px;color:#64748B">主导</span>
+              <span style="font-size:20px;font-weight:700;color:#0D9488">{{ emotion.analysis.dominant }}</span>
             </div>
-            <div class="bg-teal-50/50 rounded-lg p-2.5 border border-teal-100 mb-2">
-              <div class="text-[10px] font-semibold text-teal-800 mb-0.5">摘要</div>
-              <p class="text-[9px] text-teal-700 leading-relaxed">积极情绪占比{{ emotion.fusion.positive }}%，消极情绪维持较低水平。压力指数{{ emotion.stress }}，处于健康范围。</p>
+            <div class="mini-st" style="padding:12px;display:flex;align-items:center;justify-content:space-between">
+              <span style="font-size:14px;color:#64748B">稳定性</span>
+              <span style="font-size:20px;font-weight:700;color:#10B981">{{ emotion.analysis.stability }}</span>
             </div>
-            <div class="text-[10px] font-semibold text-slate-700 mb-1">建议</div>
-            <div class="flex flex-col gap-1">
-              <div class="adv-item" style="padding:6px 8px"><i class="fas fa-spa text-teal-500" style="font-size:9px"></i><span class="text-[9px] text-slate-600">深呼吸练习维持情绪稳定</span></div>
-              <div class="adv-item" style="padding:6px 8px"><i class="fas fa-music text-orange-500" style="font-size:9px"></i><span class="text-[9px] text-slate-600">轻音乐增强积极体验</span></div>
+            <div class="mini-st" style="padding:12px;display:flex;align-items:center;justify-content:space-between">
+              <span style="font-size:14px;color:#64748B">波动</span>
+              <span style="font-size:20px;font-weight:700;color:#F97316">{{ emotion.analysis.volatility }}</span>
             </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:16px;padding:10px 12px;background:#f8f8f8;border-radius:10px">
+            <span style="font-size:14px;font-weight:600;color:#1E293B">建议</span>
+            <div class="adv-item" style="padding:0"><i class="fas fa-spa text-teal-500" style="font-size:16px"></i><span style="font-size:14px;color:#475569">深呼吸练习维持情绪稳定</span></div>
           </div>
         </div>
       </div>
@@ -443,15 +402,27 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue';
-import { useRouter } from 'vue-router';
+import { ref, computed, onMounted, onUnmounted, watchEffect } from 'vue'
+import { useRouter } from 'vue-router'
+import { watch } from 'vue'
+import systemStore from '../core/systemStore.js';
 
 const router = useRouter();
 const HLKK_PORT = 5020;
 const activeTab = ref('cardio');
 const period = ref('day');
-const emoPeriod = ref('week');
+const emoPeriod = ref('day');
 const currentTime = ref('');
+
+// SystemStore 数据
+const systemState = ref({});
+let unsubscribeStore = null;
+
+// 从 SystemStore 获取的感知数据
+const perception = computed(() => systemState.value.perception || {});
+const personDetected = computed(() => perception.value.personDetected || false);
+const faceData = computed(() => perception.value.face || {});
+const fusionEmotion = computed(() => faceData.value.fusion || {});
 
 const healthData = ref({ hr: 72, br: 16, cr: 4.5, brel: 15, signal: 'NORMAL', plv: 0.914, phaseDiff: 45, hrr: 38, brv: 12, hrSlope: 0.15 });
 
@@ -497,6 +468,172 @@ const sleepRem = ref(1.8);
 const sleepAwake = ref(0.5);
 const sleepPlv = ref(0.914);
 const totalSleep = computed(() => sleepDeep.value + sleepLight.value + sleepRem.value + sleepAwake.value);
+
+// 心肺频率比状态和样式
+const getCrStatus = () => {
+  if (healthData.value.cr < 4) return '偏低';
+  if (healthData.value.cr <= 6) return '正常';
+  return '偏高';
+};
+
+const getCrStatusStyle = () => {
+  if (healthData.value.cr < 4) return { backgroundColor: '#F0FDFA', color: '#0D9488' };
+  if (healthData.value.cr <= 6) return { backgroundColor: '#F0FDFA', color: '#0D9488' };
+  return { backgroundColor: '#FFF7ED', color: '#F97316' };
+};
+
+// 呼吸急促度状态和样式
+const getBrelStatus = () => {
+  if (healthData.value.brel < 30) return '平稳';
+  if (healthData.value.brel < 60) return '轻度';
+  return '急促';
+};
+
+const getBrelStatusStyle = () => {
+  if (healthData.value.brel < 30) return { backgroundColor: '#F0FDFA', color: '#0D9488' };
+  if (healthData.value.brel < 60) return { backgroundColor: '#FFF7ED', color: '#F97316' };
+  return { backgroundColor: '#FEF2F2', color: '#EF4444' };
+};
+
+// 趋势数据
+const chartCanvas = ref(null);
+let chart = null;
+let ChartLoaded = ref(null);
+
+const trendData = {
+  day: {
+    labels: Array.from({length:24},(_,i)=>`${String(i).padStart(2,'0')}:00`),
+    values: [1.05,1.02,0.98,0.95,0.92,0.88,0.96,1.10,1.22,1.18,1.30,1.28,1.15,1.32,1.45,1.62,1.55,1.40,1.28,1.18,1.35,1.48,1.25,1.10],
+    stats: [{val:'1.18',lab:'平均值'},{val:'1.62',lab:'最高值'},{val:'2.5h',lab:'异常时长'}]
+  },
+  week: {
+    labels: ['周一','周二','周三','周四','周五','周六','周日'],
+    normal: [18,20,16,22,19,14,21],
+    abnormal: [3,2,5,1,3,6,2],
+    stats: [{val:'130',lab:'正常总次数'},{val:'22',lab:'异常总次数'},{val:'周六',lab:'异常最多'}]
+  },
+  year: {
+    labels: ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'],
+    normal: [520,480,510,540,560,530,500,490,550,570,540,530],
+    abnormal: [45,52,38,30,25,35,48,55,28,22,32,38],
+    stats: [{val:'6,320',lab:'年度正常'},{val:'448',lab:'年度异常'},{val:'10月',lab:'最健康月份'}]
+  }
+};
+
+const MIN = 0.8, MAX = 1.5;
+
+async function loadChart() {
+  if (typeof window !== 'undefined' && !ChartLoaded.value) {
+    return new Promise((resolve) => {
+      const script = document.createElement('script');
+      script.src = '/js/chart.min.js';
+      script.onload = () => {
+        ChartLoaded.value = true;
+        resolve(window.Chart);
+      };
+      document.head.appendChild(script);
+    });
+  }
+  return window.Chart;
+}
+
+async function renderChart(tab) {
+  if (chart) chart.destroy();
+  const ctx = chartCanvas.value?.getContext('2d');
+  if (!ctx) return;
+  
+  const Chart = await loadChart();
+  if (!Chart) return;
+  
+  const d = trendData[tab];
+  
+  if (tab === 'day') {
+    const points = d.values.map(v => (v < MIN || v > MAX) ? 4 : 0);
+    const pColor = d.values.map(v => (v < MIN || v > MAX) ? '#f0654a' : '#0D9488');
+    const grad = ctx.createLinearGradient(0,0,0,200);
+    grad.addColorStop(0,'rgba(13,148,136,0.15)');
+    grad.addColorStop(1,'rgba(13,148,136,0)');
+
+    chart = new Chart(ctx, {
+      type:'line',
+      data:{
+        labels: d.labels,
+        datasets:[{
+          data: d.values, borderColor:'#0D9488', borderWidth:2,
+          backgroundColor: grad, fill:true, tension:0.4,
+          pointRadius: points, pointBackgroundColor: pColor,
+          pointBorderColor: pColor, pointHoverRadius:5
+        }]
+      },
+      options: lineOpts(),
+      plugins:[rangePlugin]
+    });
+  } else {
+    chart = new Chart(ctx, {
+      type:'bar',
+      data:{
+        labels: d.labels,
+        datasets:[
+          {label:'正常',data:d.normal,backgroundColor:'rgba(13,148,136,0.7)',borderRadius:4,barPercentage:0.6},
+          {label:'异常',data:d.abnormal,backgroundColor:'rgba(240,101,74,0.7)',borderRadius:4,barPercentage:0.6}
+        ]
+      },
+      options:{
+        responsive:true,maintainAspectRatio:false,
+        animation:{duration:500},
+        plugins:{
+          legend:{position:'top',align:'end',labels:{font:{size:11},boxWidth:10,padding:10}},
+          tooltip:{backgroundColor:'#fff',titleColor:'#333',bodyColor:'#333',borderColor:'#eee',borderWidth:1,cornerRadius:6,padding:8}
+        },
+        scales:{
+          x:{stacked:true,grid:{display:false},ticks:{color:'#aaa',font:{size:10}},border:{display:false}},
+          y:{stacked:true,beginAtZero:true,grid:{color:'rgba(0,0,0,0.04)'},ticks:{color:'#aaa',font:{size:10}},border:{display:false}}
+        }
+      }
+    });
+  }
+  
+  renderStats(tab);
+}
+
+function lineOpts() {
+  return {
+    responsive:true, maintainAspectRatio:false,
+    animation:{duration:500},
+    plugins:{legend:{display:false},tooltip:{
+      backgroundColor:'#fff', titleColor:'#333', bodyColor:'#333',
+      borderColor:'#eee', borderWidth:1, cornerRadius:6, padding:8
+    }},
+    scales:{
+      x:{grid:{color:'rgba(0,0,0,0.04)'},ticks:{color:'#aaa',font:{size:10},maxTicksLimit:8},border:{display:false}},
+      y:{min:0.5,max:2.0,grid:{color:'rgba(0,0,0,0.04)'},ticks:{color:'#aaa',font:{size:10}},border:{display:false}}
+    }
+  };
+}
+
+const rangePlugin = {
+  beforeDraw(c) {
+    const {ctx:c2,chartArea:{left,right},scales:{y}} = c;
+    const yT = y.getPixelForValue(MAX), yB = y.getPixelForValue(MIN);
+    c2.save();
+    c2.fillStyle = 'rgba(13,148,136,0.04)';
+    c2.fillRect(left, yT, right-left, yB-yT);
+    c2.setLineDash([5,3]);
+    c2.strokeStyle = 'rgba(200,170,50,0.3)';
+    c2.lineWidth = 1;
+    [yT,yB].forEach(yy => { c2.beginPath(); c2.moveTo(left,yy); c2.lineTo(right,yy); c2.stroke(); });
+    c2.restore();
+  }
+};
+
+function renderStats(tab) {
+  document.getElementById('stats').innerHTML = trendData[tab].stats.map(s =>
+    `<div style="flex:1;background:#f8f8f8;border-radius:10px;padding:10px 16px;display:flex;align-items:center;justify-content:space-between">
+      <div style="font-size:14px;color:#999">${s.lab}</div>
+      <div style="font-size:20px;font-weight:700;color:#1E293B">${s.val}</div>
+    </div>`
+  ).join('');
+}
 
 const cardioAdvices = ref([
   { title: '有氧运动', desc: '每日30分钟中等强度', icon: 'fas fa-running', bg: '#F0FDFA', color: '#0D9488' },
@@ -621,6 +758,146 @@ const brelNeedleAngle = computed(() => {
 const brelNeedleX = computed(() => 80 + Math.cos(brelNeedleAngle.value) * 42);
 const brelNeedleY = computed(() => 80 + Math.sin(brelNeedleAngle.value) * 42);
 
+// 压力值仪表盘
+const stressProgress = computed(() => {
+  const stress = Math.min(Math.max(emotion.value.stress, 0), 100);
+  const circumference = Math.PI * 120;
+  return `${stress / 100 * circumference} ${circumference}`;
+});
+
+const stressOffset = computed(() => 0);
+
+const stressNeedleAngle = computed(() => {
+  const stress = Math.min(Math.max(emotion.value.stress, 0), 100);
+  return Math.PI + stress / 100 * Math.PI;
+});
+
+const stressNeedleX = computed(() => 80 + Math.cos(stressNeedleAngle.value) * 42);
+const stressNeedleY = computed(() => 80 + Math.sin(stressNeedleAngle.value) * 42);
+
+// 主导情绪
+const dominantEmotion = computed(() => {
+  const p = emotion.value.fusion;
+  if (p.positive >= p.neutral && p.positive >= p.negative) return '积极';
+  if (p.neutral >= p.positive && p.neutral >= p.negative) return '中性';
+  return '消极';
+});
+
+const dominantEmotionColor = computed(() => {
+  const e = dominantEmotion.value;
+  if (e === '积极') return '#10B981';
+  if (e === '中性') return '#94A3B8';
+  return '#EF4444';
+});
+
+// 压力状态
+const getStressStatus = () => {
+  const stress = emotion.value.stress;
+  if (stress < 30) return '偏低';
+  if (stress < 60) return '正常';
+  return '偏高';
+};
+
+const getStressStatusStyle = () => {
+  const status = getStressStatus();
+  let bg, color;
+  if (status === '偏低') { bg = '#ECFDF5'; color = '#10B981'; }
+  else if (status === '正常') { bg = '#F0FDF9'; color = '#0D9488'; }
+  else { bg = '#FEF3F2'; color = '#EF4444'; }
+  return { backgroundColor: bg, color };
+};
+
+// 情绪趋势图表
+const emotionChartCanvas = ref(null);
+let emotionChart = null;
+
+const emotionTrendData = {
+  day: {
+    labels: ['0:00','03:00','06:00','09:00','12:00','15:00','18:00','21:00','24:00'],
+    positive: [45,52,48,55,62,58,50,48,46],
+    stress: [42,38,45,52,48,55,40,35,38],
+    stats: [{val:'良好',lab:'整体状态'},{val:'52%',lab:'平均积极'},{val:'15:00',lab:'最佳时段'}]
+  },
+  week: {
+    labels: ['周一','周二','周三','周四','周五','周六','周日'],
+    positive: [45,52,48,55,62,58,50],
+    stress: [42,38,45,52,48,55,40],
+    stats: [{val:'130',lab:'样本数'},{val:'51%',lab:'平均积极'},{val:'周五',lab:'最佳日'}]
+  },
+  year: {
+    labels: ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'],
+    positive: [42,48,52,58,62,65,68,65,58,52,48,45],
+    stress: [48,42,38,35,32,30,28,32,38,42,45,48],
+    stats: [{val:'6,320',lab:'年度样本'},{val:'54%',lab:'平均积极'},{val:'7月',lab:'最佳月'}]
+  }
+};
+
+const renderEmotionChart = async (period) => {
+  if (emotionChart) emotionChart.destroy();
+  const ctx = emotionChartCanvas.value?.getContext('2d');
+  if (!ctx) return;
+  
+  const Chart = await loadChart();
+  if (!Chart) return;
+  
+  const d = emotionTrendData[period];
+  
+  emotionChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: d.labels,
+      datasets: [
+        { 
+          label: '积极', 
+          data: d.positive, 
+          borderColor: '#10B981', 
+          backgroundColor: 'rgba(16,185,129,0.1)', 
+          tension: 0.4, 
+          fill: true, 
+          pointRadius: 0,
+          borderWidth: 2
+        },
+        { 
+          label: '压力', 
+          data: d.stress, 
+          borderColor: '#94A3B8', 
+          backgroundColor: 'transparent', 
+          tension: 0.4, 
+          fill: false, 
+          pointRadius: 0,
+          borderWidth: 2,
+          borderDash: [5, 5]
+        }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { 
+        x: { grid: { display: false }, ticks: { color: '#aaa', font: { size: 10 } }, border: { display: false } }, 
+        y: { beginAtZero: true, max: 100, grid: { color: 'rgba(0,0,0,0.04)' }, ticks: { color: '#aaa', font: { size: 10 } }, border: { display: false } } 
+      }
+    }
+  });
+  
+  renderEmotionStats(period);
+};
+
+const renderEmotionStats = (period) => {
+  const el = document.getElementById('emotionStats');
+  if (!el) return;
+  el.innerHTML = emotionTrendData[period].stats.map(s => `
+    <div style="flex:1;background:#f8f8f8;border-radius:10px;padding:10px 16px;display:flex;align-items:center;justify-content:space-between">
+      <div style="font-size:14px;color:#999">${s.lab}</div>
+      <div style="font-size:20px;font-weight:700;color:#1E293B">${s.val}</div>
+    </div>
+  `).join('');
+};
+
+watch(emoPeriod, (newVal) => {
+  renderEmotionChart(newVal);
+});
+
 const phaseDashArray = computed(() => {
   const phase = healthData.value.phaseDiff;
   const circumference = Math.PI * 110;
@@ -736,15 +1013,32 @@ const callNurseStation = () => {
   }
 };
 
-onMounted(() => {
+watch(period, (newVal) => {
+  renderChart(newVal);
+});
+
+onMounted(async () => {
   fetchData();
   updateTime();
   intervalId = setInterval(fetchData, 1000);
   setInterval(updateTime, 1000);
+  
+  // 订阅 SystemStore
+  unsubscribeStore = systemStore.subscribe((state) => {
+    systemState.value = state;
+  });
+  
+  setTimeout(() => {
+    renderChart('day');
+    renderEmotionChart('day');
+  }, 300);
 });
 
 onUnmounted(() => {
   if (intervalId) clearInterval(intervalId);
+  if (unsubscribeStore) unsubscribeStore();
+  if (chart) chart.destroy();
+  if (emotionChart) emotionChart.destroy();
 });
 </script>
 
@@ -763,7 +1057,8 @@ onUnmounted(() => {
 
 .page-header {
   flex-shrink: 0;
-  padding: 12px 20px;
+  padding: 4px 20px;
+  margin: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -777,11 +1072,27 @@ onUnmounted(() => {
   min-height: 0;
 }
 
-.tab-btn {
-  padding: 8px 18px;
+.tab-btn2 {
+  padding: 6px 18px;
+  border: none;
+  background: #f0f0f0;
+  color: #888;
   border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all .2s;
+}
+.tab-btn2.active {
+  background: #0D9488;
+  color: #fff;
+}
+
+.tab-btn {
+  padding: 12px 24px;
+  border-radius: 10px;
   font-weight: 600;
-  font-size: 16px;
+  font-size: 20px;
   cursor: pointer;
   border: none;
   background: transparent;
@@ -917,6 +1228,10 @@ onUnmounted(() => {
   overflow: hidden;
   display: flex;
   background: #F1F5F9;
+}
+
+.emotion-card {
+  min-height: 140px;
 }
 
 .per-btn {
