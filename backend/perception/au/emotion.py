@@ -1093,6 +1093,9 @@ class EmotionEngine:
 
 # ── Flask ────────────────────────────────────────────
 app = Flask(__name__)
+# ⭐ 先创建 emotion_logger，确保在启动线程之前就定义好！
+emotion_logger = EmotionLogger(data_dir='emodata', max_file_duration=300)
+print("[EmotionLogger] 情绪记录器已启动")
 engine = EmotionEngine()
 print(f"[EmotionEngine] 摄像头初始化完成，是否打开: {engine.cap.isOpened()}")
 if engine.cap.isOpened():
@@ -1103,8 +1106,6 @@ if engine.cap.isOpened():
 else:
     print("[EmotionEngine] 警告：摄像头未打开！请检查摄像头连接。")
 print("面板分析中，请访问: http://localhost:5010/")
-emotion_logger = EmotionLogger(data_dir='emodata', max_file_duration=300)
-print("[EmotionLogger] 情绪记录器已启动")
 
 @app.route("/")
 def index(): return open(os.path.join(SCRIPT_DIR, "emotion.html"), encoding="utf-8").read()

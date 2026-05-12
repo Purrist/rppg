@@ -963,6 +963,9 @@ class SystemCore:
                     'plv_label': analysis_data.get('plv_label'),
                     'mean_phase_diff': analysis_data.get('mean_phase_diff')
                 })
+        
+        # ⭐ 立即广播更新，标记为重要字段
+        self._broadcast(force=False, important_fields=['perception.physiology'])
     
     # ==================== 完整面部/情绪数据更新（来自 emotion.py） ====================
     
@@ -1006,6 +1009,9 @@ class SystemCore:
                     'confidence': fusion_data.get('confidence', 0.0),
                     'scores': fusion_data.get('scores', {'neutral': 0, 'positive': 0, 'negative': 0})
                 })
+        
+        # ⭐ 立即广播更新，标记为重要字段
+        self._broadcast(force=False, important_fields=['perception.face'])
     
     # ==================== 环境数据 ====================
     

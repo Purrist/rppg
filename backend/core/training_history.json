@@ -117,6 +117,19 @@
     "avg_emotion": "neutral"
   },
   {
+    "date": "2026-05-11T19:06:56.826196",
+    "mode": "processing_speed",
+    "module": "go_no_go",
+    "difficulty": 1,
+    "duration": 0,
+    "score": 0,
+    "correct_count": 8,
+    "total_count": 22,
+    "correct_rate": 0.36363636363636365,
+    "avg_bpm": "--",
+    "avg_emotion": "neutral"
+  },
+  {
     "date": "2026-05-11T19:11:02.929334",
     "mode": "processing_speed",
     "module": "go_no_go",
@@ -126,6 +139,32 @@
     "correct_count": 2,
     "total_count": 4,
     "correct_rate": 0.5,
+    "avg_bpm": "--",
+    "avg_emotion": "neutral"
+  },
+  {
+    "date": "2026-05-12T01:33:56.266440",
+    "mode": "processing_speed",
+    "module": "go_no_go",
+    "difficulty": 3,
+    "duration": 59,
+    "score": 33,
+    "correct_count": 3,
+    "total_count": 8,
+    "correct_rate": 0.375,
+    "avg_bpm": "--",
+    "avg_emotion": "neutral"
+  },
+  {
+    "date": "2026-05-12T01:35:03.286818",
+    "mode": "processing_speed",
+    "module": "go_no_go",
+    "difficulty": 2,
+    "duration": 80,
+    "score": 0,
+    "correct_count": 1,
+    "total_count": 9,
+    "correct_rate": 0.1111111111111111,
     "avg_bpm": "--",
     "avg_emotion": "neutral"
   }

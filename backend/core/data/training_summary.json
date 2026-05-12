@@ -118,5 +118,35 @@
     "accuracy": 0.5,
     "avg_reaction_time_ms": 4840.5667543411255,
     "duration": 32
+  },
+  {
+    "session_id": "processing_speed_20260512_013356",
+    "timestamp": "2026-05-12T01:33:56.266440",
+    "game_type": "processing_speed",
+    "module": "go_no_go",
+    "difficulty_range": "4-4",
+    "score": 33,
+    "total_trials": 8,
+    "correct_trials": 3,
+    "incorrect_trials": 5,
+    "missed_trials": 3,
+    "accuracy": 0.375,
+    "avg_reaction_time_ms": 5308.652818202972,
+    "duration": 59
+  },
+  {
+    "session_id": "processing_speed_20260512_013503",
+    "timestamp": "2026-05-12T01:35:03.286818",
+    "game_type": "processing_speed",
+    "module": "go_no_go",
+    "difficulty_range": "3-4",
+    "score": 0,
+    "total_trials": 9,
+    "correct_trials": 1,
+    "incorrect_trials": 8,
+    "missed_trials": 7,
+    "accuracy": 0.1111111111111111,
+    "avg_reaction_time_ms": 6555.889738930597,
+    "duration": 80
   }
 ]

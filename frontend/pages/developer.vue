@@ -86,138 +86,155 @@
     <!-- ⭐ 综合情绪与生理监测 -->
     <div class="main-container">
       <div class="left-panel">
-        <!-- 生理卡片 -->
+        <!-- ⭐ 完整HLKK生理数据卡片 -->
         <div class="panel-card" style="flex:0 0 auto">
           <div class="panel-header">
-            <span class="panel-title">生理监测</span>
-            <div class="status-bar">
-              <span><span class="status-dot" :class="physioConnected ? 'on' : 'off'"></span> 心率呼吸率</span>
-              <span>最后更新: <span>{{ lastUpdateTime }}</span></span>
-              <div class="model-toggle">
-                <button class="model-toggle-btn" :class="{ active: currentModel === 'deepface' }" @click="setModel('deepface')">DeepFace</button>
-                <button class="model-toggle-btn" :class="{ active: currentModel === 'onnx' }" @click="setModel('onnx')">ONNX</button>
-              </div>
-            </div>
+            <span class="panel-title">HLKK 完整生理数据 (SystemCore)</span>
           </div>
           <div class="panel-body">
-            <div class="row-3cards">
-              <div class="mini-card">
-                <span class="mini-card-title">心率</span>
-                <span class="mini-card-value heart">{{ physioData.heart || '--' }} <span style="font-size:12px">bpm</span></span>
-                <span class="mini-card-sub" :style="{ color: physioData.hr_valid ? '#34A853' : '#EA4335' }">{{ physioData.hr_valid ? 'HR信号: 正常' : 'HR信号: 异常' }}</span>
+            <div class="data-grid">
+              <div class="data-row">
+                <span class="data-label">心率 (HR):</span>
+                <span class="data-value">{{ systemState.perception.physiology.raw.hr ?? '--' }}</span>
               </div>
-              <div class="mini-card">
-                <span class="mini-card-title">HRR</span>
-                <span class="mini-card-value hrr">{{ physioData.hrr_pct !== undefined ? physioData.hrr_pct.toFixed(1) : '--' }}<span style="font-size:12px">%</span></span>
-                <span class="mini-card-sub">{{ hrrStatus }}</span>
+              <div class="data-row">
+                <span class="data-label">呼吸率 (BR):</span>
+                <span class="data-value">{{ systemState.perception.physiology.raw.br ?? '--' }}</span>
               </div>
-              <div class="mini-card">
-                <span class="mini-card-title">斜率</span>
-                <span class="mini-card-value slope" :style="{ color: hrSlopeColor }">{{ physioData.hr_slope !== undefined ? physioData.hr_slope.toFixed(2) : '--' }}</span>
-                <span class="mini-card-sub">{{ hrSlopeStatus }}</span>
+              <div class="data-row">
+                <span class="data-label">距离:</span>
+                <span class="data-value">{{ systemState.perception.physiology.raw.distance ?? '--' }}</span>
               </div>
-            </div>
-            <div class="person-info">
-              <div class="info-item">
-                <div class="info-label">是否有人</div>
-                <div class="info-value">{{ humanText }}</div>
-                <span class="info-conf">{{ poseText }}</span>
+              <div class="data-row">
+                <span class="data-label">信号状态:</span>
+                <span class="data-value">{{ systemState.perception.physiology.raw.signal_state ?? '--' }}</span>
               </div>
-              <div class="info-item">
-                <span class="info-label">性别</span>
-                <span class="info-value">{{ genderText }}</span>
-                <span class="info-conf">{{ genderConfText }}</span>
-                <span class="info-sub">{{ hlkkGenderText }}</span>
+              <div class="data-row">
+                <span class="data-label">HR 有效:</span>
+                <span class="data-value">{{ systemState.perception.physiology.raw.hr_valid ? '是' : '否' }}</span>
               </div>
-              <div class="info-item">
-                <span class="info-label">年龄</span>
-                <span class="info-value">{{ ageText }}</span>
-                <span class="info-conf">{{ ageConfText }}</span>
-                <span class="info-sub">{{ hlkkAgeText }}</span>
+              <div class="data-row">
+                <span class="data-label">HRR (%):</span>
+                <span class="data-value">{{ systemState.perception.physiology.analysis.hrr ?? '--' }}</span>
               </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 心理卡片 -->
-        <div class="panel-card" style="flex:1">
-          <div class="panel-body" style="flex:1;padding:12px">
-            <div class="psychology-layout">
-              <div class="psych-left">
-                <div class="emotion-chart-box">
-                  <canvas ref="emotionChart"></canvas>
-                </div>
+              <div class="data-row">
+                <span class="data-label">HRR 标签:</span>
+                <span class="data-value">{{ systemState.perception.physiology.analysis.hrr_label ?? '--' }}</span>
               </div>
-              <div class="psych-right">
-                <div class="emotion-3cards">
-                  <div class="emotion-item positive">
-                    <span class="emotion-item-label">积极</span>
-                    <span class="emotion-item-value">{{ Math.round((emotionData.positive || 0) * 100) }}%</span>
-                  </div>
-                  <div class="emotion-item neutral">
-                    <span class="emotion-item-label">中性</span>
-                    <span class="emotion-item-value">{{ Math.round((emotionData.neutral || 0) * 100) }}%</span>
-                  </div>
-                  <div class="emotion-item negative">
-                    <span class="emotion-item-label">消极</span>
-                    <span class="emotion-item-value">{{ Math.round((emotionData.negative || 0) * 100) }}%</span>
-                  </div>
-                </div>
-                <div class="psych-bottom">
-                  <button class="gate-button" :class="{ disabled: !gateEnabled }" @click="toggleGate">
-                    <div class="gate-label">情绪势场</div>
-                    <div class="gate-status">
-                      <span class="gate-dot" :class="gateEnabled ? 'gate-dot-on' : 'gate-dot-off'"></span>
-                      <span class="gate-status-text">{{ gateEnabled ? '已开启' : '已关闭' }}</span>
-                    </div>
-                  </button>
-                  <div class="emotion-card" :class="emotionCardClass">
-                    <div class="emotion-card-label">情绪状态</div>
-                    <div class="emotion-card-value">{{ emotionLabelText }}</div>
-                  </div>
-                </div>
+              <div class="data-row">
+                <span class="data-label">斜率:</span>
+                <span class="data-value">{{ systemState.perception.physiology.analysis.slope ?? '--' }}</span>
+              </div>
+              <div class="data-row">
+                <span class="data-label">斜率标签:</span>
+                <span class="data-value">{{ systemState.perception.physiology.analysis.slope_label ?? '--' }}</span>
+              </div>
+              <div class="data-row">
+                <span class="data-label">呼吸变异性 (BRV):</span>
+                <span class="data-value">{{ systemState.perception.physiology.analysis.brv ?? '--' }}</span>
+              </div>
+              <div class="data-row">
+                <span class="data-label">BRV 标签:</span>
+                <span class="data-value">{{ systemState.perception.physiology.analysis.brv_label ?? '--' }}</span>
+              </div>
+              <div class="data-row">
+                <span class="data-label">呼吸熵 (BRE):</span>
+                <span class="data-value">{{ systemState.perception.physiology.analysis.brel ?? '--' }}</span>
+              </div>
+              <div class="data-row">
+                <span class="data-label">复杂度 (CR):</span>
+                <span class="data-value">{{ systemState.perception.physiology.analysis.cr ?? '--' }}</span>
+              </div>
+              <div class="data-row">
+                <span class="data-label">耦合度 (PLV):</span>
+                <span class="data-value">{{ systemState.perception.physiology.analysis.plv ?? '--' }}</span>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- 认知卡片 - 游戏状态 -->
-        <div class="panel-card" style="flex:1">
-          <div class="cognitive-panel" style="border:none;border-radius:0">
-            <div class="game-stats-left">
-              <div class="mini-card">
-                <span class="mini-card-title">剩余时间</span>
-                <span class="mini-card-value" style="color:#EA4335">{{ gameTimeText }}</span>
-                <span class="mini-card-sub">{{ gameStatusText }}</span>
+        <!-- ⭐ 完整情绪/面部数据卡片 -->
+        <div class="panel-card" style="flex:0 0 auto">
+          <div class="panel-header">
+            <span class="panel-title">Emotion 完整数据 (SystemCore)</span>
+          </div>
+          <div class="panel-body">
+            <div class="section-title">AU (Action Units) 数据</div>
+            <div class="data-grid">
+              <div class="data-row">
+                <span class="data-label">情绪:</span>
+                <span class="data-value">{{ systemState.perception.face.au.emotion ?? '--' }}</span>
               </div>
-              <div class="mini-card">
-                <span class="mini-card-title">得分</span>
-                <span class="mini-card-value" style="color:#34A853">{{ gameData.score || 0 }}</span>
-                <span class="mini-card-sub">当前分数</span>
+              <div class="data-row">
+                <span class="data-label">置信度:</span>
+                <span class="data-value">{{ systemState.perception.face.au.confidence ?? '--' }}</span>
               </div>
-              <div class="mini-card">
-                <span class="mini-card-title">难度</span>
-                <span class="mini-card-value" style="color:#4285F4">{{ gameData.difficulty || 1 }}</span>
-                <span class="mini-card-sub">{{ gameDiffName }}</span>
+              <div class="data-row">
+                <span class="data-label">姿态:</span>
+                <span class="data-value">{{ systemState.perception.face.au.pose ?? '--' }}</span>
               </div>
-              <div class="mini-card">
-                <span class="mini-card-title">准确率</span>
-                <span class="mini-card-value" style="color:#64ffda">{{ gameData.accuracy || '--' }}%</span>
-                <span class="mini-card-sub">总体表现</span>
+              <div class="data-row">
+                <span class="data-label">Pitch:</span>
+                <span class="data-value">{{ systemState.perception.face.au.pitch ?? '--' }}</span>
+              </div>
+              <div class="data-row">
+                <span class="data-label">Yaw:</span>
+                <span class="data-value">{{ systemState.perception.face.au.yaw ?? '--' }}</span>
+              </div>
+              <div class="data-row">
+                <span class="data-label">Roll:</span>
+                <span class="data-value">{{ systemState.perception.face.au.roll ?? '--' }}</span>
+              </div>
+              <div class="data-row">
+                <span class="data-label">投入度:</span>
+                <span class="data-value">{{ systemState.perception.face.au.engagement ?? '--' }}</span>
+              </div>
+              <div class="data-row">
+                <span class="data-label">检测到人脸:</span>
+                <span class="data-value">{{ systemState.perception.face.au.face_detected ? '是' : '否' }}</span>
+              </div>
+              <div class="data-row">
+                <span class="data-label">人脸数量:</span>
+                <span class="data-value">{{ systemState.perception.face.au.face_count ?? '--' }}</span>
               </div>
             </div>
-            <div class="game-records-right">
-              <div class="game-records-list">
-                <div v-for="(record, index) in gameRecords" :key="index" class="game-record-item">
-                  <span :class="record.typeClass">{{ record.typeText }}</span>
-                  <span class="game-record-time">{{ record.time === '--' ? '--' : record.time + 'ms' }}</span>
-                  <span class="game-record-diff">Lv.{{ record.difficulty }}</span>
-                  <span class="game-record-score">{{ record.score > 0 ? '+' : '' }}{{ record.score }}</span>
-                </div>
+            <div class="section-title">FER (Face Expression Recognition) 数据</div>
+            <div class="data-grid">
+              <div class="data-row">
+                <span class="data-label">标签:</span>
+                <span class="data-value">{{ systemState.perception.face.fer.label ?? '--' }}</span>
+              </div>
+              <div class="data-row">
+                <span class="data-label">置信度:</span>
+                <span class="data-value">{{ systemState.perception.face.fer.conf ?? '--' }}</span>
+              </div>
+              <div class="data-row">
+                <span class="data-label">中性概率:</span>
+                <span class="data-value">{{ systemState.perception.face.fer.probs_3?.neutral ?? '--' }}</span>
+              </div>
+              <div class="data-row">
+                <span class="data-label">积极概率:</span>
+                <span class="data-value">{{ systemState.perception.face.fer.probs_3?.positive ?? '--' }}</span>
+              </div>
+              <div class="data-row">
+                <span class="data-label">消极概率:</span>
+                <span class="data-value">{{ systemState.perception.face.fer.probs_3?.negative ?? '--' }}</span>
+              </div>
+            </div>
+            <div class="section-title">Fusion 数据</div>
+            <div class="data-grid">
+              <div class="data-row">
+                <span class="data-label">情绪:</span>
+                <span class="data-value">{{ systemState.perception.face.fusion.emotion ?? '--' }}</span>
+              </div>
+              <div class="data-row">
+                <span class="data-label">置信度:</span>
+                <span class="data-value">{{ systemState.perception.face.fusion.confidence ?? '--' }}</span>
               </div>
             </div>
           </div>
         </div>
+
       </div>
 
       <div class="right-panel">
@@ -336,37 +353,96 @@ let socket = null
 let unsubscribe = null
 
 // ⭐ 系统全局状态（从后端同步）
-const systemState = reactive({
-  aiMode: 'basic',
-  currentPage: '/',
-  game: {
-    status: 'IDLE',
-    currentGame: null,
-    difficulty: 3,
-    module: null,
-    dwellTime: 2000,
-  },
-  gameRuntime: {
-    score: 0,
-    timer: 60,
-    accuracy: 0,
-    trialCount: 0,
-    correctCount: 0,
-  },
-  perception: {
-    personDetected: false,
-    personCount: 0,
-    faceCount: 0,
-    bodyDetected: false,
-    footPosition: { x: 0, y: 0, detected: false },
-    emotion: 'neutral',
-    attention: 0,
-    fatigue: 0,
-    heartRate: null,
-    activity: 'unknown',
-    speaking: false,
-    idleMinutes: 0,
-  },
+  const systemState = reactive({
+    aiMode: 'basic',
+    currentPage: '/',
+    game: {
+      status: 'IDLE',
+      currentGame: null,
+      difficulty: 3,
+      module: null,
+      dwellTime: 2000,
+    },
+    gameRuntime: {
+      score: 0,
+      timer: 60,
+      accuracy: 0,
+      trialCount: 0,
+      correctCount: 0,
+    },
+    perception: {
+      personDetected: false,
+      personCount: 0,
+      faceCount: 0,
+      bodyDetected: false,
+      footPosition: { x: 0, y: 0, detected: false },
+      emotion: 'neutral',
+      attention: 0,
+      fatigue: 0,
+      heartRate: null,
+      activity: 'unknown',
+      speaking: false,
+      idleMinutes: 0,
+      // ⭐ 完整生理数据
+      physiology: {
+        raw: {
+          hr: null,
+          br: null,
+          hph: null,
+          bph: null,
+          is_human: 0,
+          distance: 0,
+          distance_valid: 0,
+          signal_state: 'INIT',
+          hr_valid: false,
+          br_valid: false,
+          phase_valid: false
+        },
+        analysis: {
+          hrr: null,
+          hrr_label: null,
+          slope: null,
+          slope_label: null,
+          brv: null,
+          brv_label: null,
+          brel: null,
+          brel_label: null,
+          cr: null,
+          cr_label: null,
+          plv: null,
+          plv_label: null,
+          mean_phase_diff: null
+        }
+      },
+      // ⭐ 完整面部/情绪数据
+      face: {
+        au: {
+          emotion: 'no_face',
+          confidence: 0.0,
+          scores: { neutral: 0, positive: 0, negative: 0 },
+          pose: '-',
+          pitch: 0,
+          yaw: 0,
+          roll: 0,
+          au_features: {},
+          engagement: 'None',
+          face_detected: false,
+          face_count: 0,
+          speaking: false
+        },
+        fer: {
+          label: 'neutral',
+          conf: 0.0,
+          probs_3: { neutral: 0, positive: 0, negative: 0 },
+          has_face: false
+        },
+        fusion: {
+          emotion: 'no_face',
+          confidence: 0.0,
+          scores: { neutral: 0, positive: 0, negative: 0 }
+        }
+      }
+    },
   environment: {
     lightLevel: 'normal',
   },
@@ -1388,9 +1464,21 @@ onMounted(async () => {
   unsubscribe = subscribe((state) => {
     // 更新本地状态 - 完整同步
     if (state) {
+      // 使用 Vue 响应式更新：深度合并
+      // 首先更新顶级属性
       Object.assign(systemState, state)
+      // 确保嵌套的 physiology 和 face 对象也被正确更新
+      if (state.perception?.physiology) {
+        systemState.perception.physiology = state.perception.physiology
+      }
+      if (state.perception?.face) {
+        systemState.perception.face = state.perception.face
+      }
+      console.log('[developer] 系统状态更新:', { 
+        hasPhysiology: !!state.perception?.physiology, 
+        hasFace: !!state.perception?.face 
+      })
     }
-    console.log('[developer] 系统状态更新')
   })
   
   // ⭐ 初始化情绪图表
@@ -1595,14 +1683,14 @@ onUnmounted(() => {
 .conn-badge.err { background: rgba(255, 68, 68, 0.2); color: #ff6b6b; }
 
 /* ⭐ 综合情绪与生理监测样式 */
-.main-container{display:flex;height:calc(100vh - 120px);padding:12px;gap:12px}
-.left-panel{flex:0 0 70%;display:flex;flex-direction:column;gap:8px}
-.right-panel{flex:1;display:flex;flex-direction:column;gap:12px}
+.main-container{display:flex;min-height:calc(100vh - 200px);padding:12px;gap:12px;overflow-y:auto}
+.left-panel{flex:0 0 65%;display:flex;flex-direction:column;gap:10px;overflow-y:auto}
+.right-panel{flex:1;display:flex;flex-direction:column;gap:12px;overflow-y:auto}
 .panel-card{background:linear-gradient(135deg,#151c2c,#1a2236);border-radius:12px;border:1px solid #232e44;overflow:hidden;display:flex;flex-direction:column}
 .panel-header{padding:10px 16px;background:rgba(0,0,0,0.2);border-bottom:1px solid #232e44;display:flex;align-items:center;justify-content:space-between}
 .panel-title{font-size:13px;font-weight:600;color:#64ffda;letter-spacing:0.5px}
-.panel-body{flex:1;padding:8px;display:flex;flex-direction:column;gap:10px}
-.mini-card{background:rgba(0,0,0,0.3);border-radius:8px;padding:10px 12px;border:1px solid #232e44;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px;min-height:0}
+.panel-body{padding:12px;display:flex;flex-direction:column;gap:12px}
+.mini-card{background:rgba(0,0,0,0.3);border-radius:8px;padding:10px 12px;border:1px solid #232e44;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px}
 .mini-card-title{font-size:10px;color:#6b7a94;text-transform:uppercase;letter-spacing:0.5px}
 .mini-card-value{font-size:20px;font-weight:700;color:#fff}
 .mini-card-value.heart{color:#EA4335}
@@ -1616,13 +1704,13 @@ onUnmounted(() => {
 .info-value{font-size:16px;font-weight:600;color:#fff}
 .info-conf{font-size:11px;color:#4a5570}
 .info-sub{font-size:10px;color:#6b7a94;margin-left:auto}
-.psychology-layout{display:flex;flex:1;gap:12px;min-height:0;height:100%}
-.psych-left{flex:0 0 40%;display:flex;flex-direction:column;gap:8px;min-height:0;height:100%}
-.psych-right{flex:1;display:grid;grid-template-rows:1fr 1fr;gap:6px;min-height:0;height:100%}
-.emotion-chart-box{flex:1;min-height:0;max-height:200px;background:#050a12;border-radius:8px;overflow:hidden;border:1px solid #232e44;padding:8px}
+.psychology-layout{display:flex;gap:12px}
+.psych-left{flex:0 0 40%;display:flex;flex-direction:column;gap:8px}
+.psych-right{flex:1;display:flex;flex-direction:column;gap:10px}
+.emotion-chart-box{min-height:180px;background:#050a12;border-radius:8px;overflow:hidden;border:1px solid #232e44;padding:8px}
 .emotion-chart-box canvas{width:100%!important;height:100%!important;max-height:180px}
-.emotion-3cards{display:flex;gap:8px;height:100%}
-.emotion-item{flex:1;padding:4px;border-radius:8px;border:1px solid #232e44;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-height:0;overflow:hidden}
+.emotion-3cards{display:flex;gap:8px}
+.emotion-item{flex:1;padding:8px;border-radius:8px;border:1px solid #232e44;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px}
 .emotion-item.positive{background:rgba(52,168,83,0.15);border-color:#34A853}
 .emotion-item.neutral{background:rgba(107,122,148,0.15);border-color:#6b7a94}
 .emotion-item.negative{background:rgba(234,67,53,0.15);border-color:#EA4335}
@@ -1631,8 +1719,8 @@ onUnmounted(() => {
 .emotion-item.positive .emotion-item-value{color:#34A853}
 .emotion-item.neutral .emotion-item-value{color:#6b7a94}
 .emotion-item.negative .emotion-item-value{color:#EA4335}
-.psych-bottom{display:flex;gap:8px;height:100%}
-.gate-button{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:6px;background:rgba(0,0,0,0.3);border:1px solid #374151;border-radius:10px;color:#6b7a94;font-size:10px;font-weight:500;cursor:pointer;transition:all 0.2s ease;min-height:0;overflow:hidden}
+.psych-bottom{display:flex;gap:8px}
+.gate-button{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px;background:rgba(0,0,0,0.3);border:1px solid #374151;border-radius:10px;color:#6b7a94;font-size:10px;font-weight:500;cursor:pointer;transition:all 0.2s ease}
 .gate-button:hover{background:rgba(55,65,81,0.5);border-color:#4b5563}
 .gate-button.disabled{background:rgba(0,0,0,0.2);border-color:#1f2937;color:#374151}
 .gate-label{font-size:9px;color:#6b7a94;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px}
@@ -1642,7 +1730,7 @@ onUnmounted(() => {
 .gate-dot-off{background:#4b5563}
 .gate-status-text{font-size:10px;color:#6b7a94}
 .gate-button.disabled .gate-status-text{color:#374151}
-.emotion-card{flex:1;background:linear-gradient(135deg,#1a1f35,#252b42);border-radius:10px;border:1px solid #3b82f6;padding:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:0;overflow:hidden}
+.emotion-card{flex:1;background:linear-gradient(135deg,#1a1f35,#252b42);border-radius:10px;border:1px solid #3b82f6;padding:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px}
 .emotion-card-label{font-size:8px;color:#6b7a94;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px}
 .emotion-card-value{font-size:18px;font-weight:700;color:#fff}
 .emotion-card.positive{border-color:#34A853;background:linear-gradient(135deg,rgba(52,168,83,0.15),rgba(52,168,83,0.05))}
@@ -1651,9 +1739,9 @@ onUnmounted(() => {
 .emotion-card.negative .emotion-card-value{color:#EA4335}
 .emotion-card.neutral{border-color:#6b7a94;background:linear-gradient(135deg,rgba(107,122,148,0.15),rgba(107,122,148,0.05))}
 .emotion-card.neutral .emotion-card-value{color:#6b7a94}
-.cognitive-panel{flex:1;display:flex;border:1px solid #232e44;border-radius:10px;overflow:hidden}
+.cognitive-panel{display:flex;border:1px solid #232e44;border-radius:10px;overflow:hidden}
 .game-stats-left{flex:0 0 40%;display:grid;grid-template-columns:repeat(2,1fr);grid-template-rows:repeat(2,1fr);gap:10px;padding:12px;background:rgba(0,0,0,0.2)}
-.game-records-right{flex:1;display:flex;flex-direction:column;padding:12px;background:rgba(0,0,0,0.15);border-left:1px solid #232e44}
+.game-records-right{flex:1;display:flex;flex-direction:column;padding:12px;background:rgba(0,0,0,0.15);border-left:1px solid #232e44;min-height:200px}
 .game-records-list{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:6px}
 .game-records-list::-webkit-scrollbar{width:4px}
 .game-records-list::-webkit-scrollbar-track{background:#0c1018}
@@ -1666,8 +1754,8 @@ onUnmounted(() => {
 .game-record-time{color:#6b7a94}
 .game-record-diff{color:#4285F4}
 .game-record-score{color:#f59e0b;font-weight:700}
-.dda-panel{flex:1;display:flex;flex-direction:column;gap:8px;overflow-y:auto;padding:8px}
-.dda-section{background:#1a2236;border-radius:8px;padding:8px}
+.dda-panel{display:flex;flex-direction:column;gap:10px;padding:10px}
+.dda-section{background:#1a2236;border-radius:8px;padding:10px}
 .dda-section-title{font-size:11px;color:#64ffda;margin-bottom:6px;font-weight:600}
 .dda-item{display:flex;justify-content:space-between;padding:3px 0;font-size:11px}
 .dda-label{color:#8892a4}
@@ -1717,5 +1805,100 @@ onUnmounted(() => {
   padding: 12px 24px;
   border-radius: 10px;
   z-index: 1000;
+}
+
+/* ⭐ 完整数据展示样式 */
+.data-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+
+.data-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  border: 1px solid #1e293b;
+}
+
+.data-label {
+  font-size: 10px;
+  color: #8892a4;
+  text-transform: uppercase;
+}
+
+.data-value {
+  font-size: 11px;
+  color: #e6edf3;
+  font-family: monospace;
+}
+
+.section-title {
+  font-size: 11px;
+  color: #64ffda;
+  margin-top: 10px;
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+
+/* 滚动条美化 */
+.main-container::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.main-container::-webkit-scrollbar-track {
+  background: #0c1018;
+  border-radius: 4px;
+}
+
+.main-container::-webkit-scrollbar-thumb {
+  background: #232e44;
+  border-radius: 4px;
+}
+
+.main-container::-webkit-scrollbar-thumb:hover {
+  background: #3a5570;
+}
+
+.left-panel::-webkit-scrollbar,
+.right-panel::-webkit-scrollbar {
+  width: 6px;
+}
+
+.left-panel::-webkit-scrollbar-track,
+.right-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.left-panel::-webkit-scrollbar-thumb,
+.right-panel::-webkit-scrollbar-thumb {
+  background: #232e44;
+  border-radius: 3px;
+}
+
+/* 页面主体滚动 */
+.dev-page {
+  overflow-y: auto;
+}
+
+.dev-page::-webkit-scrollbar {
+  width: 10px;
+}
+
+.dev-page::-webkit-scrollbar-track {
+  background: #0a0d14;
+}
+
+.dev-page::-webkit-scrollbar-thumb {
+  background: #232e44;
+  border-radius: 5px;
+}
+
+.dev-page::-webkit-scrollbar-thumb:hover {
+  background: #3a5570;
 }
 </style>

@@ -30,10 +30,15 @@
     
     <div class="main-grid">
       <div class="card health-summary" @click="handleNavigate('/health')">
-        <div class="card-icon">❤️</div>
-        <div class="card-info">
-          <h3>生理信号监测</h3>
-          <p>当前解析稳定，波动率正常</p>
+        <div class="flip-wrapper" :class="{ flipped: isFlipped }">
+          <div class="flip-content front">
+            <div class="flip-header">心率 <span class="flip-value">{{ realTimeData.heartRate }} bpm</span></div>
+            <canvas ref="hrCanvas" class="flip-canvas"></canvas>
+          </div>
+          <div class="flip-content back">
+            <div class="flip-header">呼吸率 <span class="flip-value">{{ realTimeData.breathRate }} bpm</span></div>
+            <canvas ref="brCanvas" class="flip-canvas"></canvas>
+          </div>
         </div>
       </div>
       
@@ -54,14 +59,237 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, nextTick, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { io } from 'socket.io-client'
+import { subscribe, getState, initStore } from '../core/systemStore.js'
 
 const router = useRouter()
 let socket = null
+let unsubscribe = null
 const backendConnected = ref(false)
 const isListening = ref(false)
+
+const getHost = () => {
+  if (typeof window === 'undefined') return 'localhost'
+  return window.location.hostname || 'localhost'
+}
+
+const PORT = 5000
+const baseUrl = `http://${getHost()}:${PORT}`
+
+// 翻转相关
+const isFlipped = ref(false)
+let flipInterval = null
+let waveInterval = null
+
+// Canvas引用
+const hrCanvas = ref(null)
+const brCanvas = ref(null)
+
+// 实时数据
+const realTimeData = ref({
+  heartRate: '--',
+  breathRate: '--',
+  hrWave: [],
+  brWave: []
+})
+
+// 系统状态（从后端SystemCore同步，完整结构像developer.vue一样）
+const systemState = reactive({
+  perception: {
+    physiology: {
+      raw: {
+        hr: null,
+        br: null,
+        hph: null,
+        bph: null,
+        is_human: 0,
+        distance: 0,
+        distance_valid: 0,
+        signal_state: 'INIT',
+        hr_valid: false,
+        br_valid: false,
+        phase_valid: false
+      },
+      analysis: {
+        hrr: null,
+        hrr_label: null,
+        slope: null,
+        slope_label: null,
+        brv: null,
+        brv_label: null,
+        brel: null,
+        brel_label: null,
+        cr: null,
+        cr_label: null,
+        plv: null,
+        plv_label: null,
+        mean_phase_diff: null
+      }
+    },
+    face: {
+      au: {},
+      fer: {},
+      fusion: {}
+    }
+  }
+})
+
+// 便捷的计算属性获取心率和呼吸率
+const heartRate = computed(() => {
+  const hr = systemState.perception?.physiology?.raw?.hr
+  return (hr !== undefined && hr !== null && hr > 0) ? Math.round(hr) : '--'
+})
+
+const breathRate = computed(() => {
+  const br = systemState.perception?.physiology?.raw?.br
+  return (br !== undefined && br !== null && br > 0) ? Math.round(br) : '--'
+})
+
+// 用心率数值生成简单波形
+function generateSimpleWave(currentValue, waveArray, baseValue) {
+  // 添加新值
+  if (currentValue && currentValue !== '--') {
+    // 用简单的正弦波模拟，基于当前心率
+    const wave = baseValue + Math.sin(Date.now() / 500) * 5
+    waveArray.push(wave)
+  } else {
+    waveArray.push(0)
+  }
+  
+  // 保持数组长度
+  if (waveArray.length > 50) {
+    waveArray.shift()
+  }
+}
+
+// 监听系统状态变化
+function updateFromSystemState(state) {
+  console.log('收到系统状态:', state)
+  
+  // 完整更新 systemState，像developer.vue一样
+  if (state) {
+    Object.assign(systemState, state)
+    if (state.perception?.physiology) {
+      systemState.perception.physiology = state.perception.physiology
+    }
+    if (state.perception?.face) {
+      systemState.perception.face = state.perception.face
+    }
+  }
+  
+  // 更新实时数据
+  realTimeData.value.heartRate = heartRate.value
+  realTimeData.value.breathRate = breathRate.value
+  
+  // 生成简单的波形
+  generateSimpleWave(realTimeData.value.heartRate, realTimeData.value.hrWave, 70)
+  generateSimpleWave(realTimeData.value.breathRate, realTimeData.value.brWave, 16)
+  
+  // 立即绘制
+  nextTick(() => {
+    drawWave(hrCanvas.value, realTimeData.value.hrWave, '#FF4D4D')
+    drawWave(brCanvas.value, realTimeData.value.brWave, '#33B555')
+  })
+}
+
+const HLKK_API = 'http://127.0.0.1:5020'
+
+async function fetchRealTimeData() {
+  try {
+    const res = await fetch(`${HLKK_API}/data`)
+    const data = await res.json()
+    
+    // 优先从 raw 获取数值
+    const raw = data.raw || {}
+    let hr = raw.hr
+    let br = raw.br
+    
+    // 如果 raw 没有，从 rt 获取
+    if ((hr === undefined || hr === null) && data.rt) {
+      hr = data.rt.heart_rate ? data.rt.heart_rate[data.rt.heart_rate.length - 1] : null
+    }
+    if ((br === undefined || br === null) && data.rt) {
+      br = data.rt.breath_rate ? data.rt.breath_rate[data.rt.breath_rate.length - 1] : null
+    }
+    
+    // 更新数值
+    realTimeData.value.heartRate = (hr !== undefined && hr !== null && hr > 0) ? Math.round(hr) : '--'
+    realTimeData.value.breathRate = (br !== undefined && br !== null && br > 0) ? Math.round(br) : '--'
+    
+    // 获取波形
+    if (data.rt) {
+      if (data.rt.heart_phase && data.rt.heart_phase.length > 0) {
+        realTimeData.value.hrWave = data.rt.heart_phase.slice(-50)
+      }
+      if (data.rt.breath_phase && data.rt.breath_phase.length > 0) {
+        realTimeData.value.brWave = data.rt.breath_phase.slice(-50)
+      }
+    }
+    
+    // 立即绘制
+    nextTick(() => {
+      drawWave(hrCanvas.value, realTimeData.value.hrWave, '#FF4D4D')
+      drawWave(brCanvas.value, realTimeData.value.brWave, '#33B555')
+    })
+  } catch (e) {
+    console.error('获取HLKK数据失败:', e.message)
+  }
+}
+
+function drawWave(canvasRef, waveData, color) {
+  const canvas = canvasRef
+  if (!canvas) return
+  
+  const ctx = canvas.getContext('2d')
+  const width = canvas.width || 300
+  const height = canvas.height || 40
+  
+  ctx.clearRect(0, 0, width, height)
+  
+  let dataToDraw = waveData
+  if (!dataToDraw || dataToDraw.length < 2) {
+    // 如果没有数据，画一个简单的横线
+    dataToDraw = []
+    for (let i = 0; i < 10; i++) {
+      dataToDraw.push(0)
+    }
+  }
+  
+  const min = Math.min(...dataToDraw)
+  const max = Math.max(...dataToDraw)
+  const range = max - min || 1
+  
+  ctx.beginPath()
+  ctx.strokeStyle = color
+  ctx.lineWidth = 2
+  
+  dataToDraw.forEach((val, i) => {
+    const x = (i / (dataToDraw.length - 1)) * width
+    const y = height - ((val - min) / range) * height * 0.7 - height * 0.15
+    if (i === 0) {
+      ctx.moveTo(x, y)
+    } else {
+      ctx.lineTo(x, y)
+    }
+  })
+  
+  ctx.stroke()
+}
+
+function initCanvas() {
+  nextTick(() => {
+    if (hrCanvas.value) {
+      hrCanvas.value.width = 300
+      hrCanvas.value.height = 40
+    }
+    if (brCanvas.value) {
+      brCanvas.value.width = 300
+      brCanvas.value.height = 40
+    }
+  })
+}
 
 // 动态提示
 const tips = ref([
@@ -218,9 +446,30 @@ onMounted(() => {
   // 每10分钟刷新一次天气数据
   const weatherInterval = setInterval(fetchWeather, 10 * 60 * 1000)
   
+  // 初始化Canvas
+  initCanvas()
+  
+  // 自动翻转
+  flipInterval = setInterval(() => {
+    isFlipped.value = !isFlipped.value
+  }, 5000)
+  
+  // 波形流畅更新
+  waveInterval = setInterval(() => {
+    // 生成简单的波形
+    generateSimpleWave(realTimeData.value.heartRate, realTimeData.value.hrWave, 70)
+    generateSimpleWave(realTimeData.value.breathRate, realTimeData.value.brWave, 16)
+    
+    // 立即绘制
+    nextTick(() => {
+      drawWave(hrCanvas.value, realTimeData.value.hrWave, '#FF4D4D')
+      drawWave(brCanvas.value, realTimeData.value.brWave, '#33B555')
+    })
+  }, 100)
+  
   // 初始化Socket连接
   try {
-    socket = io(`http://localhost:${FLASK_PORT}`, {
+    socket = io(baseUrl, {
       transports: ['polling', 'websocket'],
       reconnection: true,
       reconnectionAttempts: 3,
@@ -230,6 +479,10 @@ onMounted(() => {
     socket.on('connect', () => {
       backendConnected.value = true
       console.log('后端连接成功')
+      // 初始化store
+      initStore(socket)
+      // 订阅状态变化
+      unsubscribe = subscribe(updateFromSystemState)
     })
     
     socket.on('disconnect', () => {
@@ -263,6 +516,9 @@ onMounted(() => {
     clearInterval(timer)
     clearInterval(tipInterval)
     clearInterval(weatherInterval)
+    if (flipInterval) clearInterval(flipInterval)
+    if (waveInterval) clearInterval(waveInterval)
+    if (unsubscribe) unsubscribe()
     if (socket) socket.disconnect()
   }
 })
@@ -461,11 +717,51 @@ const startVoiceInput = () => {
 }
 
 .main-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-top: 50px; }
-.card { background: #FFF; border: 2px solid #F0F0F0; border-radius: 35px; padding: 40px; display: flex; align-items: center; gap: 25px; cursor: pointer; transition: 0.3s; }
+.card { background: #FFF; border: 2px solid #F0F0F0; border-radius: 35px; padding: 20px 25px; display: flex; align-items: center; gap: 25px; cursor: pointer; transition: 0.3s; position: relative; overflow: hidden; perspective: 1000px; }
 .card:hover { border-color: #FF7222; background: #FFF9F6; }
 .card-icon { font-size: 50px; }
 .card-info h3 { font-size: 28px; color: #333; }
 .card-info p { font-size: 18px; color: #777; margin-top: 5px; }
+
+/* 翻转卡片样式 */
+.flip-wrapper {
+  width: 100%;
+  position: relative;
+  transition: transform 0.6s;
+  transform-style: preserve-3d;
+}
+.flip-wrapper.flipped {
+  transform: rotateY(180deg);
+}
+.flip-content {
+  width: 100%;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+.flip-content.back {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  transform: rotateY(180deg);
+}
+.flip-header {
+  font-size: 22px;
+  color: #333;
+  line-height: 1.3;
+}
+.flip-header .flip-value {
+  font-size: 28px;
+  font-weight: bold;
+  color: #333;
+  margin-left: 15px;
+}
+.flip-canvas {
+  width: 100%;
+  height: 40px;
+  margin-top: 8px;
+  display: block;
+}
 
 .quick-actions { margin-top: 40px; display: flex; gap: 30px; }
 .action-btn { flex: 1; height: 120px; border-radius: 30px; display: flex; align-items: center; justify-content: center; font-size: 30px; font-weight: bold; color: #FFF; cursor: pointer; }

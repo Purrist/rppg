@@ -39,6 +39,43 @@ const state = ref({
     activity: 'unknown',
     speaking: false,
     idleMinutes: 0,
+    // ⭐ 完整生理数据
+    physiology: {
+      raw: {
+        hr: null,
+        br: null,
+        hph: null,
+        bph: null,
+        is_human: 0,
+        distance: 0,
+        distance_valid: 0,
+        signal_state: 'INIT',
+        hr_valid: false,
+        br_valid: false,
+        phase_valid: false
+      },
+      analysis: {
+        hrr: null,
+        hrr_label: null,
+        slope: null,
+        slope_label: null,
+        brv: null,
+        brv_label: null,
+        brel: null,
+        brel_label: null,
+        cr: null,
+        cr_label: null,
+        plv: null,
+        plv_label: null,
+        mean_phase_diff: null
+      }
+    },
+    // ⭐ 完整面部/情绪数据
+    face: {
+      au: {},
+      fer: {},
+      fusion: {}
+    }
   },
   environment: {
     lightLevel: 'normal',
@@ -120,7 +157,18 @@ export function initStore(socketInstance) {
     if (data.currentPage !== undefined) state.value.currentPage = data.currentPage
     if (data.game !== undefined) Object.assign(state.value.game, data.game)
     if (data.gameRuntime !== undefined) Object.assign(state.value.gameRuntime, data.gameRuntime)
-    if (data.perception !== undefined) Object.assign(state.value.perception, data.perception)
+    
+    // ⭐ 完整更新 perception，包括 physiology 和 face
+    if (data.perception !== undefined) {
+      Object.assign(state.value.perception, data.perception)
+      if (data.perception.physiology) {
+        state.value.perception.physiology = data.perception.physiology
+      }
+      if (data.perception.face) {
+        state.value.perception.face = data.perception.face
+      }
+    }
+    
     if (data.environment !== undefined) Object.assign(state.value.environment, data.environment)
     if (data.settings !== undefined) Object.assign(state.value.settings, data.settings)
     if (data.timeInfo !== undefined) Object.assign(state.value.timeInfo, data.timeInfo)
@@ -134,6 +182,12 @@ export function initStore(socketInstance) {
   socket.on('perception_update', (data) => {
     if (data) {
       Object.assign(state.value.perception, data)
+      if (data.physiology) {
+        state.value.perception.physiology = data.physiology
+      }
+      if (data.face) {
+        state.value.perception.face = data.face
+      }
       listeners.forEach(cb => cb(state.value))
     }
   })
