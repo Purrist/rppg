@@ -171,6 +171,10 @@
         <span class="label">📽 投影页面</span>
         <span class="arrow">→</span>
       </div>
+      <div class="setting-item clickable" @click="goToScreenSaver">
+        <span class="label">🎭 进入屏保</span>
+        <span class="arrow">→</span>
+      </div>
     </div>
     
     <div class="settings-section">
@@ -323,6 +327,10 @@ const goToDeveloper = () => {
 
 const goToProjection = () => {
   router.push('/projection')
+}
+
+const goToScreenSaver = () => {
+  router.push('/screen-saver')
 }
 
 // 更新语音引擎

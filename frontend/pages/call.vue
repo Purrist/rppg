@@ -329,6 +329,12 @@ const endCall = () => {
 }
 
 // 监听路由参数
+watch(() => route.params, (newParams) => {
+  if (newParams.target === 'nurse') {
+    callEmergency('护理站')
+  }
+}, { immediate: true })
+
 watch(() => route.query, (newQuery) => {
   if (newQuery.emergency === 'true') {
     isEmergency.value = true

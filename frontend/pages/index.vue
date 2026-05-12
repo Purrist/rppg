@@ -52,8 +52,8 @@
     </div>
 
     <div class="quick-actions">
-      <div class="action-btn call">视频通话</div>
-      <div class="action-btn sos">紧急呼救</div>
+      <div class="action-btn call" @click="handleNavigate('/call')">视频通话</div>
+      <div class="action-btn sos" @click="handleNavigate('/call/nurse')">紧急呼救</div>
     </div>
   </div>
 </template>

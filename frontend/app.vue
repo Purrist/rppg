@@ -87,6 +87,8 @@
         </div>
         </div>
     </div>
+
+    
   </div>
 </template>
 
@@ -113,9 +115,22 @@ const backendUrl = `http://${backendHost}:${FLASK_PORT}`
 console.log('[App] 后端地址:', backendUrl)
 
 // 纯页面
-const isPurePage = computed(() => ['projection', 'developer'].includes(route.name))
+const isPurePage = computed(() => ['projection', 'developer', 'screen-saver'].includes(route.name))
 const isDevPage = computed(() => route.name === 'developer')
 const currentPath = computed(() => route.path)
+
+// ⭐ 屏保相关
+const SCREEN_SAVER_DELAY = 4 * 60 * 1000 
+let screenSaverTimer = null
+
+function resetScreenSaverTimer() {
+  if (screenSaverTimer) clearTimeout(screenSaverTimer)
+  screenSaverTimer = setTimeout(() => {
+    if (!isPurePage.value && !ui.akon && route.path !== '/screen-saver') {
+      router.push('/screen-saver')
+    }
+  }, SCREEN_SAVER_DELAY)
+}
 
 // 后端连接状态
 const backendConnected = ref(false)
@@ -394,6 +409,18 @@ onMounted(() => {
         router.push('/learning')
       }
     }
+    
+    // ⭐ 检测毫米波雷达数据，有人靠近时退出屏保
+    if (showScreenSaver.value) {
+      const distance = data.perception?.physiology?.raw?.distance
+      const distanceValid = data.perception?.physiology?.raw?.distance_valid
+      const isHuman = data.perception?.physiology?.raw?.is_human
+      
+      if (distanceValid && distance < 150 && isHuman) {
+        console.log('[屏保] 检测到有人靠近，退出屏保')
+        exitScreenSaver()
+      }
+    }
   })
   
   socket.on('navigate_to', (data) => {
@@ -421,6 +448,26 @@ onMounted(() => {
       setCurrentPage(newPath)
     }
   }, { immediate: true })
+  
+  // ⭐ 屏保相关事件监听
+  function handleActivity() {
+    // 只有在非屏保页面时才重置计时器
+    if (route.path !== '/screen-saver') {
+      resetScreenSaverTimer()
+    }
+  }
+  
+  window.addEventListener('click', handleActivity)
+  window.addEventListener('touchstart', handleActivity)
+  window.addEventListener('keydown', handleActivity)
+  
+  // ⭐ 监听退出屏保事件
+  window.addEventListener('exit-screen-saver', () => {
+    resetScreenSaverTimer()
+  })
+  
+  // ⭐ 初始化屏保计时器
+  resetScreenSaverTimer()
 })
 
 onUnmounted(() => {
