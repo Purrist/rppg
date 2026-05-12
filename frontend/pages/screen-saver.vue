@@ -86,7 +86,7 @@ const states = {
   }
 }
 
-const emotionList = Object.keys(states)
+const emotionList = Object.keys(states).filter(e => e !== 'sad' && e !== 'angry')
 const currentState = ref('happy')
 const previousStates = ref(['happy'])
 let emotionTimer = null

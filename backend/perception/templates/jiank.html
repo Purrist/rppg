@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>健康中心</title>
+<script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+<script>
+tailwind.config={theme:{extend:{colors:{teal:{50:'#F0FDFA',100:'#CCFBF1',200:'#99F6E4',300:'#5EEAD4',400:'#2DD4BF',500:'#14B8A6',600:'#0D9488',700:'#0F766E',800:'#115E59',900:'#134E4A'}},fontFamily:{display:['Space Grotesk','sans-serif'],body:['DM Sans','sans-serif']}}}}
+</script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'DM Sans',sans-serif;background:#F3F4F6;color:#1E293B;overflow:hidden}
+h1,h2,h3,h4,h5{font-family:'Space Grotesk',sans-serif}
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#CBD5E1;border-radius:10px}
+
+/* 适应侧边栏右侧空间 */
+.page-root{height:100vh;display:flex;flex-direction:column;overflow:hidden}
+.page-header{flex-shrink:0;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;background:#fff;border-bottom:1px solid #E8ECF0}
+.page-body{flex:1;overflow-y:auto;padding:12px 16px;min-height:0}
+
+/* 左右分栏 - 窄左列 */
+.split{display:grid;grid-template-columns:240px 1fr;gap:12px;height:100%}
+.left-col{display:flex;flex-direction:column;gap:10px;overflow-y:auto;padding-right:2px}
+.right-col{display:flex;flex-direction:column;gap:10px;overflow-y:auto;padding-right:2px}
+.right-2col{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+
+/* 卡片 */
+.card{background:#fff;border-radius:12px;border:1px solid #E8ECF0;box-shadow:0 1px 2px rgba(0,0,0,.03);transition:box-shadow .25s,transform .25s}
+.card:hover{box-shadow:0 4px 14px rgba(0,0,0,.05);transform:translateY(-1px)}
+
+/* 标签按钮 */
+.tab-btn{padding:5px 14px;border-radius:8px;font-weight:600;font-size:12px;cursor:pointer;border:none;background:transparent;color:#64748B;transition:all .2s;font-family:'Space Grotesk',sans-serif}
+.tab-btn:hover{color:#0F766E;background:#F0FDFA}
+.tab-btn.active{background:#0D9488;color:#fff;box-shadow:0 2px 6px rgba(13,148,136,.25)}
+
+/* 指标标签 */
+.m-label{font-size:10px;color:#94A3B8;font-weight:500;letter-spacing:.2px}
+.m-val{font-family:'Space Grotesk',sans-serif;font-weight:700;color:#1E293B}
+.m-unit{font-size:10px;color:#94A3B8;font-weight:400;margin-left:1px}
+
+/* 迷你统计 */
+.mini-st{background:#F8FAFB;border-radius:10px;padding:10px 12px;border:1px solid #F1F5F9;transition:all .2s}
+.mini-st:hover{background:#F0FDFA;border-color:#CCFBF1}
+
+/* 进度条 */
+.prog-bar{height:5px;border-radius:3px;background:#E2E8F0;overflow:hidden}
+.prog-fill{height:100%;border-radius:3px;transition:width .8s ease}
+
+/* 情绪条 */
+.emo-bar{height:6px;border-radius:3px;overflow:hidden;display:flex;background:#F1F5F9}
+
+/* 周期切换 */
+.per-btn{padding:3px 8px;border-radius:5px;font-size:10px;font-weight:600;cursor:pointer;border:1px solid #E8ECF0;background:#fff;color:#64748B;transition:all .2s}
+.per-btn:hover{border-color:#0D9488;color:#0D9488}
+.per-btn.active{background:#0D9488;color:#fff;border-color:#0D9488}
+
+/* 视频占位 */
+.vid-box{background:linear-gradient(135deg,#1E293B,#334155,#1E293B);border-radius:10px;position:relative;overflow:hidden}
+.vid-box::before{content:'';position:absolute;inset:0;background:radial-gradient(circle at 50% 40%,rgba(13,148,136,.12) 0%,transparent 70%)}
+@keyframes scanline{0%{top:-10%}100%{top:110%}}
+.scan-ln{position:absolute;left:0;right:0;height:1.5px;background:linear-gradient(90deg,transparent,rgba(13,148,136,.35),transparent);animation:scanline 3s linear infinite}
+
+/* 睡眠阶段条 */
+.sleep-bar{display:flex;border-radius:6px;overflow:hidden;height:24px}
+.sleep-bar>div{transition:width .6s ease}
+
+/* 记录行 */
+.rec-row{display:flex;align-items:center;padding:8px 10px;border-radius:8px;transition:all .15s;border-bottom:1px solid #F8FAFC}
+.rec-row:last-child{border-bottom:none}
+.rec-row:hover{background:#F8FAFB}
+
+/* 建议卡 */
+.adv-item{display:flex;gap:8px;padding:8px 10px;border-radius:8px;background:#F8FAFB;border:1px solid #F1F5F9;transition:all .2s}
+.adv-item:hover{background:#F0FDFA;border-color:#CCFBF1}
+
+/* 圆环进度 */
+.prog-ring{transform:rotate(-90deg)}
+
+/* LIVE 标记 */
+.live-tag{display:inline-flex;align-items:center;gap:3px;padding:1px 6px;border-radius:4px;font-size:9px;font-weight:700;letter-spacing:.4px;background:#FEF2F2;color:#EF4444}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(1.2)}}
+.pulse-d{animation:pulse 1.5s ease-in-out infinite}
+
+/* 波形 */
+.wave-cv{width:100%;height:100%;display:block}
+
+/* 动画 */
+@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+.fade-up{animation:fadeUp .35s ease forwards}
+</style>
+</head>
+<body>
+
+<div id="app">
+  <div class="page-root">
+    <!-- 顶栏 -->
+    <div class="page-header">
+      <div class="flex items-center gap-2">
+        <div class="w-7 h-7 rounded-lg bg-gradient-to-br from-teal-500 to-teal-700 flex items-center justify-center shadow shadow-teal-200">
+          <i class="fas fa-heartbeat text-white" style="font-size:11px"></i>
+        </div>
+        <span class="font-bold text-sm tracking-tight">健康中心</span>
+      </div>
+      <div class="flex items-center gap-1.5 bg-slate-50 p-0.5 rounded-lg">
+        <button class="tab-btn" :class="{active:activeTab==='cardio'}" @click="switchTab('cardio')"><i class="fas fa-lungs mr-1" style="font-size:10px"></i>心肺</button>
+        <button class="tab-btn" :class="{active:activeTab==='emotion'}" @click="switchTab('emotion')"><i class="fas fa-brain mr-1" style="font-size:10px"></i>情绪</button>
+        <button class="tab-btn" :class="{active:activeTab==='sleep'}" @click="switchTab('sleep')"><i class="fas fa-moon mr-1" style="font-size:10px"></i>睡眠</button>
+      </div>
+      <div class="flex items-center gap-2">
+        <span class="live-tag"><span class="w-1 h-1 rounded-full bg-red-500 pulse-d"></span>LIVE</span>
+        <span class="text-[11px] text-slate-400">{{currentTime}}</span>
+      </div>
+    </div>
+
+    <!-- 主体 -->
+    <div class="page-body">
+
+      <!-- ====== 心肺 ====== -->
+      <div v-show="activeTab==='cardio'" class="split fade-up">
+        <div class="left-col">
+          <!-- 健康摘要 -->
+          <div class="card" style="padding:12px">
+            <div class="flex items-center justify-between mb-2">
+              <div class="flex items-center gap-1.5"><div class="w-4 h-4 rounded bg-teal-50 flex items-center justify-center"><i class="fas fa-heart-pulse text-teal-600" style="font-size:8px"></i></div><h3 class="font-bold text-xs">健康摘要</h3></div>
+              <span class="text-[9px] text-teal-600 font-semibold bg-teal-50 px-1.5 py-0.5 rounded">实时</span>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+              <div class="mini-st">
+                <div class="m-label">心率</div>
+                <div class="flex items-baseline gap-0.5 mt-0.5"><span class="m-val text-lg" style="color:#0D9488">{{hr}}</span><span class="m-unit">bpm</span></div>
+                <div class="flex items-center gap-0.5 mt-0.5"><i class="fas fa-check text-green-500" style="font-size:8px"></i><span class="text-[9px] text-green-600">正常</span></div>
+              </div>
+              <div class="mini-st">
+                <div class="m-label">呼吸率</div>
+                <div class="flex items-baseline gap-0.5 mt-0.5"><span class="m-val text-lg" style="color:#F97316">{{br}}</span><span class="m-unit">/min</span></div>
+                <div class="flex items-center gap-0.5 mt-0.5"><i class="fas fa-check text-green-500" style="font-size:8px"></i><span class="text-[9px] text-green-600">正常</span></div>
+              </div>
+              <div class="mini-st">
+                <div class="m-label">心率储备</div>
+                <div class="flex items-baseline gap-0.5 mt-0.5"><span class="m-val">{{hrr}}</span><span class="m-unit">%</span></div>
+                <div class="prog-bar mt-1"><div class="prog-fill" :style="{width:hrr+'%',background:hrr<60?'#0D9488':'#F97316'}"></div></div>
+              </div>
+              <div class="mini-st">
+                <div class="m-label">心肺频率比</div>
+                <div class="flex items-baseline gap-0.5 mt-0.5"><span class="m-val">{{cr}}</span></div>
+                <span class="text-[9px] text-slate-400 mt-0.5 block">理想 4-6</span>
+              </div>
+              <div class="mini-st">
+                <div class="m-label">呼吸变异性</div>
+                <div class="flex items-baseline gap-0.5 mt-0.5"><span class="m-val">{{brv}}</span><span class="m-unit">%</span></div>
+              </div>
+              <div class="mini-st">
+                <div class="m-label">呼吸急促度</div>
+                <div class="flex items-baseline gap-0.5 mt-0.5"><span class="m-val">{{brElevation}}</span><span class="m-unit">%</span></div>
+              </div>
+              <div class="mini-st">
+                <div class="m-label">心率斜率</div>
+                <div class="flex items-baseline gap-0.5 mt-0.5"><span class="m-val">{{hrSlope}}</span></div>
+              </div>
+              <div class="mini-st">
+                <div class="m-label">相位锁定值</div>
+                <div class="flex items-baseline gap-0.5 mt-0.5"><span class="m-val">{{plv}}</span></div>
+              </div>
+            </div>
+          </div>
+          <!-- 健康指南 -->
+          <div class="card" style="padding:12px">
+            <div class="flex items-center gap-1.5 mb-2"><div class="w-4 h-4 rounded bg-emerald-50 flex items-center justify-center"><i class="fas fa-book-medical text-emerald-500" style="font-size:8px"></i></div><h3 class="font-bold text-xs">健康指南</h3></div>
+            <div class="flex flex-col gap-1.5">
+              <div class="adv-item" v-for="(a,i) in cardioAdvices" :key="i">
+                <div class="w-6 h-6 rounded flex items-center justify-center shrink-0" :style="{background:a.bg}"><i :class="a.icon" style="font-size:9px" :style="{color:a.color}"></i></div>
+                <div><div class="text-[11px] font-semibold text-slate-700">{{a.title}}</div><div class="text-[9px] text-slate-400">{{a.desc}}</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="right-col">
+          <!-- 健康趋势（移到右列） -->
+          <div class="card" style="padding:12px">
+            <div class="flex items-center justify-between mb-2">
+              <div class="flex items-center gap-1.5"><div class="w-4 h-4 rounded bg-indigo-50 flex items-center justify-center"><i class="fas fa-chart-line text-indigo-500" style="font-size:8px"></i></div><h3 class="font-bold text-xs">健康趋势</h3></div>
+              <div class="flex gap-0.5">
+                <button class="per-btn" :class="{active:trendPeriod==='day'}" @click="setTrendPeriod('day')">日</button>
+                <button class="per-btn" :class="{active:trendPeriod==='week'}" @click="setTrendPeriod('week')">周</button>
+                <button class="per-btn" :class="{active:trendPeriod==='month'}" @click="setTrendPeriod('month')">月</button>
+              </div>
+            </div>
+            <div style="height:130px"><canvas id="healthTrendChart"></canvas></div>
+          </div>
+          <!-- 波形图 一排 -->
+          <div class="right-2col">
+            <div class="card" style="padding:12px">
+              <div class="flex items-center justify-between mb-1.5">
+                <div class="flex items-center gap-1"><div class="w-1.5 h-1.5 rounded-full bg-teal-500 pulse-d"></div><span class="font-bold text-[11px]">心率波形</span></div>
+                <span class="m-val text-base" style="color:#0D9488">{{hr}}</span>
+              </div>
+              <div style="height:120px;position:relative"><canvas id="ecgCanvas" class="wave-cv"></canvas></div>
+            </div>
+            <div class="card" style="padding:12px">
+              <div class="flex items-center justify-between mb-1.5">
+                <div class="flex items-center gap-1"><div class="w-1.5 h-1.5 rounded-full bg-orange-500 pulse-d"></div><span class="font-bold text-[11px]">呼吸波形</span></div>
+                <span class="m-val text-base" style="color:#F97316">{{br}}</span>
+              </div>
+              <div style="height:120px;position:relative"><canvas id="brCanvas" class="wave-cv"></canvas></div>
+            </div>
+          </div>
+          <!-- 仪表盘 一排 -->
+          <div class="right-2col">
+            <div class="card" style="padding:12px;display:flex;flex-direction:column;align-items:center">
+              <h3 class="font-bold text-[11px] mb-2 self-start">心肺频率比</h3>
+              <div style="width:160px;height:88px;position:relative"><canvas id="crGauge" width="160" height="88"></canvas></div>
+              <div class="m-val text-2xl mt-1" style="color:#0D9488">{{cr}}</div>
+              <div class="text-[9px] text-slate-400 mt-0.5">理想范围 4.0 - 6.0</div>
+              <div class="flex gap-3 mt-1.5 text-[9px]">
+                <span class="flex items-center gap-0.5"><span class="w-1.5 h-1.5 rounded-full" style="background:#10B981"></span>偏低</span>
+                <span class="flex items-center gap-0.5"><span class="w-1.5 h-1.5 rounded-full" style="background:#0D9488"></span>正常</span>
+                <span class="flex items-center gap-0.5"><span class="w-1.5 h-1.5 rounded-full" style="background:#F97316"></span>偏高</span>
+              </div>
+            </div>
+            <div class="card" style="padding:12px;display:flex;flex-direction:column;align-items:center">
+              <h3 class="font-bold text-[11px] mb-2 self-start">呼吸急促度</h3>
+              <div style="width:160px;height:88px;position:relative"><canvas id="brElevGauge" width="160" height="88"></canvas></div>
+              <div class="m-val text-2xl mt-1" :style="{color:brElevation>30?'#F97316':'#0D9488'}">{{brElevation}}%</div>
+              <div class="text-[9px] text-slate-400 mt-0.5">正常 &lt; 30%</div>
+              <div class="flex gap-3 mt-1.5 text-[9px]">
+                <span class="flex items-center gap-0.5"><span class="w-1.5 h-1.5 rounded-full" style="background:#10B981"></span>平稳</span>
+                <span class="flex items-center gap-0.5"><span class="w-1.5 h-1.5 rounded-full" style="background:#F97316"></span>轻度</span>
+                <span class="flex items-center gap-0.5"><span class="w-1.5 h-1.5 rounded-full" style="background:#EF4444"></span>急促</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ====== 情绪 ====== -->
+      <div v-show="activeTab==='emotion'" class="split fade-up">
+        <div class="left-col">
+          <!-- 视频流 -->
+          <div class="card" style="padding:10px">
+            <div class="flex items-center justify-between mb-2">
+              <div class="flex items-center gap-1.5"><div class="w-4 h-4 rounded bg-slate-100 flex items-center justify-center"><i class="fas fa-video text-slate-500" style="font-size:8px"></i></div><h3 class="font-bold text-xs">视频流</h3></div>
+              <span class="live-tag"><span class="w-1 h-1 rounded-full bg-red-500 pulse-d"></span>LIVE</span>
+            </div>
+            <div class="vid-box" style="height:170px">
+              <div class="scan-ln"></div>
+              <div class="absolute inset-0 flex flex-col items-center justify-center text-white/50">
+                <i class="fas fa-video text-xl mb-1"></i>
+                <span class="text-[10px]">摄像头未连接</span>
+              </div>
+              <div style="position:absolute;top:18%;left:26%;width:48%;height:58%;border:1.5px solid rgba(13,148,136,.45);border-radius:50%"></div>
+            </div>
+            <div class="flex gap-1.5 mt-2">
+              <button class="flex-1 py-1.5 rounded-lg text-[10px] font-semibold bg-teal-50 text-teal-700 hover:bg-teal-100 transition border border-teal-100"><i class="fas fa-camera mr-0.5"></i>本地</button>
+              <button class="flex-1 py-1.5 rounded-lg text-[10px] font-semibold bg-slate-50 text-slate-600 hover:bg-slate-100 transition border border-slate-200"><i class="fas fa-globe mr-0.5"></i>IP</button>
+            </div>
+          </div>
+          <!-- 情绪通道 -->
+          <div class="card" style="padding:12px">
+            <div class="flex items-center gap-1.5 mb-2"><div class="w-4 h-4 rounded bg-indigo-50 flex items-center justify-center"><i class="fas fa-layer-group text-indigo-500" style="font-size:8px"></i></div><h3 class="font-bold text-xs">情绪通道</h3></div>
+            <!-- AU -->
+            <div class="mb-2.5">
+              <div class="flex items-center justify-between mb-1"><span class="text-[11px] font-semibold text-slate-600">AU 通道</span><span class="m-val text-sm" style="color:#0D9488">{{auScore.toFixed(2)}}</span></div>
+              <div class="emo-bar"><div :style="{width:auPositive+'%',background:'#10B981'}"></div><div :style="{width:auNeutral+'%',background:'#94A3B8'}"></div><div :style="{width:auNegative+'%',background:'#EF4444'}"></div></div>
+              <div class="flex justify-between mt-0.5 text-[9px] text-slate-400"><span>积极{{auPositive}}%</span><span>中性{{auNeutral}}%</span><span>消极{{auNegative}}%</span></div>
+            </div>
+            <!-- FER+ -->
+            <div class="mb-2.5">
+              <div class="flex items-center justify-between mb-1"><span class="text-[11px] font-semibold text-slate-600">FER+ 通道</span><span class="m-val text-sm" style="color:#F97316">{{ferScore.toFixed(2)}}</span></div>
+              <div class="emo-bar"><div :style="{width:ferPositive+'%',background:'#10B981'}"></div><div :style="{width:ferNeutral+'%',background:'#94A3B8'}"></div><div :style="{width:ferNegative+'%',background:'#EF4444'}"></div></div>
+              <div class="flex justify-between mt-0.5 text-[9px] text-slate-400"><span>积极{{ferPositive}}%</span><span>中性{{ferNeutral}}%</span><span>消极{{ferNegative}}%</span></div>
+            </div>
+            <!-- 融合 -->
+            <div class="pt-2 border-t border-slate-100">
+              <div class="flex items-center justify-between mb-1"><span class="text-[11px] font-bold text-slate-700">融合结果</span><span class="m-val text-base" style="color:#0F766E">{{fusionScore.toFixed(2)}}</span></div>
+              <div class="emo-bar" style="height:8px"><div :style="{width:fusionPositive+'%',background:'#10B981'}"></div><div :style="{width:fusionNeutral+'%',background:'#94A3B8'}"></div><div :style="{width:fusionNegative+'%',background:'#EF4444'}"></div></div>
+              <div class="flex justify-between mt-0.5 text-[9px] text-slate-400"><span>积极{{fusionPositive}}%</span><span>中性{{fusionNeutral}}%</span><span>消极{{fusionNegative}}%</span></div>
+            </div>
+          </div>
+          <!-- 压力值 -->
+          <div class="card" style="padding:12px;display:flex;flex-direction:column;align-items:center">
+            <h3 class="font-bold text-xs mb-2 self-start">压力值</h3>
+            <div class="relative" style="width:100px;height:100px">
+              <svg viewBox="0 0 100 100" class="prog-ring" width="100" height="100">
+                <circle cx="50" cy="50" r="42" fill="none" stroke="#F1F5F9" stroke-width="7"/>
+                <circle cx="50" cy="50" r="42" fill="none" :stroke="pressureColor" stroke-width="7" stroke-linecap="round" :stroke-dasharray="2*Math.PI*42" :stroke-dashoffset="2*Math.PI*42*(1-pressureValue/100)"/>
+              </svg>
+              <div class="absolute inset-0 flex flex-col items-center justify-center" style="transform:rotate(90deg)">
+                <span class="m-val text-xl" :style="{color:pressureColor}">{{pressureValue}}</span>
+                <span class="text-[8px] text-slate-400">/100</span>
+              </div>
+            </div>
+            <div class="text-[11px] font-semibold mt-1.5" :style="{color:pressureColor}">{{pressureLabel}}</div>
+          </div>
+        </div>
+
+        <div class="right-col">
+          <!-- 情绪时序图 -->
+          <div class="card" style="padding:12px">
+            <div class="flex items-center justify-between mb-2">
+              <div class="flex items-center gap-1.5"><div class="w-4 h-4 rounded bg-rose-50 flex items-center justify-center"><i class="fas fa-wave-square text-rose-500" style="font-size:8px"></i></div><h3 class="font-bold text-xs">情绪时序图</h3><span class="live-tag"><span class="w-1 h-1 rounded-full bg-red-500 pulse-d"></span>LIVE</span></div>
+              <div class="flex gap-0.5">
+                <button class="per-btn" :class="{active:emoPeriod==='day'}" @click="setEmoPeriod('day')">日</button>
+                <button class="per-btn" :class="{active:emoPeriod==='week'}" @click="setEmoPeriod('week')">周</button>
+                <button class="per-btn" :class="{active:emoPeriod==='month'}" @click="setEmoPeriod('month')">月</button>
+                <button class="per-btn" :class="{active:emoPeriod==='year'}" @click="setEmoPeriod('year')">年</button>
+              </div>
+            </div>
+            <div style="height:150px"><canvas id="emotionTimelineChart"></canvas></div>
+          </div>
+          <!-- 情绪趋势 + 情绪分析 -->
+          <div class="right-2col">
+            <div class="card" style="padding:12px">
+              <div class="flex items-center gap-1.5 mb-2"><div class="w-4 h-4 rounded bg-teal-50 flex items-center justify-center"><i class="fas fa-chart-bar text-teal-600" style="font-size:8px"></i></div><h3 class="font-bold text-xs">情绪趋势</h3></div>
+              <div style="height:140px"><canvas id="emotionTrendChart"></canvas></div>
+            </div>
+            <div class="card" style="padding:12px">
+              <div class="flex items-center gap-1.5 mb-2"><div class="w-4 h-4 rounded bg-amber-50 flex items-center justify-center"><i class="fas fa-magnifying-glass-chart text-amber-500" style="font-size:8px"></i></div><h3 class="font-bold text-xs">情绪分析</h3></div>
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-bottom:8px">
+                <div class="mini-st text-center"><div class="m-label">主导</div><div class="m-val text-xs mt-0.5" style="color:#0D9488">平静</div></div>
+                <div class="mini-st text-center"><div class="m-label">稳定性</div><div class="m-val text-xs mt-0.5" style="color:#10B981">良好</div></div>
+                <div class="mini-st text-center"><div class="m-label">波动</div><div class="m-val text-xs mt-0.5" style="color:#F97316">低</div></div>
+              </div>
+              <div class="bg-teal-50/50 rounded-lg p-2.5 border border-teal-100 mb-2">
+                <div class="text-[10px] font-semibold text-teal-800 mb-0.5">摘要</div>
+                <p class="text-[9px] text-teal-700 leading-relaxed">积极情绪占比{{fusionPositive}}%，消极情绪维持较低水平。压力指数{{pressureValue}}，处于健康范围。</p>
+              </div>
+              <div class="text-[10px] font-semibold text-slate-700 mb-1">建议</div>
+              <div class="flex flex-col gap-1">
+                <div class="adv-item" style="padding:6px 8px"><i class="fas fa-spa text-teal-500" style="font-size:9px"></i><span class="text-[9px] text-slate-600">深呼吸练习维持情绪稳定</span></div>
+                <div class="adv-item" style="padding:6px 8px"><i class="fas fa-music text-orange-500" style="font-size:9px"></i><span class="text-[9px] text-slate-600">轻音乐增强积极体验</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ====== 睡眠 ====== -->
+      <div v-show="activeTab==='sleep'" class="split fade-up">
+        <div class="left-col">
+          <!-- 睡眠得分 -->
+          <div class="card" style="padding:12px;display:flex;flex-direction:column;align-items:center">
+            <h3 class="font-bold text-xs mb-2 self-start">睡眠得分</h3>
+            <div class="relative" style="width:110px;height:110px">
+              <svg viewBox="0 0 110 110" class="prog-ring" width="110" height="110">
+                <circle cx="55" cy="55" r="46" fill="none" stroke="#F1F5F9" stroke-width="8"/>
+                <circle cx="55" cy="55" r="46" fill="none" stroke="#0D9488" stroke-width="8" stroke-linecap="round" :stroke-dasharray="2*Math.PI*46" :stroke-dashoffset="2*Math.PI*46*(1-sleepScore/100)"/>
+              </svg>
+              <div class="absolute inset-0 flex flex-col items-center justify-center" style="transform:rotate(90deg)">
+                <span class="m-val text-2xl" style="color:#0D9488">{{sleepScore}}</span>
+                <span class="text-[9px] text-slate-400">/100</span>
+              </div>
+            </div>
+            <div class="text-[11px] font-semibold mt-2" style="color:#0D9488">{{sleepScoreLabel}}</div>
+          </div>
+          <!-- 睡眠比例 -->
+          <div class="card" style="padding:12px">
+            <div class="flex items-center gap-1.5 mb-2"><div class="w-4 h-4 rounded bg-teal-50 flex items-center justify-center"><i class="fas fa-chart-pie text-teal-600" style="font-size:8px"></i></div><h3 class="font-bold text-xs">睡眠比例</h3></div>
+            <div class="sleep-bar mb-2">
+              <div :style="{width:sleepDeep/totalSleep*100+'%',background:'#0F766E'}"></div>
+              <div :style="{width:sleepLight/totalSleep*100+'%',background:'#14B8A6'}"></div>
+              <div :style="{width:sleepRem/totalSleep*100+'%',background:'#F59E0B'}"></div>
+              <div :style="{width:sleepAwake/totalSleep*100+'%',background:'#EF4444'}"></div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 8px">
+              <div class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded" style="background:#0F766E"></span><span class="text-[9px] text-slate-500">深睡</span><span class="text-[11px] font-bold ml-auto">{{sleepDeep}}h</span></div>
+              <div class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded" style="background:#14B8A6"></span><span class="text-[9px] text-slate-500">浅睡</span><span class="text-[11px] font-bold ml-auto">{{sleepLight}}h</span></div>
+              <div class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded" style="background:#F59E0B"></span><span class="text-[9px] text-slate-500">REM</span><span class="text-[11px] font-bold ml-auto">{{sleepRem}}h</span></div>
+              <div class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded" style="background:#EF4444"></span><span class="text-[9px] text-slate-500">清醒</span><span class="text-[11px] font-bold ml-auto">{{sleepAwake}}h</span></div>
+            </div>
+            <div class="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between">
+              <span class="text-[9px] text-slate-400">总睡眠</span>
+              <span class="m-val text-sm">{{(sleepDeep+sleepLight+sleepRem).toFixed(1)}}h</span>
+            </div>
+            <div style="height:100px;margin-top:8px"><canvas id="sleepDoughnutChart"></canvas></div>
+          </div>
+          <!-- 睡眠记录 -->
+          <div class="card" style="padding:12px;flex:1;min-height:0;display:flex;flex-direction:column">
+            <div class="flex items-center gap-1.5 mb-2"><div class="w-4 h-4 rounded bg-blue-50 flex items-center justify-center"><i class="fas fa-clock-rotate-left text-blue-500" style="font-size:8px"></i></div><h3 class="font-bold text-xs">睡眠记录</h3></div>
+            <div class="flex flex-col overflow-y-auto flex-1 min-h-0" style="margin:0 -4px;padding:0 4px">
+              <div class="rec-row" v-for="(r,i) in sleepRecords" :key="i">
+                <div class="flex-1 min-w-0">
+                  <div class="text-[11px] font-medium text-slate-700">{{r.date}}</div>
+                  <div class="text-[9px] text-slate-400">{{r.start}} - {{r.end}}</div>
+                </div>
+                <div class="text-right">
+                  <div class="m-val text-sm" :style="{color:r.score>=80?'#0D9488':r.score>=60?'#F97316':'#EF4444'}">{{r.score}}</div>
+                  <div class="text-[9px] text-slate-400">{{r.duration}}h</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="right-col">
+          <!-- 睡眠时长趋势 -->
+          <div class="card" style="padding:12px">
+            <div class="flex items-center justify-between mb-2">
+              <div class="flex items-center gap-1.5"><div class="w-4 h-4 rounded bg-violet-50 flex items-center justify-center"><i class="fas fa-chart-area text-violet-500" style="font-size:8px"></i></div><h3 class="font-bold text-xs">睡眠时长趋势</h3></div>
+              <div class="flex gap-2 text-[9px]">
+                <span class="flex items-center gap-0.5"><span class="w-2 h-2 rounded" style="background:#0F766E"></span>深睡</span>
+                <span class="flex items-center gap-0.5"><span class="w-2 h-2 rounded" style="background:#14B8A6"></span>浅睡</span>
+                <span class="flex items-center gap-0.5"><span class="w-2 h-2 rounded" style="background:#F59E0B"></span>REM</span>
+                <span class="flex items-center gap-0.5"><span class="w-2 h-2 rounded" style="background:#EF4444"></span>清醒</span>
+              </div>
+            </div>
+            <div style="height:140px"><canvas id="sleepTrendChart"></canvas></div>
+          </div>
+          <!-- Lissajous + 相位差 -->
+          <div class="right-2col">
+            <div class="card" style="padding:12px">
+              <div class="flex items-center justify-between mb-1.5">
+                <div class="flex items-center gap-1"><div class="w-4 h-4 rounded bg-indigo-50 flex items-center justify-center"><i class="fas fa-bezier-curve text-indigo-500" style="font-size:8px"></i></div><span class="font-bold text-[11px]">心肺相空间</span></div>
+                <span class="text-[9px] text-slate-400">HR vs BR</span>
+              </div>
+              <div style="height:180px;position:relative"><canvas id="lissajousCanvas" class="wave-cv"></canvas></div>
+            </div>
+            <div class="card" style="padding:12px">
+              <div class="flex items-center justify-between mb-1.5">
+                <div class="flex items-center gap-1"><div class="w-4 h-4 rounded bg-violet-50 flex items-center justify-center"><i class="fas fa-circle-notch text-violet-500" style="font-size:8px"></i></div><span class="font-bold text-[11px]">相位差圆周</span></div>
+                <span class="m-val text-sm" style="color:#6366F1">{{phaseDiff}}°</span>
+              </div>
+              <div style="height:180px;position:relative"><canvas id="phaseCircleCanvas" class="wave-cv"></canvas></div>
+            </div>
+          </div>
+          <!-- PLV + 解读 -->
+          <div class="right-2col">
+            <div class="card" style="padding:12px;display:flex;flex-direction:column;align-items:center;justify-content:center">
+              <h3 class="font-bold text-[11px] mb-2 self-start">相位锁定值</h3>
+              <div class="relative" style="width:110px;height:110px">
+                <svg viewBox="0 0 110 110" class="prog-ring" width="110" height="110">
+                  <circle cx="55" cy="55" r="44" fill="none" stroke="#F1F5F9" stroke-width="8"/>
+                  <circle cx="55" cy="55" r="44" fill="none" stroke="#6366F1" stroke-width="8" stroke-linecap="round" :stroke-dasharray="2*Math.PI*44" :stroke-dashoffset="2*Math.PI*44*(1-sleepPlv)"/>
+                </svg>
+                <div class="absolute inset-0 flex flex-col items-center justify-center" style="transform:rotate(90deg)">
+                  <span class="m-val text-xl" style="color:#6366F1">{{sleepPlv}}</span>
+                </div>
+              </div>
+              <div class="text-[9px] text-slate-400 mt-2">心肺耦合强度</div>
+              <div class="text-[10px] font-semibold" style="color:#6366F1">强耦合</div>
+            </div>
+            <div class="card" style="padding:12px">
+              <div class="flex items-center gap-1.5 mb-2"><div class="w-4 h-4 rounded bg-teal-50 flex items-center justify-center"><i class="fas fa-file-medical text-teal-600" style="font-size:8px"></i></div><h3 class="font-bold text-xs">解读与建议</h3></div>
+              <div class="bg-teal-50/50 rounded-lg p-2.5 border border-teal-100 mb-2">
+                <div class="text-[10px] font-semibold text-teal-800 mb-0.5">睡眠解读</div>
+                <p class="text-[9px] text-teal-700 leading-relaxed">深睡占比{{(sleepDeep/(sleepDeep+sleepLight+sleepRem)*100).toFixed(0)}}%，接近推荐水平。REM充足，心肺耦合强(PLV={{sleepPlv}})，自主神经调节良好。</p>
+              </div>
+              <div class="flex flex-col gap-1.5">
+                <div class="adv-item" v-for="(a,i) in sleepAdvices" :key="i">
+                  <div class="w-5 h-5 rounded flex items-center justify-center shrink-0" :style="{background:a.bg}"><i :class="a.icon" style="font-size:8px" :style="{color:a.color}"></i></div>
+                  <div><div class="text-[10px] font-semibold text-slate-700">{{a.title}}</div><div class="text-[9px] text-slate-400">{{a.desc}}</div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+const{createApp,ref,computed,onMounted,nextTick,onBeforeUnmount}=Vue;
+createApp({
+  data(){
+    return {
+      activeTab:'cardio',currentTime:'',
+      hr:72,br:16,hrr:38,cr:4.5,brv:12,hrSlope:0.15,plv:0.72,brElevation:8,
+      trendPeriod:'day',
+      auScore:0.65,ferScore:0.58,fusionScore:0.62,
+      auPositive:45,auNeutral:38,auNegative:17,
+      ferPositive:52,ferNeutral:30,ferNegative:18,
+      fusionPositive:48,fusionNeutral:35,fusionNegative:17,
+      pressureValue:35,emoPeriod:'day',
+      sleepScore:82,sleepDeep:1.5,sleepLight:3.2,sleepRem:1.8,sleepAwake:0.5,
+      sleepPlv:0.914,phaseDiff:45,
+      sleepRecords:[
+        {date:'今天',start:'23:15',end:'06:45',score:82,duration:'7.5'},
+        {date:'昨天',start:'22:50',end:'06:30',score:78,duration:'7.7'},
+        {date:'前天',start:'23:30',end:'07:00',score:85,duration:'7.5'},
+        {date:'3天前',start:'00:10',end:'07:15',score:65,duration:'7.1'},
+        {date:'4天前',start:'23:00',end:'06:50',score:88,duration:'7.8'},
+      ],
+      cardioAdvices:[
+        {title:'有氧运动',desc:'每日30分钟中等强度',icon:'fas fa-running',bg:'#F0FDFA',color:'#0D9488'},
+        {title:'深呼吸',desc:'腹式呼吸每天5分钟',icon:'fas fa-wind',bg:'#FFF7ED',color:'#F97316'},
+        {title:'充足睡眠',desc:'7-9小时优质睡眠',icon:'fas fa-bed',bg:'#EFF6FF',color:'#3B82F6'},
+      ],
+      sleepAdvices:[
+        {title:'固定作息',desc:'同一时间入睡起床',icon:'fas fa-clock',bg:'#F0FDFA',color:'#0D9488'},
+        {title:'睡前放松',desc:'避免蓝光刺激',icon:'fas fa-book-open',bg:'#FFF7ED',color:'#F97316'},
+      ],
+      chartInstances:{},animFrames:{},ecgData:[],brData:[]
+    }
+  },
+  computed:{
+    pressureColor(){return this.pressureValue<30?'#10B981':this.pressureValue<60?'#F97316':'#EF4444'},
+    pressureLabel(){return this.pressureValue<30?'放松':this.pressureValue<50?'轻度压力':this.pressureValue<70?'中度压力':'高度压力'},
+    sleepScoreLabel(){return this.sleepScore>=85?'优秀':this.sleepScore>=70?'良好':this.sleepScore>=50?'一般':'较差'},
+    totalSleep(){return this.sleepDeep+this.sleepLight+this.sleepRem+this.sleepAwake}
+  },
+  methods:{
+    switchTab(t){this.activeTab=t;nextTick(()=>this.initCurrentTabCharts())},
+    setTrendPeriod(p){this.trendPeriod=p;this.updateHealthTrendChart()},
+    setEmoPeriod(p){this.emoPeriod=p;this.updateEmotionTimelineChart()},
+    updateTime(){this.currentTime=new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit'})},
+
+    initCurrentTabCharts(){
+      Object.keys(this.chartInstances).forEach(k=>{if(this.chartInstances[k]){this.chartInstances[k].destroy();delete this.chartInstances[k]}});
+      Object.keys(this.animFrames).forEach(k=>{cancelAnimationFrame(this.animFrames[k]);delete this.animFrames[k]});
+      if(this.activeTab==='cardio')this.initCardioCharts();
+      else if(this.activeTab==='emotion')this.initEmotionCharts();
+      else if(this.activeTab==='sleep')this.initSleepCharts();
+    },
+
+    // ===== 心肺 =====
+    initCardioCharts(){this.initHealthTrendChart();this.initECG();this.initBRWave();this.drawCRGauge();this.drawBRElevGauge()},
+    initHealthTrendChart(){
+      const ctx=document.getElementById('healthTrendChart');if(!ctx)return;const d=this.getTrendData();
+      this.chartInstances['ht']=new Chart(ctx,{type:'line',data:{labels:d.labels,datasets:[
+        {label:'心率',data:d.hr,borderColor:'#0D9488',backgroundColor:'rgba(13,148,136,.06)',tension:.4,fill:true,pointRadius:2,borderWidth:1.5},
+        {label:'呼吸率',data:d.br,borderColor:'#F97316',backgroundColor:'rgba(249,115,22,.06)',tension:.4,fill:true,pointRadius:2,borderWidth:1.5,yAxisID:'y1'}
+      ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:true,position:'top',labels:{boxWidth:6,usePointStyle:true,font:{size:9}}}},scales:{
+        x:{grid:{display:false},ticks:{font:{size:9},color:'#94A3B8'}},
+        y:{position:'left',grid:{color:'#F8FAFC'},ticks:{font:{size:9},color:'#0D9488'},title:{display:true,text:'bpm',font:{size:9}}},
+        y1:{position:'right',grid:{display:false},ticks:{font:{size:9},color:'#F97316'},title:{display:true,text:'/min',font:{size:9}}}
+      },interaction:{intersect:false,mode:'index'}}});
+    },
+    updateHealthTrendChart(){const c=this.chartInstances['ht'];if(!c)return;const d=this.getTrendData();c.data.labels=d.labels;c.data.datasets[0].data=d.hr;c.data.datasets[1].data=d.br;c.update()},
+    getTrendData(){
+      const p=this.trendPeriod;
+      if(p==='day')return{labels:['0:00','2:00','4:00','6:00','8:00','10:00','12:00','14:00','16:00','18:00','20:00','22:00'],hr:[62,60,58,56,64,72,78,75,80,76,70,65],br:[14,13,12,12,14,16,18,17,18,16,15,14]};
+      if(p==='week')return{labels:['周一','周二','周三','周四','周五','周六','周日'],hr:[71,74,68,72,76,70,72],br:[15,17,14,16,17,15,16]};
+      return{labels:['1日','5日','10日','15日','20日','25日','30日'],hr:[72,70,74,71,73,69,72],br:[16,15,16,15,17,14,16]};
+    },
+
+    initECG(){
+      const cv=document.getElementById('ecgCanvas');if(!cv)return;const ctx=cv.getContext('2d');
+      const w=cv.parentElement.clientWidth,h=cv.parentElement.clientHeight;
+      cv.width=w*2;cv.height=h*2;cv.style.width=w+'px';cv.style.height=h+'px';ctx.scale(2,2);
+      this.ecgData=new Array(Math.ceil(w/2)).fill(0);let t=0;
+      const draw=()=>{t+=.02;const cy=t%1;let v=0;
+        if(cy<.08)v=Math.sin(cy/.08*Math.PI)*.12;else if(cy<.12)v=0;else if(cy<.14)v=-.08;
+        else if(cy<.18)v=Math.sin((cy-.14)/.04*Math.PI)*.85;else if(cy<.21)v=-.12;
+        else if(cy<.30)v=0;else if(cy<.44)v=Math.sin((cy-.30)/.14*Math.PI)*.2;else v=0;
+        v+=(Math.random()-.5)*.012;this.ecgData.push(v);if(this.ecgData.length>Math.ceil(w/2))this.ecgData.shift();
+        ctx.clearRect(0,0,w,h);ctx.strokeStyle='#F1F5F9';ctx.lineWidth=.4;
+        for(let i=0;i<h;i+=16){ctx.beginPath();ctx.moveTo(0,i);ctx.lineTo(w,i);ctx.stroke()}
+        const mid=h/2;ctx.beginPath();ctx.strokeStyle='#0D9488';ctx.lineWidth=1.5;
+        this.ecgData.forEach((val,i)=>{const x=i*2,y=mid-val*(h*.4);i===0?ctx.moveTo(x,y):ctx.lineTo(x,y)});ctx.stroke();
+        this.animFrames['ecg']=requestAnimationFrame(draw)};draw();
+    },
+    initBRWave(){
+      const cv=document.getElementById('brCanvas');if(!cv)return;const ctx=cv.getContext('2d');
+      const w=cv.parentElement.clientWidth,h=cv.parentElement.clientHeight;
+      cv.width=w*2;cv.height=h*2;cv.style.width=w+'px';cv.style.height=h+'px';ctx.scale(2,2);
+      this.brData=new Array(Math.ceil(w/2)).fill(0);let t=0;
+      const draw=()=>{t+=.015;const v=Math.sin(t*1.2)*.5+Math.sin(t*2.4)*.1+Math.sin(t*.6)*.07+(Math.random()-.5)*.015;
+        this.brData.push(v);if(this.brData.length>Math.ceil(w/2))this.brData.shift();
+        ctx.clearRect(0,0,w,h);ctx.strokeStyle='#F1F5F9';ctx.lineWidth=.4;
+        for(let i=0;i<h;i+=16){ctx.beginPath();ctx.moveTo(0,i);ctx.lineTo(w,i);ctx.stroke()}
+        const mid=h/2;ctx.beginPath();ctx.strokeStyle='#F97316';ctx.lineWidth=1.5;
+        this.brData.forEach((val,i)=>{const x=i*2,y=mid-v*(h*.36);i===0?ctx.moveTo(x,y):ctx.lineTo(x,y)});ctx.stroke();
+        this.animFrames['br']=requestAnimationFrame(draw)};draw();
+    },
+    drawCRGauge(){
+      const cv=document.getElementById('crGauge');if(!cv)return;const ctx=cv.getContext('2d');
+      const w=160,h=88,cx=w/2,cy=h-4,r=62;ctx.clearRect(0,0,w,h);
+      [{s:Math.PI,e:Math.PI+Math.PI*.3,c:'#10B981'},{s:Math.PI+Math.PI*.3,e:Math.PI+Math.PI*.7,c:'#0D9488'},{s:Math.PI+Math.PI*.7,e:2*Math.PI,c:'#F97316'}].forEach(seg=>{
+        ctx.beginPath();ctx.arc(cx,cy,r,seg.s,seg.e,false);ctx.strokeStyle=seg.c;ctx.lineWidth=10;ctx.lineCap='round';ctx.stroke()});
+      const n=Math.min(Math.max((this.cr-2)/8,0),1),a=Math.PI+n*Math.PI;
+      const nx=cx+Math.cos(a)*(r-18),ny=cy+Math.sin(a)*(r-18);
+      ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(nx,ny);ctx.strokeStyle='#1E293B';ctx.lineWidth=2;ctx.lineCap='round';ctx.stroke();
+      ctx.beginPath();ctx.arc(cx,cy,3,0,Math.PI*2);ctx.fillStyle='#1E293B';ctx.fill();
+    },
+    drawBRElevGauge(){
+      const cv=document.getElementById('brElevGauge');if(!cv)return;const ctx=cv.getContext('2d');
+      const w=160,h=88,cx=w/2,cy=h-4,r=62;ctx.clearRect(0,0,w,h);
+      [{s:Math.PI,e:Math.PI+Math.PI*.4,c:'#10B981'},{s:Math.PI+Math.PI*.4,e:Math.PI+Math.PI*.7,c:'#F97316'},{s:Math.PI+Math.PI*.7,e:2*Math.PI,c:'#EF4444'}].forEach(seg=>{
+        ctx.beginPath();ctx.arc(cx,cy,r,seg.s,seg.e,false);ctx.strokeStyle=seg.c;ctx.lineWidth=10;ctx.lineCap='round';ctx.stroke()});
+      const n=Math.min(this.brElevation/100,1),a=Math.PI+n*Math.PI;
+      const nx=cx+Math.cos(a)*(r-18),ny=cy+Math.sin(a)*(r-18);
+      ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(nx,ny);ctx.strokeStyle='#1E293B';ctx.lineWidth=2;ctx.lineCap='round';ctx.stroke();
+      ctx.beginPath();ctx.arc(cx,cy,3,0,Math.PI*2);ctx.fillStyle='#1E293B';ctx.fill();
+    },
+
+    // ===== 情绪 =====
+    initEmotionCharts(){this.initEmotionTimelineChart();this.initEmotionTrendChart()},
+    initEmotionTimelineChart(){
+      const ctx=document.getElementById('emotionTimelineChart');if(!ctx)return;const d=this.getEmoData();
+      this.chartInstances['etl']=new Chart(ctx,{type:'line',data:{labels:d.labels,datasets:[
+        {label:'积极',data:d.positive,borderColor:'#10B981',backgroundColor:'rgba(16,185,129,.06)',tension:.4,fill:true,pointRadius:2,borderWidth:1.5},
+        {label:'中性',data:d.neutral,borderColor:'#94A3B8',backgroundColor:'rgba(148,163,184,.04)',tension:.4,fill:true,pointRadius:2,borderWidth:1.5},
+        {label:'消极',data:d.negative,borderColor:'#EF4444',backgroundColor:'rgba(239,68,68,.05)',tension:.4,fill:true,pointRadius:2,borderWidth:1.5}
+      ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:true,position:'top',labels:{boxWidth:6,usePointStyle:true,font:{size:9}}}},scales:{
+        x:{grid:{display:false},ticks:{font:{size:9},color:'#94A3B8'}},y:{grid:{color:'#F8FAFC'},ticks:{font:{size:9},color:'#94A3B8'},min:0,max:100}
+      },interaction:{intersect:false,mode:'index'}}});
+    },
+    updateEmotionTimelineChart(){const c=this.chartInstances['etl'];if(!c)return;const d=this.getEmoData();c.data.labels=d.labels;c.data.datasets[0].data=d.positive;c.data.datasets[1].data=d.neutral;c.data.datasets[2].data=d.negative;c.update()},
+    getEmoData(){
+      const p=this.emoPeriod;
+      if(p==='day')return{labels:['8:00','9:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00','18:00','19:00'],positive:[40,55,60,50,45,65,70,55,48,52,58,62],neutral:[35,30,25,30,35,20,18,28,32,30,25,23],negative:[25,15,15,20,20,15,12,17,20,18,17,15]};
+      if(p==='week')return{labels:['周一','周二','周三','周四','周五','周六','周日'],positive:[50,45,60,55,48,65,58],neutral:[30,35,25,28,32,22,27],negative:[20,20,15,17,20,13,15]};
+      if(p==='month')return{labels:['第1周','第2周','第3周','第4周'],positive:[52,58,50,55],neutral:[28,25,30,27],negative:[20,17,20,18]};
+      return{labels:['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'],positive:[45,50,55,48,52,58,60,55,50,53,56,58],neutral:[30,28,25,32,28,25,22,27,30,28,25,24],negative:[25,22,20,20,20,17,18,18,20,19,19,18]};
+    },
+    initEmotionTrendChart(){
+      const ctx=document.getElementById('emotionTrendChart');if(!ctx)return;
+      this.chartInstances['etr']=new Chart(ctx,{type:'bar',data:{labels:['周一','周二','周三','周四','周五','周六','周日'],datasets:[
+        {label:'积极',data:[50,45,60,55,48,65,58],backgroundColor:'rgba(16,185,129,.6)',borderRadius:3},
+        {label:'中性',data:[30,35,25,28,32,22,27],backgroundColor:'rgba(148,163,184,.4)',borderRadius:3},
+        {label:'消极',data:[20,20,15,17,20,13,15],backgroundColor:'rgba(239,68,68,.5)',borderRadius:3}
+      ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{
+        x:{stacked:true,grid:{display:false},ticks:{font:{size:8},color:'#94A3B8'}},
+        y:{stacked:true,grid:{color:'#F8FAFC'},ticks:{font:{size:8},color:'#94A3B8',callback:v=>v+'%'},max:100}
+      }}});
+    },
+
+    // ===== 睡眠 =====
+    initSleepCharts(){this.initSleepDoughnut();this.initSleepTrendChart();this.drawLissajous();this.drawPhaseCircle()},
+    initSleepDoughnut(){
+      const ctx=document.getElementById('sleepDoughnutChart');if(!ctx)return;
+      this.chartInstances['sd']=new Chart(ctx,{type:'doughnut',data:{labels:['深睡','浅睡','REM','清醒'],datasets:[{data:[this.sleepDeep,this.sleepLight,this.sleepRem,this.sleepAwake],backgroundColor:['#0F766E','#14B8A6','#F59E0B','#EF4444'],borderWidth:0,hoverOffset:4}]},options:{responsive:true,maintainAspectRatio:false,cutout:'62%',plugins:{legend:{display:false}}}});
+    },
+    initSleepTrendChart(){
+      const ctx=document.getElementById('sleepTrendChart');if(!ctx)return;
+      this.chartInstances['st']=new Chart(ctx,{type:'bar',data:{labels:['周一','周二','周三','周四','周五','周六','周日'],datasets:[
+        {label:'深睡',data:[1.2,1.5,1.8,1.0,1.4,1.6,1.5],backgroundColor:'#0F766E',borderRadius:3},
+        {label:'浅睡',data:[3.0,3.2,2.8,3.5,3.1,2.9,3.2],backgroundColor:'#14B8A6',borderRadius:3},
+        {label:'REM',data:[1.5,1.8,2.0,1.2,1.7,1.9,1.8],backgroundColor:'#F59E0B',borderRadius:3},
+        {label:'清醒',data:[0.5,0.3,0.6,0.8,0.4,0.3,0.5],backgroundColor:'#EF4444',borderRadius:3}
+      ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{
+        x:{stacked:true,grid:{display:false},ticks:{font:{size:9},color:'#94A3B8'}},
+        y:{stacked:true,grid:{color:'#F8FAFC'},ticks:{font:{size:9},color:'#94A3B8',callback:v=>v+'h'}}
+      }}});
+    },
+    drawLissajous(){
+      const cv=document.getElementById('lissajousCanvas');if(!cv)return;const ctx=cv.getContext('2d');
+      const w=cv.parentElement.clientWidth,h=cv.parentElement.clientHeight;
+      cv.width=w*2;cv.height=h*2;cv.style.width=w+'px';cv.style.height=h+'px';ctx.scale(2,2);
+      const cx=w/2,cy=h/2,rx=w*.36,ry=h*.36;let t=0;
+      const draw=()=>{t+=.003;ctx.fillStyle='rgba(255,255,255,.06)';ctx.fillRect(0,0,w,h);
+        ctx.strokeStyle='#E8ECF0';ctx.lineWidth=.4;ctx.beginPath();ctx.moveTo(cx-rx-8,cy);ctx.lineTo(cx+rx+8,cy);ctx.stroke();
+        ctx.beginPath();ctx.moveTo(cx,cy-ry-8);ctx.lineTo(cx,cy+ry+8);ctx.stroke();
+        ctx.beginPath();const a=4,b=1,delta=t*.5;
+        for(let i=0;i<500;i++){const tt=i*.02;const x=cx+rx*Math.sin(a*tt+delta),y=cy+ry*Math.sin(b*tt);i===0?ctx.moveTo(x,y):ctx.lineTo(x,y)}
+        ctx.strokeStyle='rgba(99,102,241,.18)';ctx.lineWidth=1;ctx.stroke();
+        const px=cx+rx*Math.sin(a*t*8+delta),py=cy+ry*Math.sin(b*t*8);
+        ctx.beginPath();ctx.arc(px,py,3,0,Math.PI*2);ctx.fillStyle='#6366F1';ctx.fill();
+        ctx.beginPath();ctx.arc(px,py,7,0,Math.PI*2);ctx.fillStyle='rgba(99,102,241,.15)';ctx.fill();
+        ctx.fillStyle='#94A3B8';ctx.font='9px DM Sans';ctx.textAlign='center';ctx.fillText('HR',cx+rx+12,cy+3);ctx.fillText('BR',cx,cy-ry-10);
+        this.animFrames['lj']=requestAnimationFrame(draw)};ctx.clearRect(0,0,w,h);draw();
+    },
+    drawPhaseCircle(){
+      const cv=document.getElementById('phaseCircleCanvas');if(!cv)return;const ctx=cv.getContext('2d');
+      const w=cv.parentElement.clientWidth,h=cv.parentElement.clientHeight;
+      cv.width=w*2;cv.height=h*2;cv.style.width=w+'px';cv.style.height=h+'px';ctx.scale(2,2);
+      const cx=w/2,cy=h/2,r=Math.min(w,h)*.34;const pr=this.phaseDiff*Math.PI/180;let ap=0;
+      const draw=()=>{ap+=.01;ctx.clearRect(0,0,w,h);
+        ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.strokeStyle='#E8ECF0';ctx.lineWidth=1.5;ctx.stroke();
+        for(let i=0;i<36;i++){const a=i*Math.PI*2/36;const inner=i%3===0?r-8:r-4;
+          ctx.beginPath();ctx.moveTo(cx+Math.cos(a)*inner,cy+Math.sin(a)*inner);ctx.lineTo(cx+Math.cos(a)*r,cy+Math.sin(a)*r);
+          ctx.strokeStyle=i%3===0?'#94A3B8':'#CBD5E1';ctx.lineWidth=i%3===0?1:.5;ctx.stroke()}
+        ctx.beginPath();ctx.arc(cx,cy,r-14,-Math.PI/2,-Math.PI/2+pr,false);ctx.strokeStyle='#6366F1';ctx.lineWidth=3;ctx.lineCap='round';ctx.stroke();
+        const hrA=ap;ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(cx+Math.cos(hrA)*(r-20),cy+Math.sin(hrA)*(r-20));ctx.strokeStyle='#0D9488';ctx.lineWidth=2;ctx.lineCap='round';ctx.stroke();
+        const brA=hrA+pr;ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(cx+Math.cos(brA)*(r-20),cy+Math.sin(brA)*(r-20));ctx.strokeStyle='#F97316';ctx.lineWidth=2;ctx.lineCap='round';ctx.stroke();
+        ctx.beginPath();ctx.arc(cx,cy,3,0,Math.PI*2);ctx.fillStyle='#1E293B';ctx.fill();
+        ctx.fillStyle='#6366F1';ctx.font='bold 11px Space Grotesk';ctx.textAlign='center';ctx.fillText(this.phaseDiff+'°',cx,cy+r+18);
+        this.animFrames['pc']=requestAnimationFrame(draw)};draw();
+    },
+
+    simulateData(){
+      setInterval(()=>{
+        this.hr=68+Math.floor(Math.random()*10);this.br=14+Math.floor(Math.random()*4);
+        this.hrr=35+Math.floor(Math.random()*10);this.brElevation=5+Math.floor(Math.random()*8);
+        this.brv=10+Math.floor(Math.random()*6);this.plv=(0.65+Math.random()*.15).toFixed(3);
+        this.hrSlope=(0.1+Math.random()*.12).toFixed(2);
+        this.auScore=.55+Math.random()*.2;this.ferScore=.50+Math.random()*.2;
+        this.fusionScore=this.auScore*.6+this.ferScore*.4;
+        this.auPositive=40+Math.floor(Math.random()*15);this.auNegative=12+Math.floor(Math.random()*10);this.auNeutral=100-this.auPositive-this.auNegative;
+        this.ferPositive=45+Math.floor(Math.random()*15);this.ferNegative=14+Math.floor(Math.random()*8);this.ferNeutral=100-this.ferPositive-this.ferNegative;
+        this.fusionPositive=Math.round(this.auPositive*.6+this.ferPositive*.4);this.fusionNegative=Math.round(this.auNegative*.6+this.ferNegative*.4);this.fusionNeutral=100-this.fusionPositive-this.fusionNegative;
+        this.pressureValue=25+Math.floor(Math.random()*25);
+        if(this.activeTab==='cardio'){this.drawCRGauge();this.drawBRElevGauge()}
+      },2000);
+    }
+  },
+  mounted(){this.updateTime();setInterval(()=>this.updateTime(),1000);this.simulateData();nextTick(()=>this.initCurrentTabCharts())},
+  beforeUnmount(){Object.values(this.animFrames).forEach(id=>cancelAnimationFrame(id));Object.values(this.chartInstances).forEach(c=>c&&c.destroy())}
+}).mount('#app');
+</script>
+</body>
+</html>
