@@ -52,7 +52,12 @@
         <div class="card-icon">🧠</div>
         <div class="card-info">
           <h3>今日训练任务</h3>
-          <p>色词识别挑战（待开始）</p>
+          <div class="training-progress">
+            <div class="progress-bar-container">
+              <div class="progress-bar-fill" style="width: 0%"></div>
+            </div>
+            <span class="progress-text">0/3</span>
+          </div>
         </div>
       </div>
     </div>
@@ -861,6 +866,35 @@ const startVoiceInput = () => {
 .card-icon { font-size: 50px; }
 .card-info h3 { font-size: 28px; color: #333; }
 .card-info p { font-size: 18px; color: #777; margin-top: 5px; }
+
+.training-progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.progress-bar-container {
+  flex: 1;
+  height: 12px;
+  background: #E5E7EB;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #0D9488, #10B981);
+  border-radius: 6px;
+  transition: width 0.3s ease;
+}
+
+.progress-text {
+  font-size: 18px;
+  font-weight: 600;
+  color: #0D9488;
+  min-width: 40px;
+}
 
 /* 翻转卡片样式 */
 .flip-wrapper {

@@ -37,8 +37,10 @@
           <!-- 训练计划 -->
           <div class="card fade-up fade-up-d1 training-plan-card">
             <div class="card-header">
-              <div class="card-icon">🔥</div>
-              <h3 class="card-title">今日训练计划</h3>
+              <div class="header-left">
+                <span class="header-emoji">🔥</span>
+                <h3 class="card-title">今日训练计划</h3>
+              </div>
               <span class="training-status" :class="dailyStats.count >= 3 ? 'complete' : 'incomplete'">
                 {{ dailyStats.count >= 3 ? '已完成' : '进行中' }}
               </span>
@@ -63,24 +65,6 @@
                 <div class="progress-item">
                   <span class="progress-label">连续天数</span>
                   <span class="progress-highlight streak">{{ streakDays }}天</span>
-                </div>
-                
-                <div class="progress-bar-section">
-                  <div class="progress-bar-wrap">
-                    <div class="progress-bar-fill" :style="{width: (dailyStats.count/3*100) + '%'}"></div>
-                  </div>
-                  <span class="progress-percent">{{ Math.min(Math.round(dailyStats.count/3*100), 100) }}%</span>
-                </div>
-              </div>
-            </div>
-
-            <div class="week-section">
-              <div class="week-title">本周回顾</div>
-              <div class="week-days-large">
-                <div v-for="(day, i) in 7" :key="i" class="week-day-big" 
-                  :class="{ active: i < streakDays, today: i === todayIndex }">
-                  <span class="day-label">{{ ['一','二','三','四','五','六','日'][i] }}</span>
-                  <span v-if="i < streakDays" class="day-dot"></span>
                 </div>
               </div>
             </div>
@@ -276,6 +260,17 @@ const todayIndex = computed(() => {
   return d === 0 ? 6 : d - 1
 })
 
+const isDayActive = (i) => {
+  // 从今天往前连续4天被框选
+  const daysToShow = streakDays.value
+  // 确保刚好4天
+  for (let j = 0; j < daysToShow; j++) {
+    let dayIndex = (todayIndex.value - j + 7) % 7
+    if (dayIndex === i) return true
+  }
+  return false
+}
+
 watch(dailyStats, (newStats) => {
   nextTick(() => {
     const ring = document.querySelector('.big-progress-ring')
@@ -301,13 +296,12 @@ const gameInfo = {
   'processing_speed': {
     icon: '⚡',
     title: '处理速度训练',
-    description: '基于ACTIVE研究的科学认知训练，包含三个模块',
+    description: '基于ACTIVE研究的科学认知训练，包含两个模块',
     rules: [
       '【反应控制】绿色区域出现时要快速踩踏，红色区域出现时要忍住不踩',
       '【选择反应】根据提示踩踏对应颜色的区域',
-      '【序列学习】按顺序踩踏亮起的区域，完成整个序列',
-      '每个模块60秒，站在目标区域停留3秒确认选择',
-      '反应越快得分越高，系统会根据表现自动调整难度'
+      ' 站在目标区域停留3秒确认选择',
+      ' 反应越快得分越高，系统会根据表现自动调整难度'
     ],
     tips: '游戏共有8个圆形区域，请根据屏幕提示踩踏正确位置，停留3秒完成确认。'
   }
@@ -581,7 +575,7 @@ body {
 .main-content {
   max-width: 2000px;
   margin: 0 auto;
-  padding: 0px 16px 15px 16px;
+  padding: 0px 5px 15px 5px;
   flex: 1;
 }
 
@@ -589,7 +583,7 @@ body {
 .split-layout {
   display: grid;
   grid-template-columns: 380px 1fr;
-  gap: 40px;
+  gap: 30px;
 }
 
 .left-col {
@@ -630,6 +624,21 @@ body {
   align-items: center;
   gap: 8px;
   margin-bottom: 16px;
+}
+
+.training-plan-card .card-header {
+  justify-content: space-between;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.header-emoji {
+  font-size: 20px;
+  line-height: 1;
 }
 
 .card-icon {
@@ -825,6 +834,7 @@ body {
   display: flex;
   flex-direction: column;
   justify-content: center;
+  padding-left: 30px;
 }
 
 .progress-item {
@@ -881,7 +891,7 @@ body {
 }
 
 .week-section {
-  padding-top: 16px;
+  padding-top: 8px;
   border-top: 1px solid #F1F5F9;
 }
 

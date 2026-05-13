@@ -9,11 +9,11 @@
     <div v-else class="tablet-frame">
       <aside class="side-nav">
         <div class="nav-links">
-          <div class="nav-item" :class="{ 'active-custom': currentPath === '/' }" @click="handleNavigate('/')">🏠<br>首页</div>
-          <div class="nav-item" :class="{ 'active-custom': currentPath === '/health' }" @click="handleNavigate('/health')">❤️<br>健康</div>
-          <div class="nav-item" :class="{ 'active-custom': currentPath === '/entertainment' }" @click="handleNavigate('/entertainment')">🎵<br>娱乐</div>
-          <div class="nav-item" :class="{ 'active-custom': currentPath === '/learning' }" @click="handleNavigate('/learning')">🧩<br>益智</div>
-          <div class="nav-item" :class="{ 'active-custom': currentPath === '/call' }" @click="handleNavigate('/call')">📞<br>通话</div>
+          <div class="nav-item" :class="{ 'active-custom': currentPath === '/' }" @click="handleNavigate('/')"><i class="fas fa-home"></i><br>首页</div>
+          <div class="nav-item" :class="{ 'active-custom': currentPath === '/health' }" @click="handleNavigate('/health')"><i class="fas fa-heart-pulse"></i><br>健康</div>
+          <div class="nav-item" :class="{ 'active-custom': currentPath === '/entertainment' }" @click="handleNavigate('/entertainment')"><i class="fas fa-music"></i><br>娱乐</div>
+          <div class="nav-item" :class="{ 'active-custom': currentPath === '/learning' }" @click="handleNavigate('/learning')"><i class="fas fa-puzzle-piece"></i><br>益智</div>
+          <div class="nav-item" :class="{ 'active-custom': currentPath === '/call' }" @click="handleNavigate('/call')"><i class="fas fa-phone-volume"></i><br>通话</div>
         </div>
         <!-- ⭐ 点击张爷爷直接跳转设置页 -->
         <div class="user-zone" @click="goToSettings">
@@ -22,7 +22,7 @@
         </div>
       </aside>
 
-      <main class="main-content">
+      <main class="main-content" :class="{ 'no-scroll': isNoScrollPage }">
         <NuxtPage />
       </main>
 
@@ -36,7 +36,7 @@
         @touchstart="handleDragStart"
         @click="handleBallClick"
       >
-        <img src="/akon.svg" alt="阿康" class="akon-icon" />
+        <img src="/Vector.svg" alt="阿康" class="akon-icon" />
       </div>
 
             <!-- 阿康对话 -->
@@ -121,6 +121,7 @@ console.log('[App] 后端地址:', backendUrl)
 
 // 纯页面
 const isPurePage = computed(() => ['projection', 'developer', 'screen-saver'].includes(route.name))
+const isNoScrollPage = computed(() => ['/', '/health', '/learning'].includes(route.path))
 const isDevPage = computed(() => route.name === 'developer')
 const currentPath = computed(() => route.path)
 
@@ -729,13 +730,14 @@ html, body {
   width: 140px; background: #F8F9FA; display: flex; flex-direction: column;
   padding: 40px 0; border-right: 1px solid #EEE; z-index: 100;
 }
-.nav-links { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 22px; }
+.nav-links { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 16px; }
 
 .nav-item { 
   cursor: pointer; color: #333; font-size: 22px; font-weight: bold; 
   text-align: center; width: 100px; padding: 15px 0; border-radius: 20px;
   transition: all 0.2s;
 }
+.nav-item i { font-size: 28px; margin-bottom: 1px;}
 .active-custom { background: #FF7222 !important; color: #FFF !important; }
 
 .main-content { 
@@ -743,6 +745,7 @@ html, body {
   padding: 40px; scrollbar-width: none; 
 }
 .main-content::-webkit-scrollbar { display: none; }
+.main-content.no-scroll { overflow: hidden; }
 
 .akon-ball {
   position: fixed; width: 90px; height: 90px; background: #FF7222;
