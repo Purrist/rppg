@@ -508,42 +508,107 @@ function getWeatherIcon(iconCode) {
   return iconMap[iconCode] || '☁️'
 }
 
+function saveWeatherCache(data) {
+  const cache = {
+    city: data.city,
+    temperature: data.temperature,
+    weather: data.weather,
+    humidity: data.humidity,
+    windDirection: data.windDirection,
+    windPower: data.windPower,
+    weatherIcon: data.weatherIcon,
+    timestamp: Date.now()
+  }
+  localStorage.setItem('weatherCache', JSON.stringify(cache))
+}
+
+function loadWeatherCache() {
+  const cacheStr = localStorage.getItem('weatherCache')
+  if (!cacheStr) return null
+  try {
+    const cache = JSON.parse(cacheStr)
+    // 缓存有效期5分钟
+    if (Date.now() - cache.timestamp < 5 * 60 * 1000) {
+      return cache
+    }
+    return null
+  } catch (e) {
+    return null
+  }
+}
+
 // 国内可用免费天气API（自动IP定位，无需Key）
-async function fetchWeather() {
+async function fetchWeather(forceRefresh = false) {
+  if (!forceRefresh) {
+    const cache = loadWeatherCache()
+    if (cache) {
+      city.value = cache.city
+      temperature.value = cache.temperature
+      weather.value = cache.weather
+      humidity.value = cache.humidity
+      windDirection.value = cache.windDirection
+      windPower.value = cache.windPower
+      weatherIcon.value = cache.weatherIcon
+      console.log('[Weather] 使用缓存数据')
+      return
+    }
+  }
+  
   try {
     const res = await fetch('https://uapis.cn/api/v1/misc/weather?lang=zh')
     const data = await res.json()
     console.log('Weather API response:', data)
+    let result = null
+    
     if (data.code === 0 && data.data) {
       city.value = data.data.city
       temperature.value = data.data.temperature
       weather.value = data.data.weather
       humidity.value = data.data.humidity
       windDirection.value = data.data.wind_direction || ''
-      // 清理风力数据，避免重复"级"字
       let rawWindPower = data.data.wind_power || ''
       if (rawWindPower) {
         rawWindPower = rawWindPower.replace(/级$/, '')
       }
       windPower.value = rawWindPower
       weatherIcon.value = getWeatherIcon(data.data.weather_icon || '999')
+      result = {
+        city: data.data.city,
+        temperature: data.data.temperature,
+        weather: data.data.weather,
+        humidity: data.data.humidity,
+        windDirection: data.data.wind_direction || '',
+        windPower: rawWindPower,
+        weatherIcon: weatherIcon.value
+      }
     } else if (data.city) {
-      // 直接返回数据的情况
       city.value = data.city
       temperature.value = data.temperature
       weather.value = data.weather
       humidity.value = data.humidity
       windDirection.value = data.wind_direction || ''
-      // 清理风力数据，避免重复"级"字
       let rawWindPower = data.wind_power || ''
       if (rawWindPower) {
         rawWindPower = rawWindPower.replace(/级$/, '')
       }
       windPower.value = rawWindPower
       weatherIcon.value = getWeatherIcon(data.weather_icon || '999')
+      result = {
+        city: data.city,
+        temperature: data.temperature,
+        weather: data.weather,
+        humidity: data.humidity,
+        windDirection: data.wind_direction || '',
+        windPower: rawWindPower,
+        weatherIcon: weatherIcon.value
+      }
     } else {
       city.value = '获取失败'
       weatherIcon.value = '☁️'
+    }
+    
+    if (result) {
+      saveWeatherCache(result)
     }
   } catch (e) {
     city.value = '网络异常'
@@ -568,10 +633,10 @@ onMounted(() => {
     currentTip.value = tips.value[nextIndex]
   }, 10000)
   
-  // 获取真实地理位置和天气数据
+  // 获取真实地理位置和天气数据（优先使用缓存）
   fetchWeather()
-  // 每10分钟刷新一次天气数据
-  const weatherInterval = setInterval(fetchWeather, 10 * 60 * 1000)
+  // 每10分钟强制刷新一次天气数据
+  const weatherInterval = setInterval(() => fetchWeather(true), 10 * 60 * 1000)
   
   // 初始化Canvas
   initCanvas()

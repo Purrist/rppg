@@ -46,7 +46,7 @@
         <div v-if="s.layout==='poster'" class="scroll-row">
           <div class="poster-card" v-for="(item,i) in s.items" :key="i" @click="openModal(item)">
             <div class="img-wrap">
-              <img :src="item.img" :alt="item.title" loading="lazy">
+              <img :src="item.img" :alt="item.title" :loading="i < 4 ? 'eager' : 'lazy'">
               <div v-if="item.tag" class="tag" :style="{background:s.color}">{{item.tag}}</div>
               <div class="play-ico"><i class="fas fa-play" style="font-size:10px;margin-left:1px;color:#fff"></i></div>
             </div>
@@ -59,7 +59,7 @@
         <div v-if="s.layout==='news'">
           <div class="news-featured">
             <div class="news-big" v-for="(item,i) in s.items.slice(0,2)" :key="i" @click="openModal(item)">
-              <img :src="item.img" :alt="item.title" loading="lazy">
+              <img :src="item.img" :alt="item.title" loading="eager">
               <div class="n-overlay">
                 <h4>{{item.title}}</h4>
                 <span><i class="fas fa-clock mr-1"></i>{{item.sub}}</span>
@@ -68,7 +68,7 @@
           </div>
           <div class="scroll-row">
             <div class="wide-card" v-for="(item,i) in s.items.slice(2)" :key="i" @click="openModal(item)">
-              <div class="w-img"><img :src="item.img" :alt="item.title" loading="lazy"></div>
+              <div class="w-img"><img :src="item.img" :alt="item.title" :loading="i < 3 ? 'eager' : 'lazy'"></div>
               <div class="w-info">
                 <div class="w-title">{{item.title}}</div>
                 <div class="w-sub"><i class="fas fa-eye mr-0.5"></i>{{item.sub}}</div>
@@ -80,7 +80,7 @@
         <!-- 广场舞：横版卡片 -->
         <div v-if="s.layout==='wide'" class="scroll-row">
           <div class="wide-card" v-for="(item,i) in s.items" :key="i" @click="openModal(item)">
-            <div class="w-img"><img :src="item.img" :alt="item.title" loading="lazy"></div>
+            <div class="w-img"><img :src="item.img" :alt="item.title" :loading="i < 4 ? 'eager' : 'lazy'"></div>
             <div class="w-info">
               <div class="w-title">{{item.title}}</div>
               <div class="w-sub"><i class="fas fa-users mr-0.5"></i>{{item.sub}}</div>
@@ -92,7 +92,7 @@
         <div v-if="s.layout==='music'" class="scroll-row">
           <div class="music-card" v-for="(item,i) in s.items" :key="i" @click="openModal(item)">
             <div class="m-img">
-              <img :src="item.img" :alt="item.title" loading="lazy">
+              <img :src="item.img" :alt="item.title" :loading="i < 4 ? 'eager' : 'lazy'">
               <div class="m-play"><i class="fas fa-play" style="font-size:14px;margin-left:2px;color:#fff"></i></div>
             </div>
             <div class="m-title">{{item.title}}</div>

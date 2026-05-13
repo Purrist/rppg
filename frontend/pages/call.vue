@@ -156,11 +156,8 @@ const ringtoneAudio = ref(null)
 
 const playRingTone = () => {
   try {
-    // 停止之前的铃声
-    if (ringtoneAudio.value) {
-      ringtoneAudio.value.pause()
-      ringtoneAudio.value = null
-    }
+    // 确保停止之前的铃声
+    stopRingTone()
     
     // 使用真实音频文件
     ringtoneAudio.value = new Audio()
@@ -168,11 +165,9 @@ const playRingTone = () => {
       ? '/sounds/call/电话呼叫声.wav' 
       : '/sounds/call/通话呼叫.mp3'
     ringtoneAudio.value.loop = true
-    // 紧急铃声音量大，日常铃声音量小
     ringtoneAudio.value.volume = isEmergency.value ? 0.6 : 0.25
     ringtoneAudio.value.play().catch(e => {
       console.log('音频播放失败，尝试使用Web Audio API:', e)
-      // 降级到合成铃声
       playFallbackRingtone()
     })
   } catch (e) {
@@ -218,7 +213,13 @@ const playFallbackRingtone = () => {
 const stopRingTone = () => {
   // 停止真实音频
   if (ringtoneAudio.value) {
-    ringtoneAudio.value.pause()
+    try {
+      ringtoneAudio.value.pause()
+      ringtoneAudio.value.currentTime = 0
+      ringtoneAudio.value.src = ''
+    } catch (e) {
+      console.log('[CallPage] 停止音频失败:', e)
+    }
     ringtoneAudio.value = null
   }
   
@@ -234,7 +235,9 @@ const stopRingTone = () => {
     ringOscillator = null
   }
   if (audioContext) {
-    audioContext.close()
+    try {
+      audioContext.close()
+    } catch (e) {}
     audioContext = null
   }
 }
