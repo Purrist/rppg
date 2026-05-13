@@ -12,6 +12,13 @@ export default defineNuxtConfig({
           rel: 'stylesheet',
           href: 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css'
         }
+      ],
+      script: [
+        {
+          src: '/js/chart.min.js',
+          async: true,
+          defer: true
+        }
       ]
     }
   }

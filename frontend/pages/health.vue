@@ -614,18 +614,17 @@ const trendData = {
 const MIN = 0.8, MAX = 1.5;
 
 async function loadChart() {
-  if (typeof window !== 'undefined' && !ChartLoaded.value) {
-    return new Promise((resolve) => {
-      const script = document.createElement('script');
-      script.src = '/js/chart.min.js';
-      script.onload = () => {
+  return new Promise((resolve) => {
+    const checkChart = () => {
+      if (window.Chart) {
         ChartLoaded.value = true;
         resolve(window.Chart);
-      };
-      document.head.appendChild(script);
-    });
-  }
-  return window.Chart;
+      } else {
+        setTimeout(checkChart, 50);
+      }
+    };
+    checkChart();
+  });
 }
 
 async function renderChart(tab) {

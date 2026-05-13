@@ -315,20 +315,19 @@ const getBackendHost = () => {
 const FLASK_PORT = 5000
 const backendUrl = `http://${getBackendHost()}:${FLASK_PORT}`
 
-// 动态加载 Chart.js
+// 等待预加载的 Chart.js
 async function loadChart() {
-  if (typeof window !== 'undefined' && !ChartLoaded.value) {
-    return new Promise((resolve) => {
-      const script = document.createElement('script');
-      script.src = '/js/chart.min.js';
-      script.onload = () => {
+  return new Promise((resolve) => {
+    const checkChart = () => {
+      if (window.Chart) {
         ChartLoaded.value = true;
         resolve(window.Chart);
-      };
-      document.head.appendChild(script);
-    });
-  }
-  return window.Chart;
+      } else {
+        setTimeout(checkChart, 50);
+      }
+    };
+    checkChart();
+  });
 }
 
 const fetchTrainingStats = async () => {
@@ -508,7 +507,7 @@ const confirmStartGame = () => {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   socket = io(backendUrl, {
     transports: ['polling', 'websocket'],
     reconnection: true
@@ -530,8 +529,8 @@ onMounted(() => {
     }
   })
   
-  fetchTrainingStats()
-  fetchTrainingHistory()
+  await fetchTrainingStats()
+  await fetchTrainingHistory()
   
   initCharts()
   
