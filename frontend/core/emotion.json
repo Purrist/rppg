@@ -1,17 +1,17 @@
 {
-  "timestamp": "20260513_162627",
-  "elapsed": 13520.16,
+  "timestamp": "20260513_164359",
+  "elapsed": 14572.09,
   "au": {
     "emotion": "no_face",
-    "confidence": 0.937,
+    "confidence": 0.181,
     "scores": {
       "neutral": 0,
       "positive": 0,
       "negative": 0
     },
     "pose": "front",
-    "pitch": 5.7,
-    "yaw": 11.8,
+    "pitch": 0.7,
+    "yaw": -5.7,
     "au_features": {}
   },
   "fer": {
@@ -25,7 +25,7 @@
   },
   "fusion": {
     "emotion": "no_face",
-    "confidence": 0.937,
+    "confidence": 0.181,
     "scores": {
       "neutral": 0,
       "positive": 0,

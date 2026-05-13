@@ -131,6 +131,67 @@ let autoExitTimer = null
 let audioContext = null
 let ringOscillator = null
 
+// ⭐ 预加载音频缓存
+const audioCache = ref({
+  emergency: null,
+  normal: null,
+  loaded: false
+})
+
+// ⭐ 预加载音频文件
+const preloadAudios = () => {
+  return new Promise((resolve) => {
+    const emergencyAudio = new Audio('/sounds/call/电话呼叫声.wav')
+    const normalAudio = new Audio('/sounds/call/通话呼叫.mp3')
+    
+    emergencyAudio.preload = 'auto'
+    normalAudio.preload = 'auto'
+    emergencyAudio.loop = true
+    normalAudio.loop = true
+    
+    let loadedCount = 0
+    const total = 2
+    
+    const checkLoaded = () => {
+      loadedCount++
+      if (loadedCount >= total) {
+        audioCache.value.emergency = emergencyAudio
+        audioCache.value.normal = normalAudio
+        audioCache.value.loaded = true
+        console.log('[CallPage] 音频预加载完成')
+        resolve()
+      }
+    }
+    
+    emergencyAudio.addEventListener('canplaythrough', checkLoaded, { once: true })
+    normalAudio.addEventListener('canplaythrough', checkLoaded, { once: true })
+    
+    emergencyAudio.addEventListener('error', () => {
+      console.warn('[CallPage] 紧急呼叫音频加载失败')
+      checkLoaded()
+    })
+    normalAudio.addEventListener('error', () => {
+      console.warn('[CallPage] 正常呼叫音频加载失败')
+      checkLoaded()
+    })
+    
+    // 超时处理
+    setTimeout(() => {
+      if (!audioCache.value.loaded) {
+        audioCache.value.emergency = emergencyAudio
+        audioCache.value.normal = normalAudio
+        audioCache.value.loaded = true
+        console.log('[CallPage] 音频预加载超时，继续执行')
+        resolve()
+      }
+    }, 3000)
+    
+    // 触发加载
+    emergencyAudio.src = '/sounds/call/电话呼叫声.wav'
+    normalAudio.src = '/sounds/call/通话呼叫.mp3'
+  })
+}
+
 // 紧急电话列表
 const emergencyContacts = [
   { id: 'nurse', name: '护理站', phone: '010-12345678', avatar: '🏥' },
@@ -151,27 +212,62 @@ const goBack = () => {
   router.push('/')
 }
 
-// 播放铃声（使用真实音频文件）
-const ringtoneAudio = ref(null)
+// 当前播放的音频对象
+const currentRingtoneAudio = ref(null)
 
-const playRingTone = () => {
+// ⭐ 播放铃声（优先使用预加载的音频）
+const playRingTone = async () => {
   try {
     // 确保停止之前的铃声
     stopRingTone()
     
-    // 使用真实音频文件
-    ringtoneAudio.value = new Audio()
-    ringtoneAudio.value.src = isEmergency.value 
-      ? '/sounds/call/电话呼叫声.wav' 
-      : '/sounds/call/通话呼叫.mp3'
-    ringtoneAudio.value.loop = true
-    ringtoneAudio.value.volume = isEmergency.value ? 0.6 : 0.25
-    ringtoneAudio.value.play().catch(e => {
-      console.log('音频播放失败，尝试使用Web Audio API:', e)
-      playFallbackRingtone()
-    })
+    // 获取对应的音频对象
+    const targetAudio = isEmergency.value 
+      ? audioCache.value.emergency 
+      : audioCache.value.normal
+    
+    if (targetAudio && audioCache.value.loaded) {
+      // ⭐ 使用预加载的音频缓存
+      currentRingtoneAudio.value = targetAudio
+      currentRingtoneAudio.value.volume = isEmergency.value ? 0.6 : 0.25
+      currentRingtoneAudio.value.currentTime = 0
+      
+      await currentRingtoneAudio.value.play().then(() => {
+        console.log(`[CallPage] 开始播放${isEmergency.value ? '紧急' : '正常'}呼叫铃声（预加载）`)
+      }).catch(e => {
+        console.log('[CallPage] 预加载音频播放失败，尝试创建新音频:', e)
+        throw e
+      })
+    } else {
+      // ⭐ 回退到动态创建音频
+      console.log('[CallPage] 使用动态创建的音频')
+      currentRingtoneAudio.value = new Audio()
+      currentRingtoneAudio.value.src = isEmergency.value 
+        ? '/sounds/call/电话呼叫声.wav' 
+        : '/sounds/call/通话呼叫.mp3'
+      currentRingtoneAudio.value.loop = true
+      currentRingtoneAudio.value.volume = isEmergency.value ? 0.6 : 0.25
+      
+      // 等待音频加载完成后播放
+      currentRingtoneAudio.value.addEventListener('canplay', () => {
+        currentRingtoneAudio.value.play().catch(() => {
+          playFallbackRingtone()
+        })
+      }, { once: true })
+      
+      // 超时处理
+      setTimeout(() => {
+        if (currentRingtoneAudio.value && currentRingtoneAudio.value.readyState >= 2) {
+          currentRingtoneAudio.value.play().catch(() => {
+            playFallbackRingtone()
+          })
+        } else {
+          playFallbackRingtone()
+        }
+      }, 1000)
+    }
   } catch (e) {
-    console.log('音频播放失败:', e)
+    console.log('[CallPage] 音频播放失败:', e)
     playFallbackRingtone()
   }
 }
@@ -209,18 +305,17 @@ const playFallbackRingtone = () => {
   }
 }
 
-// 停止铃声
+// ⭐ 停止铃声
 const stopRingTone = () => {
   // 停止真实音频
-  if (ringtoneAudio.value) {
+  if (currentRingtoneAudio.value) {
     try {
-      ringtoneAudio.value.pause()
-      ringtoneAudio.value.currentTime = 0
-      ringtoneAudio.value.src = ''
+      currentRingtoneAudio.value.pause()
+      currentRingtoneAudio.value.currentTime = 0
     } catch (e) {
       console.log('[CallPage] 停止音频失败:', e)
     }
-    ringtoneAudio.value = null
+    // 注意：不设置src为空，保留预加载的音频缓存
   }
   
   // 停止合成铃声
@@ -352,8 +447,10 @@ watch(() => route.query, (newQuery) => {
   }
 }, { immediate: true })
 
-onMounted(() => {
+onMounted(async () => {
   console.log('[CallPage] 呼叫页面已加载')
+  // ⭐ 预加载音频文件
+  await preloadAudios()
 })
 
 onUnmounted(() => {

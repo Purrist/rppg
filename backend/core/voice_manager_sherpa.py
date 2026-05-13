@@ -1302,7 +1302,7 @@ class VoiceManager:
                 threading.Timer(0.5, self._resume_kws).start()
             return
         
-        # ⭐ 回退到实时合成
+        # ⭐ 回退到实时合成（改进版）
         self._pause_kws()
         self.is_playing = True
         
@@ -1312,8 +1312,31 @@ class VoiceManager:
                     text, sid=self.tts_sid, speed=max(1.2, self.tts_speed)
                 )
                 samples = np.array(audio.samples, dtype=np.float32) * self.tts_volume
-                sd.play(samples, samplerate=audio.sample_rate)
-                sd.wait()
+                
+                # ⭐ 计算预期播放时间
+                expected_duration = len(samples) / audio.sample_rate
+                timeout_duration = expected_duration + 3.0
+                
+                # ⭐ 带超时的播放
+                try:
+                    sd.play(samples, samplerate=audio.sample_rate)
+                    start_time = time.time()
+                    while sd.get_stream().active and time.time() - start_time < timeout_duration:
+                        time.sleep(0.03)
+                    if sd.get_stream().active:
+                        sd.stop()
+                        print(f"[VoiceManager] 同步播放超时")
+                except Exception as play_e:
+                    print(f"[VoiceManager] VITS同步播放错误: {play_e}")
+                    # 重试
+                    try:
+                        if sd.get_stream().active:
+                            sd.stop()
+                        sd.play(samples, samplerate=audio.sample_rate)
+                        sd.wait()
+                    except:
+                        pass
+                        
             elif self.tts_engine_type == 'pytts' and self.pytts_engine:
                 import pyttsx3
                 engine = pyttsx3.init()
@@ -1326,10 +1349,31 @@ class VoiceManager:
                 if self.tts_engine:
                     audio = self.tts_engine.generate(text, sid=self.tts_sid, speed=max(1.2, self.tts_speed))
                     samples = np.array(audio.samples, dtype=np.float32) * self.tts_volume
-                    sd.play(samples, samplerate=audio.sample_rate)
-                    sd.wait()
+                    
+                    # ⭐ 带超时的播放
+                    expected_duration = len(samples) / audio.sample_rate
+                    timeout_duration = expected_duration + 3.0
+                    
+                    try:
+                        sd.play(samples, samplerate=audio.sample_rate)
+                        start_time = time.time()
+                        while sd.get_stream().active and time.time() - start_time < timeout_duration:
+                            time.sleep(0.03)
+                        if sd.get_stream().active:
+                            sd.stop()
+                    except Exception as play_e:
+                        print(f"[VoiceManager] 回退播放错误: {play_e}")
+                        try:
+                            if sd.get_stream().active:
+                                sd.stop()
+                            sd.play(samples, samplerate=audio.sample_rate)
+                            sd.wait()
+                        except:
+                            pass
         except Exception as e:
             print(f"[VoiceManager] 同步播报错误: {e}")
+            import traceback
+            traceback.print_exc()
         finally:
             self.is_playing = False
             # ⭐ 播报结束后延迟恢复KWS
@@ -1380,28 +1424,64 @@ class VoiceManager:
                         print(f"[VoiceManager] 播报被打断 [会话{current_session}]")
                         return
                     
-                    # 播放音频
+                    # ⭐ 播放音频（改进版）
                     try:
-                        sd.play(samples, samplerate=audio.sample_rate)
-                        # 设置超时，避免音频设备问题导致无限等待
-                        start_time = time.time()
-                        while sd.get_stream().active and time.time() - start_time < 10:
-                            if not is_speaking_session_valid():
-                                print(f"[VoiceManager] 播报被打断 [会话{current_session}]")
-                                sd.stop()
-                                return
-                            time.sleep(0.05)
-                        # 确保流被停止
-                        if sd.get_stream().active:
-                            sd.stop()
-                    except Exception as e:
-                        print(f"[VoiceManager] VITS播放错误: {e}")
-                        # 确保流被停止
+                        # 计算预期播放时间，设置合理超时
+                        expected_duration = len(samples) / audio.sample_rate
+                        timeout_duration = expected_duration + 5.0  # 额外5秒缓冲
+                        
+                        # 检查音频设备状态
                         try:
-                            if sd.get_stream().active:
-                                sd.stop()
+                            if not sd.query_devices(self.mic_device_id or sd.default.device[1]):
+                                print(f"[VoiceManager] 音频输出设备不可用")
+                                raise RuntimeError("音频输出设备不可用")
                         except:
                             pass
+                        
+                        # 使用sd.play播放，设置blocking=False以便检查中断
+                        sd.play(samples, samplerate=audio.sample_rate, blocking=False)
+                        
+                        # ⭐ 改进的播放等待循环
+                        start_time = time.time()
+                        while True:
+                            # 检查是否被打断
+                            if not is_speaking_session_valid():
+                                print(f"[VoiceManager] 播报被打断 [会话{current_session}]")
+                                try:
+                                    sd.stop()
+                                except:
+                                    pass
+                                return
+                            
+                            # 检查是否播放完成
+                            if not sd.get_stream().active:
+                                break
+                            
+                            # 检查超时
+                            elapsed = time.time() - start_time
+                            if elapsed > timeout_duration:
+                                print(f"[VoiceManager] 播放超时 ({elapsed:.1f}s > {timeout_duration:.1f}s)")
+                                try:
+                                    sd.stop()
+                                except:
+                                    pass
+                                break
+                            
+                            time.sleep(0.03)  # 更频繁的检查
+                            
+                    except Exception as e:
+                        print(f"[VoiceManager] VITS播放错误: {e}")
+                        # ⭐ 尝试重新初始化音频设备
+                        try:
+                            import sounddevice as sd_new
+                            # 尝试重启音频流
+                            if sd_new.get_stream().active:
+                                sd_new.stop()
+                            # 重新播放
+                            sd_new.play(samples, samplerate=audio.sample_rate)
+                            sd_new.wait()
+                        except Exception as retry_e:
+                            print(f"[VoiceManager] 重试播放也失败: {retry_e}")
                 
                 elif self.tts_engine_type == 'pytts' and self.pytts_engine:
                     # 使用pytts生成语音
