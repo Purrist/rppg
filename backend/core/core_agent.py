@@ -67,35 +67,33 @@ def think(world_state: dict, state_manager=None) -> dict:
 def ask_akon(user_input: str, system_state: dict) -> Tuple[str, dict]:
     """对话接口 - 返回纯文本回复和可选的action"""
     
-    # ⭐ 简化prompt，要求直接返回纯文本，只在需要跳转时附加JSON
-    prompt = f"""你是阿康，一个温暖的陪伴助手。用户说："{user_input}"
+    # ⭐ 简化prompt，要求直接返回纯文本，只在需要跳转时附加标记
+    prompt = f'''你是阿康，一个温暖的陪伴助手。用户说："{user_input}"
 
 当前页面：{system_state.get('current_page', '/')}
-游戏状态：{'正在玩' + system_state.get('game_name') if system_state.get('game_active') else '未开始'}
 
 请直接回复用户的话，用温暖简短的语气，使用自然的口语化表达。
 
-如果用户想跳转页面，请先给出友好的回复，然后在回复后另起一行加上：[ACTION:页面路径]
+只有当用户明确要求跳转页面或询问某个功能时，才添加[ACTION:页面路径]标记。
+如果用户只是闲聊、问问题、寻求建议，不需要跳转，直接回答即可。
+
 例如：
-"好的，为您跳转到娱乐页面了，给您推荐一些好看的电影。
-[ACTION:/entertainment]"
+用户：我想看电影
+回复：好的，为您跳转到娱乐页面。
+[ACTION:/entertainment]
+
+用户：西红柿炒鸡蛋怎么做
+回复：西红柿炒鸡蛋很简单，先炒鸡蛋，再炒西红柿混在一起就好啦。
 
 可用页面：
 - /entertainment (娱乐视频)
 - /learning (益智游戏)
 - /health (健康监测)
 - /settings (设置)
-
-跳转规则：
-- 用户提到想看电影、视频、娱乐内容时 → [ACTION:/entertainment]
-- 用户提到想玩游戏、做训练、益智活动时 → [ACTION:/learning]
-- 用户提到想看健康、血压、心率等健康相关内容时 → [ACTION:/health]
-- 用户只是闲聊、问候、问天气或时间时 → 不跳转，直接回复
-
-请注意：
-1. 回复要自然友好，不要机械复述规则
-2. 先给出完整的回复内容，再添加ACTION标记
-3. 回复要符合老年人的语言习惯，简洁易懂"""
+- /call (通话)
+- /contact (联系人)
+- / (首页)
+'''
 
     try:
         response = requests.post(
@@ -195,18 +193,38 @@ def _parse_response(response: str) -> Tuple[str, dict]:
 
 
 def _parse_simple_response(response: str) -> Tuple[str, dict]:
-    """⭐ 简化版响应解析 - 提取纯文本和[ACTION:路径]"""
+    """⭐ 简化版响应解析 - 提取纯文本和[ACTION:路径]或JSON格式的action"""
     import re
+    import json
     
-    # 查找 [ACTION:页面路径] 标记
-    action_match = re.search(r'\[ACTION:([^\]]+)\]', response)
     action = None
     
-    if action_match:
-        page = action_match.group(1).strip()
-        action = {"type": "navigate", "page": page}
-        # 移除 ACTION 标记，保留前面的文本
-        response = response[:action_match.start()].strip()
+    # 首先尝试解析 JSON 格式的响应（如果有的话）
+    json_start = response.find('{')
+    json_end = response.rfind('}')
+    if json_start != -1 and json_end != -1 and json_start < json_end:
+        try:
+            json_str = response[json_start:json_end+1]
+            data = json.loads(json_str)
+            if 'action' in data:
+                action = data['action']
+                # 如果response中有文本字段，优先使用
+                if 'response' in data:
+                    response = data['response']
+                else:
+                    # 否则使用JSON前面的文本
+                    response = response[:json_start].strip()
+        except json.JSONDecodeError:
+            pass
+    
+    # 如果没有找到JSON的action，尝试查找 [ACTION:页面路径] 标记
+    if not action:
+        action_match = re.search(r'\[ACTION:([^\]]+)\]', response)
+        if action_match:
+            page = action_match.group(1).strip()
+            action = {"type": "navigate", "page": page}
+            # 移除 ACTION 标记，保留前面的文本
+            response = response[:action_match.start()].strip()
     
     # 清理响应文本
     clean_response = response.strip('`"\' \n\r')

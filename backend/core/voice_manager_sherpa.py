@@ -372,7 +372,6 @@ class VoiceManager:
                         'data': data,
                         'sample_rate': sr
                     }
-                    print(f"[VoiceManager] 已缓存: {response}")
             
             self._prevoice_loaded = True
             print(f"[VoiceManager] 预合成音频缓存加载完成，共 {len(self._prevoice_cache)} 个")
@@ -922,12 +921,15 @@ class VoiceManager:
                 # ⚡ 紧急呼救 - 直接跳转呼叫页面并播报
                 print(f"[VoiceManager] [会话{session_id}] ⚡ 紧急呼救: {user_text}")
                 # 跳转到呼叫页面（紧急模式）
+                print(f"[VoiceManager] [会话{session_id}] 发送 navigate_to 事件到 /call?emergency=true")
                 self.socketio.emit('navigate_to', {'page': '/call?emergency=true'})
                 self.socketio.emit('voice_llm_response', {
                     'text': intent_result['response'],
                     'state': 'PROCESSING',
                     'session_id': session_id
                 })
+                # ⭐ 稍微延迟一下，确保前端收到导航事件后再播报
+                time.sleep(0.3)
                 self._speak(intent_result['response'])
                 return  # ⚡ 直接返回，不调用LLM
                 
@@ -945,26 +947,29 @@ class VoiceManager:
                 
             elif intent_result['intent'] == 'time':
                 # ⚡ 直接播报时间 - 不交给AI思考
-                time_text = intent_result['response']
-                print(f"[VoiceManager] [会话{session_id}] ⚡ 时间查询（跳过AI）: {time_text}")
+                current_time_text = intent_result['response']
+                print(f"[VoiceManager] [会话{session_id}] ⚡ 时间查询（跳过AI）: {current_time_text}")
                 self.socketio.emit('voice_llm_response', {
-                    'text': time_text,
+                    'text': current_time_text,
                     'state': 'PROCESSING',
                     'session_id': session_id
                 })
-                self._speak(time_text)
+                self._speak(current_time_text)
                 return  # ⚡ 直接返回，不调用LLM
                 
             elif intent_result['intent'] == 'navigate':
                 # ⚡ 页面跳转 - 不交给AI思考
                 page = intent_result['page']
                 print(f"[VoiceManager] [会话{session_id}] ⚡ 页面跳转（跳过AI）: {page}")
+                print(f"[VoiceManager] [会话{session_id}] 发送 navigate_to 事件到 {page}")
                 self.socketio.emit('navigate_to', {'page': page})
                 self.socketio.emit('voice_llm_response', {
                     'text': intent_result['response'],
                     'state': 'PROCESSING',
                     'session_id': session_id
                 })
+                # ⭐ 稍微延迟一下，确保前端收到导航事件后再播报
+                time.sleep(0.3)
                 self._speak(intent_result['response'])
                 return  # ⚡ 直接返回，不调用LLM
                 
@@ -973,12 +978,16 @@ class VoiceManager:
                 contact = intent_result['contact']
                 print(f"[VoiceManager] [会话{session_id}] ⚡ 打电话给: {contact}")
                 # 跳转到呼叫页面（指定联系人）
-                self.socketio.emit('navigate_to', {'page': f'/call?contact={contact}'})
+                target_page = f'/call?contact={contact}'
+                print(f"[VoiceManager] [会话{session_id}] 发送 navigate_to 事件到 {target_page}")
+                self.socketio.emit('navigate_to', {'page': target_page})
                 self.socketio.emit('voice_llm_response', {
                     'text': intent_result['response'],
                     'state': 'PROCESSING',
                     'session_id': session_id
                 })
+                # ⭐ 稍微延迟一下，确保前端收到导航事件后再播报
+                time.sleep(0.3)
                 self._speak(intent_result['response'])
                 return  # ⚡ 直接返回，不调用LLM
             
@@ -990,7 +999,7 @@ class VoiceManager:
                 
                 # 获取当前系统状态作为上下文
                 system_state = self.system_core.get_state() if self.system_core else {}
-                print(f"[VoiceManager] [会话{session_id}] 系统状态: {system_state}")
+                #print(f"[VoiceManager] [会话{session_id}] 系统状态: {system_state}")
                 
                 # 调用LLM
                 response, action = ask_akon(user_text, system_state)
@@ -1005,6 +1014,15 @@ class VoiceManager:
                     if session_id and not is_session_valid():
                         print(f"[VoiceManager] [会话{session_id}] 获取LLM回复后被打断，退出")
                         return
+                    
+                    # ⭐ 处理LLM返回的action
+                    if action and isinstance(action, dict):
+                        action_type = action.get('type')
+                        if action_type == 'navigate':
+                            page = action.get('page', '/')
+                            # 直接导航，不做任何限制
+                            print(f"[VoiceManager] [会话{session_id}] ⭐ LLM请求导航到: {page}")
+                            self.socketio.emit('navigate_to', {'page': page})
                     
                     # 通知前端显示LLM回复（⭐ 不再让前端播放语音，由后端统一播放）
                     self.socketio.emit('voice_llm_response', {
@@ -1032,56 +1050,24 @@ class VoiceManager:
                 print(f"[VoiceManager] [会话{session_id}] 已被新会话取代，不回到待机")
 
     def _clean_response(self, text):
-        """清理LLM回复 - 限制长度在20字以内，去除emoji和颜文字"""
+        """清理LLM回复 - 保留所有内容，只做基本的首尾空白去除"""
         if not text:
             return ""
         
-        # 去除emoji和特殊字符
-        import re
-        # 匹配emoji的正则表达式
-        emoji_pattern = re.compile(
-            "["
-            u"\U0001F600-\U0001F64F"  # emoticons
-            u"\U0001F300-\U0001F5FF"  # symbols & pictographs
-            u"\U0001F680-\U0001F6FF"  # transport & map symbols
-            u"\U0001F1E0-\U0001F1FF"  # flags (iOS)
-            u"\U00002500-\U00002BEF"  # chinese char
-            u"\U00002702-\U000027B0"
-            u"\U00002702-\U000027B0"
-            u"\U000024C2-\U0001F251"
-            u"\U0001f926-\U0001f937"
-            u"\U00010000-\U0010ffff"
-            u"\u2640-\u2642"
-            u"\u2600-\u2B55"
-            u"\u200d"
-            u"\u23cf"
-            u"\u23e9"
-            u"\u231a"
-            u"\ufe0f"  # variation selectors-16
-            u"\u3030"
-            "]+",
-            flags=re.UNICODE
-        )
-        
-        # 去除颜文字（简单匹配）
-        text = emoji_pattern.sub(r'', text)
-        text = re.sub(r'[^\w\s，。！？、；：（）【】—…·]+', '', text)
-        
-        # 限制长度在20字以内
-        text = text.strip()[:20]
-        
-        # 确保以完整句子结尾
-        if len(text) > 0 and text[-1] not in ['，', '。', '！', '？']:
-            text += '。'
-        
-        return text
+        # 只去除首尾空白，保留所有内容
+        return text.strip()
 
     def _recognize_intent(self, text):
         """意图识别 - 支持紧急呼救、天气、时间查询和页面跳转"""
         text = text.lower().strip()
         
-        # ⭐ 紧急呼救关键词（最高优先级）
-        emergency_keywords = ['救命', '救救我', '救命啊', '不舒服', '好痛', '难受', '疼', '晕倒', '心脏病', '呼吸困难']
+        # ⭐ 紧急呼救关键词（最高优先级 - 扩大范围）
+        emergency_keywords = [
+            '救命', '救救我', '救命啊', '不舒服', '好痛', '难受', '疼', 
+            '晕倒', '心脏病', '呼吸困难', '喘不过气', '喘不上气', '憋气',
+            '胸闷', '心跳', '心慌', '头晕', '恶心', '呕吐', '昏迷',
+            '流血', '受伤', '摔倒了', '骨折', '中风', '急救'
+        ]
         if any(keyword in text for keyword in emergency_keywords):
             return {
                 'intent': 'emergency',
@@ -1129,7 +1115,7 @@ class VoiceManager:
             return {
                 'intent': 'navigate',
                 'page': '/learning',
-                'response': '好的，我带您进行益智训练'
+                'response': '好的，我为您跳转到益智界面'
             }
         
         # ⭐ 打电话给特定联系人

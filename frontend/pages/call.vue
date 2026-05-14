@@ -7,19 +7,16 @@
         <div class="section-title">🆘 紧急电话</div>
         <div class="emergency-cards">
           <div class="emergency-card" @click="callEmergency('护理站')">
-            <div class="card-icon">👩‍⚕️</div>
             <div class="card-name">护理站</div>
             <div class="card-desc">紧急情况请联系</div>
             <div class="card-call">📞呼叫</div>
           </div>
           <div class="emergency-card" @click="callEmergency('110')">
-            <div class="card-icon">👮</div>
             <div class="card-name">110</div>
             <div class="card-desc">报警电话</div>
             <div class="card-call">📞呼叫</div>
           </div>
           <div class="emergency-card" @click="callEmergency('120')">
-            <div class="card-icon">🚑</div>
             <div class="card-name">120</div>
             <div class="card-desc">急救电话</div>
             <div class="card-call">📞呼叫</div>
@@ -127,84 +124,20 @@ let callTimer = null
 let ringTimer = null
 let autoExitTimer = null
 
-// 音频上下文
-let audioContext = null
-let ringOscillator = null
-
-// ⭐ 预加载音频缓存
-const audioCache = ref({
-  emergency: null,
-  normal: null,
-  loaded: false
-})
-
-// ⭐ 预加载音频文件
-const preloadAudios = () => {
-  return new Promise((resolve) => {
-    const emergencyAudio = new Audio('/sounds/call/电话呼叫声.wav')
-    const normalAudio = new Audio('/sounds/call/通话呼叫.mp3')
-    
-    emergencyAudio.preload = 'auto'
-    normalAudio.preload = 'auto'
-    emergencyAudio.loop = true
-    normalAudio.loop = true
-    
-    let loadedCount = 0
-    const total = 2
-    
-    const checkLoaded = () => {
-      loadedCount++
-      if (loadedCount >= total) {
-        audioCache.value.emergency = emergencyAudio
-        audioCache.value.normal = normalAudio
-        audioCache.value.loaded = true
-        console.log('[CallPage] 音频预加载完成')
-        resolve()
-      }
-    }
-    
-    emergencyAudio.addEventListener('canplaythrough', checkLoaded, { once: true })
-    normalAudio.addEventListener('canplaythrough', checkLoaded, { once: true })
-    
-    emergencyAudio.addEventListener('error', () => {
-      console.warn('[CallPage] 紧急呼叫音频加载失败')
-      checkLoaded()
-    })
-    normalAudio.addEventListener('error', () => {
-      console.warn('[CallPage] 正常呼叫音频加载失败')
-      checkLoaded()
-    })
-    
-    // 超时处理
-    setTimeout(() => {
-      if (!audioCache.value.loaded) {
-        audioCache.value.emergency = emergencyAudio
-        audioCache.value.normal = normalAudio
-        audioCache.value.loaded = true
-        console.log('[CallPage] 音频预加载超时，继续执行')
-        resolve()
-      }
-    }, 3000)
-    
-    // 触发加载
-    emergencyAudio.src = '/sounds/call/电话呼叫声.wav'
-    normalAudio.src = '/sounds/call/通话呼叫.mp3'
-  })
-}
+// 音频上下文（不再使用预加载，播放时才加载）
 
 // 紧急电话列表
 const emergencyContacts = [
-  { id: 'nurse', name: '护理站', phone: '010-12345678', avatar: '🏥' },
-  { id: 'police', name: '110', phone: '110', avatar: '👮' },
-  { id: 'ambulance', name: '120', phone: '120', avatar: '🚑' },
+  { id: 'nurse', name: '护理站', phone: '010-12345678'},
+  { id: 'police', name: '110', phone: '110'},
+  { id: 'ambulance', name: '120', phone: '120'},
 ]
 
 // 常用联系人列表
 const contacts = ref([
   { id: 1, name: '张帅', relation: '儿子', phone: '13800138001', avatar: '👨', status: 'online', lastCallTime: '今天 14:30' },
   { id: 2, name: '张敏', relation: '女儿', phone: '13900139002', avatar: '👩', status: 'online', lastCallTime: '昨天 18:45' },
-  { id: 3, name: '赵兰', relation: '老伴', phone: '13700137003', avatar: '👵', status: 'offline', lastCallTime: '3天前' },
-  { id: 4, name: '李医生', relation: '医生', phone: '13600136004', avatar: '👨‍⚕️', status: 'online', lastCallTime: '上周' },
+  { id: 3, name: '赵兰', relation: '老伴', phone: '13700137003', avatar: '👵', status: 'offline', lastCallTime: '3天前' }
 ])
 
 // 返回首页
@@ -215,93 +148,25 @@ const goBack = () => {
 // 当前播放的音频对象
 const currentRingtoneAudio = ref(null)
 
-// ⭐ 播放铃声（优先使用预加载的音频）
+// ⭐ 播放铃声（直接播放，不使用降级）
 const playRingTone = async () => {
   try {
     // 确保停止之前的铃声
     stopRingTone()
     
-    // 获取对应的音频对象
-    const targetAudio = isEmergency.value 
-      ? audioCache.value.emergency 
-      : audioCache.value.normal
+    // 直接创建新的音频对象播放，避免复杂缓存问题
+    const newAudio = new Audio()
+    newAudio.src = isEmergency.value 
+      ? '/sounds/call/电话呼叫声.wav' 
+      : '/sounds/call/通话呼叫.mp3'
+    newAudio.loop = true
+    newAudio.volume = isEmergency.value ? 0.6 : 0.25
     
-    if (targetAudio && audioCache.value.loaded) {
-      // ⭐ 使用预加载的音频缓存
-      currentRingtoneAudio.value = targetAudio
-      currentRingtoneAudio.value.volume = isEmergency.value ? 0.6 : 0.25
-      currentRingtoneAudio.value.currentTime = 0
-      
-      await currentRingtoneAudio.value.play().then(() => {
-        console.log(`[CallPage] 开始播放${isEmergency.value ? '紧急' : '正常'}呼叫铃声（预加载）`)
-      }).catch(e => {
-        console.log('[CallPage] 预加载音频播放失败，尝试创建新音频:', e)
-        throw e
-      })
-    } else {
-      // ⭐ 回退到动态创建音频
-      console.log('[CallPage] 使用动态创建的音频')
-      currentRingtoneAudio.value = new Audio()
-      currentRingtoneAudio.value.src = isEmergency.value 
-        ? '/sounds/call/电话呼叫声.wav' 
-        : '/sounds/call/通话呼叫.mp3'
-      currentRingtoneAudio.value.loop = true
-      currentRingtoneAudio.value.volume = isEmergency.value ? 0.6 : 0.25
-      
-      // 等待音频加载完成后播放
-      currentRingtoneAudio.value.addEventListener('canplay', () => {
-        currentRingtoneAudio.value.play().catch(() => {
-          playFallbackRingtone()
-        })
-      }, { once: true })
-      
-      // 超时处理
-      setTimeout(() => {
-        if (currentRingtoneAudio.value && currentRingtoneAudio.value.readyState >= 2) {
-          currentRingtoneAudio.value.play().catch(() => {
-            playFallbackRingtone()
-          })
-        } else {
-          playFallbackRingtone()
-        }
-      }, 1000)
-    }
+    await newAudio.play()
+    currentRingtoneAudio.value = newAudio
+    console.log(`[CallPage] 开始播放${isEmergency.value ? '紧急' : '正常'}呼叫铃声`)
   } catch (e) {
     console.log('[CallPage] 音频播放失败:', e)
-    playFallbackRingtone()
-  }
-}
-
-// 降级合成铃声
-const playFallbackRingtone = () => {
-  try {
-    audioContext = new (window.AudioContext || window.webkitAudioContext)()
-    
-    const frequencies = isEmergency.value ? [800, 1000] : [400, 600]
-    let freqIndex = 0
-    
-    ringTimer = setInterval(() => {
-      if (!audioContext) return
-      
-      const ringOscillator = audioContext.createOscillator()
-      const gainNode = audioContext.createGain()
-      
-      ringOscillator.connect(gainNode)
-      gainNode.connect(audioContext.destination)
-      
-      ringOscillator.frequency.value = frequencies[freqIndex % 2]
-      ringOscillator.type = 'sine'
-      
-      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime)
-      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1)
-      
-      ringOscillator.start(audioContext.currentTime)
-      ringOscillator.stop(audioContext.currentTime + 0.1)
-      
-      freqIndex++
-    }, isEmergency.value ? 150 : 400)
-  } catch (e) {
-    console.log('[CallPage] 铃声播放失败:', e)
   }
 }
 
@@ -315,25 +180,6 @@ const stopRingTone = () => {
     } catch (e) {
       console.log('[CallPage] 停止音频失败:', e)
     }
-    // 注意：不设置src为空，保留预加载的音频缓存
-  }
-  
-  // 停止合成铃声
-  if (ringTimer) {
-    clearInterval(ringTimer)
-    ringTimer = null
-  }
-  if (ringOscillator) {
-    try {
-      ringOscillator.stop()
-    } catch (e) {}
-    ringOscillator = null
-  }
-  if (audioContext) {
-    try {
-      audioContext.close()
-    } catch (e) {}
-    audioContext = null
   }
 }
 
@@ -377,7 +223,7 @@ const startCallProcess = () => {
   // 15秒后自动退出通话
   autoExitTimer = setTimeout(() => {
     console.log('[CallPage] 通话超时，自动退出')
-    hangUp()
+    endCall()
   }, 15000)
   
   // 开始计时器
@@ -426,31 +272,58 @@ const endCall = () => {
   callingStatus.value = '已结束'
 }
 
-// 监听路由参数
-watch(() => route.params, (newParams) => {
-  if (newParams.target === 'nurse') {
-    callEmergency('护理站')
-  }
-}, { immediate: true })
-
-watch(() => route.query, (newQuery) => {
-  if (newQuery.emergency === 'true') {
+// 处理路由参数中的紧急呼叫
+const handleRouteQuery = () => {
+  const query = route.query
+  console.log('[CallPage] 处理路由参数:', query)
+  
+  if (query.emergency === 'true') {
+    console.log('[CallPage] 检测到紧急呼叫参数，直接进入紧急呼叫状态')
+    // 先结束任何正在进行的通话
+    endCall()
+    // 然后开始紧急呼叫
     isEmergency.value = true
     currentState.value = 'calling'
     callingStatus.value = '紧急呼叫中...'
-    startCallProcess()
-  } else if (newQuery.contact) {
-    const contact = contacts.value.find(c => c.name === newQuery.contact)
+    // 使用 setTimeout 确保状态更新完成
+    setTimeout(() => {
+      console.log('[CallPage] isEmergency:', isEmergency.value)
+      startCallProcess()
+    }, 100)
+  } else if (query.contact) {
+    const contact = contacts.value.find(c => c.name === query.contact)
     if (contact) {
-      startCall(contact)
+      console.log('[CallPage] 检测到联系人参数:', contact.name)
+      endCall()
+      setTimeout(() => {
+        startCall(contact)
+      }, 100)
     }
   }
-}, { immediate: true })
+}
 
-onMounted(async () => {
+// 监听路由参数变化（包括查询参数）
+watch(
+  () => route.query,
+  (newQuery) => {
+    console.log('[CallPage] 路由查询参数变化:', newQuery)
+    handleRouteQuery()
+  },
+  { immediate: true }
+)
+
+// 监听路由参数（向后兼容）
+watch(
+  () => route.params,
+  (newParams) => {
+    if (newParams.target === 'nurse') {
+      callEmergency('护理站')
+    }
+  }
+)
+
+onMounted(() => {
   console.log('[CallPage] 呼叫页面已加载')
-  // ⭐ 预加载音频文件
-  await preloadAudios()
 })
 
 onUnmounted(() => {

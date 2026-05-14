@@ -74,6 +74,7 @@ import { ref, onMounted, onUnmounted, computed, nextTick, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { io } from 'socket.io-client'
 import { subscribe, getState, initStore } from '../core/systemStore.js'
+import { useHealthCache } from '../core/healthDataCache.js'
 
 const router = useRouter()
 let socket = null
@@ -98,15 +99,18 @@ let waveInterval = null
 const hrCanvas = ref(null)
 const brCanvas = ref(null)
 
-// 实时数据
-const realTimeData = ref({
-  heartRate: '--',
-  breathRate: '--',
-  hrWave: [],
-  brWave: []
-})
+// 使用健康数据缓存
+const healthCache = useHealthCache()
 
-// 系统状态（从后端SystemCore同步，完整结构像developer.vue一样）
+// 实时数据（从缓存获取）
+const realTimeData = computed(() => ({
+  heartRate: healthCache.data.value.heartRate || '--',
+  breathRate: healthCache.data.value.breathRate || '--',
+  hrWave: healthCache.data.value.hrWave,
+  brWave: healthCache.data.value.brWave
+}))
+
+// 系统状态（从后端SystemCore同步）
 const systemState = reactive({
   perception: {
     physiology: {
@@ -147,39 +151,11 @@ const systemState = reactive({
   }
 })
 
-// 便捷的计算属性获取心率和呼吸率
-const heartRate = computed(() => {
-  const hr = systemState.perception?.physiology?.raw?.hr
-  return (hr !== undefined && hr !== null && hr > 0) ? Math.round(hr) : '--'
-})
-
-const breathRate = computed(() => {
-  const br = systemState.perception?.physiology?.raw?.br
-  return (br !== undefined && br !== null && br > 0) ? Math.round(br) : '--'
-})
-
-// 用心率数值生成简单波形
-function generateSimpleWave(currentValue, waveArray, baseValue) {
-  // 添加新值
-  if (currentValue && currentValue !== '--') {
-    // 用简单的正弦波模拟，基于当前心率
-    const wave = baseValue + Math.sin(Date.now() / 500) * 5
-    waveArray.push(wave)
-  } else {
-    waveArray.push(0)
-  }
-  
-  // 保持数组长度
-  if (waveArray.length > 50) {
-    waveArray.shift()
-  }
-}
-
 // 监听系统状态变化
 function updateFromSystemState(state) {
   console.log('收到系统状态:', state)
   
-  // 完整更新 systemState，像developer.vue一样
+  // 完整更新 systemState
   if (state) {
     Object.assign(systemState, state)
     if (state.perception?.physiology) {
@@ -190,65 +166,14 @@ function updateFromSystemState(state) {
     }
   }
   
-  // 更新实时数据
-  realTimeData.value.heartRate = heartRate.value
-  realTimeData.value.breathRate = breathRate.value
+  // 更新健康数据缓存
+  healthCache.updateFromSystemState(state)
   
-  // 从 systemState 获取相位数据绘制波形
-  if (state?.perception?.physiology?.raw?.hph !== undefined && 
-      state?.perception?.physiology?.raw?.hph !== null) {
-    hrPhaseWave.value.push(state.perception.physiology.raw.hph)
-    if (hrPhaseWave.value.length > 300) {
-      hrPhaseWave.value.shift()
-    }
-  }
-  
-  if (state?.perception?.physiology?.raw?.bph !== undefined && 
-      state?.perception?.physiology?.raw?.bph !== null) {
-    brPhaseWave.value.push(state.perception.physiology.raw.bph)
-    if (brPhaseWave.value.length > 300) {
-      brPhaseWave.value.shift()
-    }
-  }
-  
-  // 立即绘制
+  // 立即绘制波形
   nextTick(() => {
-    drawPhaseWave(hrCanvas.value, hrPhaseWave.value, '#FF4D4D')
-    drawPhaseWave(brCanvas.value, brPhaseWave.value, '#33B555')
+    renderWaves()
   })
 }
-
-// 健康数据引用
-const healthData = ref({
-  time: 0,
-  hr: 72,
-  br: 16,
-  hph: 0,
-  bph: 0,
-  is_human: 0,
-  distance: 0,
-  distance_valid: 0,
-  signal_state: 'INIT',
-  hr_valid: false,
-  br_valid: false,
-  phase_valid: false,
-  hrr: 0,
-  hrr_label: '',
-  slope: 0,
-  slope_label: '',
-  brv: 0,
-  brv_label: '',
-  brel: 0,
-  brel_label: '',
-  cr: 0,
-  cr_label: '',
-  plv: 0.9,
-  plv_label: ''
-})
-
-// 相位波形数据（保存300个点，约1分钟数据，每200ms一个点）
-const hrPhaseWave = ref([])
-const brPhaseWave = ref([])
 
 const getBackendHost = () => {
   if (typeof window === 'undefined') return 'localhost'
@@ -262,54 +187,16 @@ const backendHost = getBackendHost()
 const backendUrl = `http://${backendHost}:${BACKEND_PORT}`
 const hlkkUrl = `http://${backendHost}:${HLKK_PORT}`
 
-async function fetchHealthJson() {
-  try {
-    const res = await fetch(`${backendUrl}/core/health.json?` + Date.now())
-    if (res.ok) {
-      const data = await res.json()
-      healthData.value = data
-      
-      // 更新实时数据
-      realTimeData.value.heartRate = (data.hr !== undefined && data.hr !== null && data.hr > 0) ? Math.round(data.hr) : '--'
-      realTimeData.value.breathRate = (data.br !== undefined && data.br !== null && data.br > 0) ? Math.round(data.br) : '--'
-      
-      // 收集相位数据绘制波形
-      if (data.hph !== null && data.hph !== undefined) {
-        hrPhaseWave.value.push(data.hph)
-        if (hrPhaseWave.value.length > 300) {
-          hrPhaseWave.value.shift()
-        }
-      }
-      
-      if (data.bph !== null && data.bph !== undefined) {
-        brPhaseWave.value.push(data.bph)
-        if (brPhaseWave.value.length > 300) {
-          brPhaseWave.value.shift()
-        }
-      }
-      
-      // 立即绘制
-      nextTick(() => {
-        drawPhaseWave(hrCanvas.value, hrPhaseWave.value, '#FF4D4D')
-        drawPhaseWave(brCanvas.value, brPhaseWave.value, '#33B555')
-      })
-    }
-  } catch (e) {
-    console.warn('[Index] 无法读取 health.json:', e.message)
-  }
-}
-
-async function fetchRealTimeData() {
-  try {
-    await fetchHealthJson()
-  } catch (e) {
-    console.error('获取数据失败:', e.message)
-  }
+// 绘制相位波形（优化版）
+function renderWaves() {
+  nextTick(() => {
+    drawPhaseWave(hrCanvas.value, healthCache.data.value.hrWave, '#FF4D4D')
+    drawPhaseWave(brCanvas.value, healthCache.data.value.brWave, '#33B555')
+  })
 }
 
 // 绘制相位波形（hph和bph范围0-2π）
-function drawPhaseWave(canvasRef, waveData, color) {
-  const canvas = canvasRef
+function drawPhaseWave(canvas, data, color) {
   if (!canvas) return
   
   const ctx = canvas.getContext('2d')
@@ -318,12 +205,13 @@ function drawPhaseWave(canvasRef, waveData, color) {
   
   ctx.clearRect(0, 0, width, height)
   
-  let dataToDraw = waveData
-  if (!dataToDraw || dataToDraw.length < 2) {
-    // 如果没有数据，画一个简单的横线
-    dataToDraw = []
-    for (let i = 0; i < 10; i++) {
-      dataToDraw.push(Math.PI)
+  // 确保有数据
+  let waveData = data
+  if (!waveData || waveData.length < 2) {
+    // 如果没有数据，绘制一条简单的正弦波
+    waveData = []
+    for (let i = 0; i < 20; i++) {
+      waveData.push((i / 20) * Math.PI * 2)
     }
   }
   
@@ -332,10 +220,12 @@ function drawPhaseWave(canvasRef, waveData, color) {
   ctx.lineWidth = 2
   
   // 相位范围是0-2π，绘制正弦波
-  dataToDraw.forEach((phase, i) => {
-    const x = (i / (dataToDraw.length - 1)) * width
+  waveData.forEach((phase, i) => {
+    const x = (i / (waveData.length - 1)) * width
+    // 处理null/undefined的情况
+    const p = phase === null || phase === undefined ? Math.random() * Math.PI * 2 : phase
     // 相位到正弦值：值范围 -1 到 1，转换为画布坐标
-    const normalizedSin = Math.sin(phase)
+    const normalizedSin = Math.sin(p)
     const y = height/2 - normalizedSin * height * 0.35
     
     if (i === 0) {
@@ -348,57 +238,42 @@ function drawPhaseWave(canvasRef, waveData, color) {
   ctx.stroke()
 }
 
-function drawWave(canvasRef, waveData, color) {
-  const canvas = canvasRef
-  if (!canvas) return
-  
-  const ctx = canvas.getContext('2d')
-  const width = canvas.width || 300
-  const height = canvas.height || 40
-  
-  ctx.clearRect(0, 0, width, height)
-  
-  let dataToDraw = waveData
-  if (!dataToDraw || dataToDraw.length < 2) {
-    // 如果没有数据，画一个简单的横线
-    dataToDraw = []
-    for (let i = 0; i < 10; i++) {
-      dataToDraw.push(0)
-    }
-  }
-  
-  const min = Math.min(...dataToDraw)
-  const max = Math.max(...dataToDraw)
-  const range = max - min || 1
-  
-  ctx.beginPath()
-  ctx.strokeStyle = color
-  ctx.lineWidth = 2
-  
-  dataToDraw.forEach((val, i) => {
-    const x = (i / (dataToDraw.length - 1)) * width
-    const y = height - ((val - min) / range) * height * 0.7 - height * 0.15
-    if (i === 0) {
-      ctx.moveTo(x, y)
-    } else {
-      ctx.lineTo(x, y)
-    }
-  })
-  
-  ctx.stroke()
-}
-
-function initCanvas() {
+// 初始化波形渲染
+function initRenderers() {
   nextTick(() => {
     if (hrCanvas.value) {
       hrCanvas.value.width = 300
       hrCanvas.value.height = 40
     }
+    
     if (brCanvas.value) {
       brCanvas.value.width = 300
       brCanvas.value.height = 40
     }
+    
+    // 立即渲染一次（使用缓存数据）
+    renderWaves()
   })
+}
+
+// 获取健康数据（降低频率）
+async function fetchHealthJson() {
+  try {
+    const res = await fetch(`${backendUrl}/core/health.json?` + Date.now())
+    if (res.ok) {
+      const data = await res.json()
+      
+      // 更新健康数据缓存
+      healthCache.updateFromSystemState({ perception: { physiology: { raw: data } } })
+      
+      // 立即绘制
+      nextTick(() => {
+        renderWaves()
+      })
+    }
+  } catch (e) {
+    console.warn('[Index] 无法读取 health.json:', e.message)
+  }
 }
 
 // 动态提示
@@ -638,18 +513,18 @@ onMounted(() => {
   // 每10分钟强制刷新一次天气数据
   const weatherInterval = setInterval(() => fetchWeather(true), 10 * 60 * 1000)
   
-  // 初始化Canvas
-  initCanvas()
+  // 初始化波形渲染器
+  initRenderers()
   
   // 自动翻转
   flipInterval = setInterval(() => {
     isFlipped.value = !isFlipped.value
   }, 8000)
   
-  // 波形流畅更新
+  // 波形更新（降低频率到500ms，减少性能消耗）
   waveInterval = setInterval(() => {
     fetchHealthJson()
-  }, 200)
+  }, 500)
   
   // 初始化Socket连接
   try {

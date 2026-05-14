@@ -642,8 +642,8 @@ class PersonAnalyzer:
                     "pose": d.get('pose', '-'),
                     "is_front_face": abs(d.get('yaw', 0)) < 35 and abs(d.get('pitch', 0)) < 25
                 }
-        except Exception as e:
-            print(f"[PersonAnalyzer] 获取情绪状态失败: {e}")
+        except Exception:
+            pass
         return None
     
     def update(self):
@@ -715,7 +715,7 @@ class PersonAnalyzer:
                     self.cached_age = age
                     self.cached_gender = gender
                 self._hlkk_fail_count = 0
-                print(f"[PersonAnalyzer] 成功向 HLKK 发送数据: age={age}, gender={gender}")
+                #print(f"[PersonAnalyzer] 成功向 HLKK 发送数据: age={age}, gender={gender}")
         except Exception as e:
             self._hlkk_fail_count += 1
             if self._hlkk_fail_count % 10 == 0:

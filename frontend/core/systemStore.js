@@ -218,6 +218,7 @@ export function initStore(socketInstance) {
   
   // ⭐ 用户说话 - 显示在对话中
   socket.on('voice_user_speak', (data) => {
+    console.log('[SystemStore] 收到 voice_user_speak:', data)
     state.value.voice.state = data.state || 'PROCESSING'
     state.value.voice.isLoading = true  // 设置思考中状态
     // 添加用户消息
@@ -227,6 +228,7 @@ export function initStore(socketInstance) {
       type: 'voice_input',
       timestamp: Date.now()
     })
+    console.log('[SystemStore] 添加用户消息后 chatMessages:', state.value.chatMessages)
     // ⭐ 保存到localStorage
     saveChatMessagesToStorage(state.value.chatMessages)
     listeners.forEach(cb => cb(state.value))
@@ -234,9 +236,11 @@ export function initStore(socketInstance) {
   
   // ⭐ LLM回复 - 不直接添加，由app.vue处理（实现打字机效果）
   socket.on('voice_llm_response', (data) => {
+    console.log('[SystemStore] 收到 voice_llm_response:', data)
     state.value.voice.isLoading = false  // 关闭思考中状态
     // 移除[ACTION:]标记
     let text = data.text.replace(/\[ACTION:\]/g, '').trim()
+    console.log('[SystemStore] 处理后的AI回复:', text)
     // 触发自定义事件，让app.vue处理打字机效果
     window.dispatchEvent(new CustomEvent('ai_response', { 
       detail: { text, source: 'voice' } 

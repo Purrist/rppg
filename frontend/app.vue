@@ -121,7 +121,7 @@ console.log('[App] 后端地址:', backendUrl)
 
 // 纯页面
 const isPurePage = computed(() => ['projection', 'developer', 'screen-saver'].includes(route.name))
-const isNoScrollPage = computed(() => ['/', '/health', '/learning'].includes(route.path))
+const isNoScrollPage = computed(() => ['/', '/health', '/learning', '/call'].includes(route.path))
 const isDevPage = computed(() => route.name === 'developer')
 const currentPath = computed(() => route.path)
 
@@ -176,8 +176,12 @@ const isTyping = ref(false)  // 是否正在打字
 
 // 监听全局消息变化，同步到本地（但在打字时不同步，避免覆盖打字效果）
 watch(globalMessages, (newMessages) => {
+  console.log('[App] globalMessages 变化:', newMessages)
   if (!isTyping.value) {
+    console.log('[App] 同步到 akonMessages')
     akonMessages.value = [...newMessages]
+  } else {
+    console.log('[App] 打字中，暂不同步')
   }
 }, { deep: true })
 
@@ -216,12 +220,14 @@ function setupVoiceSocketHandlers() {
   })
   
   // ⭐ 唤醒成功
-  socket.on('voice_wake_up', (data) => {
+  socket.on('voice_wake_up', async (data) => {
     console.log('[语音] 唤醒成功:', data.response)
     // 打开对话框
     ui.akon = true
     ball.status = 'full'
-    // 不显示系统回应，只由systemStore处理
+    // 滚动到底部
+    await nextTick()
+    scrollToBottom()
   })
   
   // ⭐ 用户说话识别结果 - 由systemStore.js处理，避免重复显示
@@ -330,6 +336,7 @@ function goToSettings() {
 async function handleAIResponse(event) {
   const { text, source } = event.detail
   console.log('[App] 收到AI回复:', text, '来源:', source)
+  console.log('[App] 当前 akonMessages:', akonMessages.value)
   
   // 插入一条空的AI消息到本地数组
   akonMessages.value.push({
@@ -337,6 +344,8 @@ async function handleAIResponse(event) {
     content: '',
     typing: true
   })
+  
+  console.log('[App] 插入AI消息后 akonMessages:', akonMessages.value)
   
   // 滚动到底部
   await nextTick()
@@ -428,9 +437,13 @@ onMounted(() => {
   })
   
   socket.on('navigate_to', (data) => {
-    if (!isPurePage.value && route.path !== data.page) {
+    console.log('[App] 收到导航事件:', data)
+    if (!isPurePage.value) {
+      console.log('[App] 执行导航到:', data.page)
       router.push(data.page)
       ui.akon = false
+    } else {
+      console.log('[App] 纯页面，不执行导航')
     }
   })
   
