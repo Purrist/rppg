@@ -31,9 +31,9 @@ WHACK_A_MOLE_CONFIG = GameConfig(
 class WhackAMoleGame(GameBase):
     """打地鼠游戏"""
     
-    def __init__(self, socketio, config: GameConfig = None):
+    def __init__(self, socketio, config: GameConfig = None, system_core=None):
         config = config or WHACK_A_MOLE_CONFIG
-        super().__init__(socketio, config)
+        super().__init__(socketio, config, system_core)
         
         self.current_mole = -1
         self.mole_appear_time = 0
