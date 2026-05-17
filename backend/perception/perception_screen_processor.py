@@ -85,6 +85,11 @@ class PositionSmoother:
 # ============================================================================
 def save_config_to_file():
     try:
+        # 确保目录存在
+        config_dir = os.path.dirname(CONFIG_FILE)
+        if not os.path.exists(config_dir):
+            os.makedirs(config_dir, exist_ok=True)
+        
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
             json.dump({
                 "corners": state["corners"],
@@ -93,25 +98,47 @@ def save_config_to_file():
                 "admin_bg": state["admin_bg"],
                 "projection_bg": state["projection_bg"]
             }, f, indent=2)
+        
+        print(f"[ScreenProcessor] 配置已保存到: {CONFIG_FILE}")
+        print(f"[ScreenProcessor] 配置内容: corners={state['corners']}")
         return True
-    except:
+    except Exception as e:
+        print(f"[ScreenProcessor] 保存配置失败: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
 def load_config_from_file():
     global state
     if not os.path.exists(CONFIG_FILE):
+        print(f"[ScreenProcessor] 配置文件不存在: {CONFIG_FILE}")
         return False
     try:
         with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
             config = json.load(f)
-        if "corners" in config: state["corners"] = config["corners"]
-        if "zones" in config: state["zones"] = config["zones"]
-        if "zone_id_counter" in config: state["zone_id_counter"] = config["zone_id_counter"]
-        if "admin_bg" in config: state["admin_bg"] = config["admin_bg"]
-        if "projection_bg" in config: state["projection_bg"] = config["projection_bg"]
+        
+        if "corners" in config: 
+            state["corners"] = config["corners"]
+            print(f"[ScreenProcessor] 加载 corners: {state['corners']}")
+        if "zones" in config: 
+            state["zones"] = config["zones"]
+        if "zone_id_counter" in config: 
+            state["zone_id_counter"] = config["zone_id_counter"]
+        if "admin_bg" in config: 
+            state["admin_bg"] = config["admin_bg"]
+        if "projection_bg" in config: 
+            state["projection_bg"] = config["projection_bg"]
+        
+        print(f"[ScreenProcessor] 配置加载成功")
         return True
-    except:
+    except json.JSONDecodeError as e:
+        print(f"[ScreenProcessor] 配置文件格式错误: {e}")
+        return False
+    except Exception as e:
+        print(f"[ScreenProcessor] 加载配置失败: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
@@ -121,6 +148,13 @@ def load_config_from_file():
 class ScreenProcessor:
     def __init__(self, camera_source=1, socketio=None):
         self.socketio = socketio
+        
+        # ⭐ 初始化时尝试加载配置
+        if os.path.exists(CONFIG_FILE):
+            print("[ScreenProcessor] 发现配置文件，正在加载...")
+            load_config_from_file()
+        else:
+            print("[ScreenProcessor] 未发现配置文件，使用默认配置")
         
         # 尝试打开摄像头
         self.cap = None
@@ -211,7 +245,9 @@ class ScreenProcessor:
                 left_ankle = lm[27]
                 right_ankle = lm[28]
                 
-                if left_ankle.visibility > 0.4 and right_ankle.visibility > 0.4:
+                # ⭐ 多人场景过滤逻辑：优先选择站在标定区域内的人
+                # 1. 脚踝可见性检查（降低阈值以支持不同身高的人）
+                if left_ankle.visibility > 0.3 and right_ankle.visibility > 0.3:
                     l_pt = (int(left_ankle.x * w), int(left_ankle.y * h))
                     r_pt = (int(right_ankle.x * w), int(right_ankle.y * h))
                     
@@ -221,14 +257,49 @@ class ScreenProcessor:
                     center = ((l_pt[0] + r_pt[0]) // 2, (l_pt[1] + r_pt[1]) // 2)
                     cv2.circle(frame, center, 10, (255, 0, 255), -1)
                     
-                    if state["matrix"] is not None:
-                        try:
-                            src_pt = np.array([[[center[0], center[1]]]], dtype=np.float32)
-                            dst_pt = cv2.perspectiveTransform(src_pt, state["matrix"])[0][0]
-                            raw_feet_x, raw_feet_y = int(dst_pt[0]), int(dst_pt[1])
-                            raw_feet_detected = True
-                        except:
-                            pass
+                    # 2. 计算标定区域中心点（用于距离比较）
+                    pts = np.array([[int(c[0]*w), int(c[1]*h)] for c in state["corners"]], np.int32)
+                    
+                    # 计算标定区域的中心点
+                    pts_center_x = int(np.mean(pts[:, 0]))
+                    pts_center_y = int(np.mean(pts[:, 1]))
+                    
+                    # 计算脚踝中心到标定区域中心的距离
+                    dist_to_center = np.sqrt((center[0] - pts_center_x)**2 + (center[1] - pts_center_y)**2)
+                    
+                    # 检查脚踝是否在标定区域内
+                    is_inside = cv2.pointPolygonTest(pts, (center[0], center[1]), False) >= 0
+                    
+                    # 3. 检查是否是近距离的人（宽松阈值，支持小孩）
+                    # 使用脚踝和膝盖的距离来判断大致身高
+                    left_knee = lm[25]
+                    right_knee = lm[26]
+                    has_knee_data = left_knee.visibility > 0.2 or right_knee.visibility > 0.2
+                    
+                    # 计算脚踝中心点 y 坐标
+                    ankle_center_y = (left_ankle.y + right_ankle.y) / 2 * h
+                    
+                    if has_knee_data:
+                        knee_center_y = ((left_knee.y if left_knee.visibility > 0.2 else right_knee.y) + 
+                                        (right_knee.y if right_knee.visibility > 0.2 else left_knee.y)) / 2 * h
+                        leg_length = abs(ankle_center_y - knee_center_y)
+                        # 宽松的最小腿长阈值（支持小孩）
+                        is_close_enough = leg_length >= h * 0.08  # 至少占画面高度的8%
+                    else:
+                        # 如果膝盖数据不可用，放宽要求
+                        is_close_enough = True
+                    
+                    # 判断条件：在区域内 OR 非常靠近区域中心
+                    # 优先选择站在区域内的人
+                    if (is_inside or dist_to_center < w * 0.15) and is_close_enough:
+                        if state["matrix"] is not None:
+                            try:
+                                src_pt = np.array([[[center[0], center[1]]]], dtype=np.float32)
+                                dst_pt = cv2.perspectiveTransform(src_pt, state["matrix"])[0][0]
+                                raw_feet_x, raw_feet_y = int(dst_pt[0]), int(dst_pt[1])
+                                raw_feet_detected = True
+                            except:
+                                pass
             
             # 平滑处理
             smooth_x, smooth_y, smooth_detected = self.position_smoother.update(

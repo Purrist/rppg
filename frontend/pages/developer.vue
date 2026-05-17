@@ -353,7 +353,7 @@ let socket = null
 let unsubscribe = null
 
 // ⭐ 系统全局状态（从后端同步）
-  const systemState = reactive({
+const systemState = reactive({
     aiMode: 'basic',
     currentPage: '/',
     game: {
@@ -1142,28 +1142,42 @@ function showToast(msg) {
 }
 
 function startEdit() {
+  console.log('[developer] 点击编辑按钮，isEditing变为true')
   isEditing.value = true
   savedCorners.value = JSON.parse(JSON.stringify(corners.value))
   showToast('开始编辑校准区域')
 }
 
 async function saveAndExitEdit() {
+  console.log('[developer] 点击保存按钮，开始保存校准区域...')
+  console.log('[developer] 当前isEditing:', isEditing.value)
+  console.log('[developer] 当前corners:', corners.value)
+  
   await saveCorners()
   await saveConfig()
+  
   isEditing.value = false
   savedCorners.value = null
   showToast('校准区域已保存')
+  console.log('[developer] 保存完成，isEditing变为false')
 }
 
 async function checkConn() {
   try {
+    console.log(`[developer] 尝试连接后端: ${baseUrl}`)
     const c = new AbortController()
     const t = setTimeout(() => c.abort(), 3000)
     const r = await fetch(`${baseUrl}/api/config`, { signal: c.signal })
     clearTimeout(t)
     connected.value = r.ok
+    if (r.ok) {
+      console.log('[developer] 后端API连接成功')
+    } else {
+      console.error('[developer] 后端API连接失败:', r.status)
+    }
     return r.ok
-  } catch {
+  } catch (e) {
+    console.error('[developer] 后端API连接异常:', e)
     connected.value = false
     return false
   }
@@ -1184,14 +1198,28 @@ async function loadCorners() {
 }
 
 async function saveCorners() {
-  if (!connected.value) return
+  if (!connected.value) {
+    console.error('[developer] 未连接后端，无法保存校准区域')
+    showToast('未连接后端，无法保存')
+    return
+  }
   try {
-    await fetch(`${baseUrl}/api/corners`, {
+    console.log('[developer] 保存校准区域:', corners.value)
+    const r = await fetch(`${baseUrl}/api/corners`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ corners: corners.value })
     })
-  } catch {}
+    if (r.ok) {
+      console.log('[developer] 校准区域保存成功')
+    } else {
+      console.error('[developer] 校准区域保存失败:', r.status)
+      showToast('保存失败')
+    }
+  } catch (e) {
+    console.error('[developer] 保存校准区域异常:', e)
+    showToast('保存失败')
+  }
 }
 
 async function saveConfig() {

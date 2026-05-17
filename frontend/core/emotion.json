@@ -1,18 +1,60 @@
 {
-  "timestamp": "20260516_150905",
-  "elapsed": 567.63,
+  "timestamp": "20260517_110724",
+  "elapsed": 2403.49,
   "au": {
-    "emotion": "no_face",
-    "confidence": 0.422,
+    "emotion": "neutral",
+    "confidence": 0.286,
     "scores": {
-      "neutral": 0,
-      "positive": 0,
-      "negative": 0
+      "neutral": 0.286,
+      "positive": 0.489,
+      "negative": 0.226
     },
     "pose": "side_right",
-    "pitch": -12.4,
-    "yaw": 44.0,
-    "au_features": {}
+    "pitch": 2.0,
+    "yaw": 35.3,
+    "au_features": {
+      "AU1": 54.4,
+      "AU2": 52.9,
+      "AU4": 60.0,
+      "AU5": 54.3,
+      "AU6": 60.5,
+      "AU7": 61.4,
+      "AU9": 58.7,
+      "AU10": 61.6,
+      "AU11": 52.6,
+      "AU12": 60.4,
+      "AU13": 50.4,
+      "AU14": 55.9,
+      "AU15": 52.9,
+      "AU16": 55.4,
+      "AU17": 58.4,
+      "AU18": 51.6,
+      "AU19": 52.5,
+      "AU20": 54.3,
+      "AU22": 52.2,
+      "AU23": 52.2,
+      "AU24": 54.1,
+      "AU25": 62.2,
+      "AU26": 52.1,
+      "AU27": 53.7,
+      "AU32": 50.4,
+      "AU38": 52.3,
+      "AU39": 50.3,
+      "AUL1": 0.0,
+      "AUR1": 0.0,
+      "AUL2": 0.0,
+      "AUR2": 0.0,
+      "AUL4": 0.0,
+      "AUR4": 0.0,
+      "AUL6": 0.0,
+      "AUR6": 0.0,
+      "AUL10": 0.0,
+      "AUR10": 0.0,
+      "AUL12": 0.0,
+      "AUR12": 0.0,
+      "AUL14": 0.0,
+      "AUR14": 0.0
+    }
   },
   "fer": {
     "label": "neutral",
@@ -24,12 +66,12 @@
     }
   },
   "fusion": {
-    "emotion": "no_face",
-    "confidence": 0.422,
+    "emotion": "neutral",
+    "confidence": 0.286,
     "scores": {
-      "neutral": 0,
-      "positive": 0,
-      "negative": 0
+      "neutral": 0.286,
+      "positive": 0.489,
+      "negative": 0.226
     }
   }
 }

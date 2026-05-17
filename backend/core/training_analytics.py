@@ -508,10 +508,14 @@ class TrainingAnalytics:
     def end_session(self, final_score: int):
         """结束训练会话"""
         if not self.current_session:
+            print("[TrainingAnalytics] 没有活跃的训练会话，跳过结束")
             return
 
-        self.current_session.end_time = datetime.now().isoformat()
-        self.current_session.final_score = final_score
+        # 保存引用，防止在操作过程中被修改
+        session = self.current_session
+        
+        session.end_time = datetime.now().isoformat()
+        session.final_score = final_score
         self._update_session_stats()
 
         # 保存最终会话数据
@@ -521,15 +525,15 @@ class TrainingAnalytics:
         self._update_summary()
         
         # 保存到历史
-        self.sessions.append(self.current_session)
+        self.sessions.append(session)
         self._save_summary_history()  # 兼容旧格式
 
-        print(f"[TrainingAnalytics] 训练会话结束: {self.current_session.session_id}")
-        print(f"  - 总题数: {self.current_session.total_trials}")
-        print(f"  - 准确率: {self.current_session.final_accuracy:.2%}")
-        print(f"  - 平均反应时间: {self.current_session.avg_reaction_time_ms:.0f}ms")
-        print(f"  - 难度范围: {self.current_session.min_difficulty} - {self.current_session.max_difficulty}")
-        print(f"  - 正确: {self.current_session.correct_trials}, 错误: {self.current_session.total_trials - self.current_session.correct_trials}")
+        print(f"[TrainingAnalytics] 训练会话结束: {session.session_id}")
+        print(f"  - 总题数: {session.total_trials}")
+        print(f"  - 准确率: {session.final_accuracy:.2%}")
+        print(f"  - 平均反应时间: {session.avg_reaction_time_ms:.0f}ms")
+        print(f"  - 难度范围: {session.min_difficulty} - {session.max_difficulty}")
+        print(f"  - 正确: {session.correct_trials}, 错误: {session.total_trials - session.correct_trials}")
 
         self.current_session = None
         self.current_session_file = None

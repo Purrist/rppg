@@ -10,10 +10,113 @@
 
 import random
 import time
+import numpy as np
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
 from enum import Enum
 from .games_base import GameBase, GameConfig
+
+# 音效播放模块
+class SoundPlayer:
+    """简单的音效播放器，用于播放游戏对错音效"""
+    
+    def __init__(self):
+        self.sd = None
+        self._init_sounddevice()
+    
+    def _init_sounddevice(self):
+        try:
+            import sounddevice as sd
+            self.sd = sd
+            print("[ProcessingSpeedGame] 音效播放器初始化成功")
+        except ImportError:
+            print("[ProcessingSpeedGame] sounddevice 未安装，音效功能不可用")
+    
+    def play_correct_sound(self):
+        """播放正确音效 - 愉快的上升音调"""
+        if self.sd is None:
+            return
+        
+        try:
+            # 生成一个愉快的上升音调
+            samplerate = 44100
+            duration = 0.3  # 0.3秒
+            
+            # 创建上升音调（C5到E5）
+            t = np.linspace(0, duration, int(samplerate * duration), dtype=np.float32)
+            freq1 = 523.25  # C5
+            freq2 = 659.25  # E5
+            
+            # 使用线性插值从freq1到freq2
+            freq = np.linspace(freq1, freq2, len(t))
+            audio = np.sin(2 * np.pi * freq * t)
+            
+            # 添加包络（淡入淡出）
+            envelope = np.sin(np.pi * t / duration)
+            audio = audio * envelope * 0.3  # 降低音量
+            
+            # 添加一点谐波
+            audio += np.sin(2 * np.pi * 2 * freq * t) * 0.1
+            
+            self.sd.play(audio, samplerate, blocking=False)
+        except Exception as e:
+            print(f"[ProcessingSpeedGame] 播放正确音效失败: {e}")
+    
+    def play_wrong_sound(self):
+        """播放错误音效 - 低沉的下降音调"""
+        if self.sd is None:
+            return
+        
+        try:
+            # 生成一个低沉的错误提示音
+            samplerate = 44100
+            duration = 0.4  # 0.4秒
+            
+            # 创建下降音调（E4到C4）
+            t = np.linspace(0, duration, int(samplerate * duration), dtype=np.float32)
+            freq1 = 329.63  # E4
+            freq2 = 261.63  # C4
+            
+            freq = np.linspace(freq1, freq2, len(t))
+            audio = np.sin(2 * np.pi * freq * t)
+            
+            # 添加包络
+            envelope = np.sin(np.pi * t / duration)
+            audio = audio * envelope * 0.3
+            
+            self.sd.play(audio, samplerate, blocking=False)
+        except Exception as e:
+            print(f"[ProcessingSpeedGame] 播放错误音效失败: {e}")
+    
+    def play_timeout_sound(self):
+        """播放超时音效 - 短促的提示音"""
+        if self.sd is None:
+            return
+        
+        try:
+            samplerate = 44100
+            duration = 0.5  # 0.5秒
+            
+            t = np.linspace(0, duration, int(samplerate * duration), dtype=np.float32)
+            
+            # 两个短促的音调
+            freq1 = 440.0  # A4
+            freq2 = 392.0  # G4
+            
+            audio = np.zeros(len(t), dtype=np.float32)
+            mid = int(len(t) / 2)
+            
+            # 第一个音调
+            audio[:mid] = np.sin(2 * np.pi * freq1 * t[:mid]) * np.sin(np.pi * t[:mid] / (duration/2))
+            
+            # 第二个音调（稍低）
+            audio[mid:] = np.sin(2 * np.pi * freq2 * t[mid:]) * np.sin(np.pi * t[mid:] / (duration/2))
+            
+            audio = audio * 0.3
+            
+            self.sd.play(audio, samplerate, blocking=False)
+        except Exception as e:
+            print(f"[ProcessingSpeedGame] 播放超时音效失败: {e}")
 
 # ⭐ 导入训练分析器
 try:
@@ -141,6 +244,9 @@ class ProcessingSpeedGame(GameBase):
         # ⭐ 游戏时长设置
         self.game_duration = 180  # 默认3分钟
         self.game_start_time = 0  # 游戏开始时间
+        
+        # ⭐ 音效播放器
+        self.sound_player = SoundPlayer()
 
     def get_difficulty_params(self) -> Dict:
         """获取当前难度参数"""
@@ -617,6 +723,12 @@ class ProcessingSpeedGame(GameBase):
                 'selected_zone': zone_id
             })
 
+        # 播放音效
+        if correct:
+            self.sound_player.play_correct_sound()
+        else:
+            self.sound_player.play_wrong_sound()
+
         # 发送反馈
         self._emit_feedback(correct, zone_id)
 
@@ -679,8 +791,9 @@ class ProcessingSpeedGame(GameBase):
                 'selected_zone': None
             })
 
-        # 发送超时反馈
+        # 播放超时音效（只有错误超时才播放）
         if not correct:
+            self.sound_player.play_timeout_sound()
             self._emit_feedback(correct=False, zone_id=None, is_timeout=True)
 
         # 开始间隔
